@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=JetArm Sort v2
+Comment=Launch the v2 custom sorting stack with the live tuner UI
+# Adjust the path below if you copied the script somewhere else.
+Exec=bash -c 'cd "$HOME/jetarm_v2" && ./launch_v2.sh'
+# A terminal window stays open so you can read logs and Ctrl+C cleanly.
+Terminal=true
+# Optional: drop a custom icon at the path below, or remove this line to use
+# the default terminal icon.
+Icon=utilities-terminal
+Categories=Development;Robotics;
+StartupNotify=true

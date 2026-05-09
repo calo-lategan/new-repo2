@@ -25,6 +25,7 @@ import rclpy
 from rclpy.node import Node
 from rcl_interfaces.srv import SetParameters, GetParameters, ListParameters
 from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
+from std_srvs.srv import Trigger, SetBool
 
 
 FLOAT_PARAMS = [
@@ -70,6 +71,13 @@ class TunerClient(Node):
                                           f'/{target_node}/get_parameters')
         self.list_cli = self.create_client(ListParameters,
                                            f'/{target_node}/list_parameters')
+        # Lifecycle / control services exposed by custom_sortingv2.
+        self.enable_cli = self.create_client(SetBool,
+                                             f'/{target_node}/enable_sorting')
+        self.recalibrate_cli = self.create_client(Trigger,
+                                                  f'/{target_node}/recalibrate')
+        self.enter_cli = self.create_client(Trigger, f'/{target_node}/enter')
+        self.exit_cli = self.create_client(Trigger, f'/{target_node}/exit')
 
     def wait_ready(self, timeout=10.0):
         return (self.set_cli.wait_for_service(timeout_sec=timeout)
@@ -92,6 +100,35 @@ class TunerClient(Node):
             elif val.type == ParameterType.PARAMETER_STRING:
                 out[name] = val.string_value
         return out
+
+    def call_enable_sorting(self, enable):
+        if not self.enable_cli.wait_for_service(timeout_sec=1.0):
+            return False
+        req = SetBool.Request(); req.data = bool(enable)
+        future = self.enable_cli.call_async(req)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
+        return future.done() and future.result() is not None
+
+    def call_recalibrate(self):
+        if not self.recalibrate_cli.wait_for_service(timeout_sec=1.0):
+            return False
+        future = self.recalibrate_cli.call_async(Trigger.Request())
+        rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
+        return future.done() and future.result() is not None
+
+    def call_enter(self):
+        if not self.enter_cli.wait_for_service(timeout_sec=1.0):
+            return False
+        future = self.enter_cli.call_async(Trigger.Request())
+        rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
+        return future.done() and future.result() is not None
+
+    def call_exit(self):
+        if not self.exit_cli.wait_for_service(timeout_sec=1.0):
+            return False
+        future = self.exit_cli.call_async(Trigger.Request())
+        rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
+        return future.done() and future.result() is not None
 
     def set_value(self, name, value):
         p = Parameter(); p.name = name
@@ -119,12 +156,53 @@ class TunerUI:
         self.client = client
         self.root = tk.Tk()
         self.root.title('JetArm v2 - live tuner')
-        self.root.geometry('560x780')
+        self.root.geometry('620x920')
         self._building = True
         self._build()
         self._building = False
 
     def _build(self):
+        # ---- Top control bar: Start / Stop / Calibrate ----
+        ctrl = ttk.LabelFrame(self.root, text='Robot control')
+        ctrl.pack(fill='x', padx=8, pady=(8, 4))
+
+        # Status indicator with color
+        self.status_var = tk.StringVar(value='STOPPED')
+        status_row = ttk.Frame(ctrl); status_row.pack(fill='x', padx=6, pady=4)
+        ttk.Label(status_row, text='Status:').pack(side='left')
+        self.status_label = tk.Label(status_row, textvariable=self.status_var,
+                                     fg='white', bg='#aa3333',
+                                     font=('TkDefaultFont', 11, 'bold'),
+                                     padx=10, pady=2)
+        self.status_label.pack(side='left', padx=8)
+
+        btn_row = ttk.Frame(ctrl); btn_row.pack(fill='x', padx=6, pady=4)
+
+        # Use big tk.Button (not ttk) so colors actually apply on most themes.
+        self.start_btn = tk.Button(btn_row, text='START SORTING',
+                                   bg='#2e8b57', fg='white',
+                                   font=('TkDefaultFont', 11, 'bold'),
+                                   width=16, height=2, command=self._on_start)
+        self.start_btn.pack(side='left', padx=4)
+
+        self.stop_btn = tk.Button(btn_row, text='STOP',
+                                  bg='#aa3333', fg='white',
+                                  font=('TkDefaultFont', 11, 'bold'),
+                                  width=12, height=2, command=self._on_stop)
+        self.stop_btn.pack(side='left', padx=4)
+
+        self.cal_btn = tk.Button(btn_row, text='CALIBRATE',
+                                 bg='#3366aa', fg='white',
+                                 font=('TkDefaultFont', 11, 'bold'),
+                                 width=12, height=2, command=self._on_calibrate)
+        self.cal_btn.pack(side='left', padx=4)
+
+        # Hint label
+        hint = ttk.Label(ctrl, foreground='#555555',
+                         text='Tip: STOP halts vision + motion. Adjust sliders or '
+                              'CALIBRATE while stopped, then START again.')
+        hint.pack(anchor='w', padx=8, pady=(0, 4))
+
         notebook = ttk.Notebook(self.root)
         notebook.pack(fill='both', expand=True, padx=8, pady=8)
 
@@ -228,6 +306,45 @@ class TunerUI:
         for k, v in mapping.items():
             self.client.set_value(k, v)
 
+    # ------------------------------------------------------------------ control buttons
+
+    def _set_status(self, text, color):
+        self.status_var.set(text)
+        self.status_label.configure(bg=color)
+
+    def _on_start(self):
+        # Run service calls in a worker thread so the UI doesn't freeze if
+        # the node is briefly unresponsive.
+        def go():
+            ok_enter = self.client.call_enter()  # idempotent on the v2 node
+            ok = self.client.call_enable_sorting(True)
+            if ok and ok_enter:
+                self._set_status('RUNNING', '#2e8b57')
+            else:
+                self._set_status('NODE NOT REACHABLE', '#aa6633')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_stop(self):
+        def go():
+            ok = self.client.call_enable_sorting(False)
+            if ok:
+                self._set_status('STOPPED', '#aa3333')
+            else:
+                self._set_status('NODE NOT REACHABLE', '#aa6633')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_calibrate(self):
+        def go():
+            # Force a stop first - calibrating during motion is unsafe.
+            self.client.call_enable_sorting(False)
+            self._set_status('CALIBRATING...', '#3366aa')
+            ok = self.client.call_recalibrate()
+            if ok:
+                self._set_status('STOPPED (calibrated)', '#aa3333')
+            else:
+                self._set_status('CALIBRATE FAILED', '#aa6633')
+        threading.Thread(target=go, daemon=True).start()
+
     def run(self):
         self.root.mainloop()
 
@@ -251,6 +368,13 @@ def main():
     spin_thread.start()
 
     ui = TunerUI(client)
+
+    # Safety: assert "stopped" state on UI startup so the robot doesn't begin
+    # sorting just because we connected. The user has to explicitly press
+    # START before any motion happens.
+    threading.Thread(target=client.call_enable_sorting, args=(False,),
+                     daemon=True).start()
+
     try:
         ui.run()
     finally:

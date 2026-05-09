@@ -5,12 +5,21 @@ from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, OpaqueFunction
+from launch.conditions import IfCondition
 
 
 def launch_setup(context):
     compiled = os.environ.get('need_compile', 'False')
-    start = LaunchConfiguration('start', default='true')
-    start_arg = DeclareLaunchArgument('start', default_value=start)
+    # Default to paused so the user has to press START in the tuner UI before
+    # any motion happens - keeps the robot safe while you calibrate / tune.
+    start = LaunchConfiguration('start', default='false')
+    start_arg = DeclareLaunchArgument(
+        'start', default_value=start,
+        description='If true, sorting begins immediately on launch (no UI gate).')
+    auto_tune_ui = LaunchConfiguration('tune_ui', default='true')
+    auto_tune_ui_arg = DeclareLaunchArgument(
+        'tune_ui', default_value=auto_tune_ui,
+        description='Spawn the live parameter tuner UI alongside the node.')
     display = LaunchConfiguration('display', default='true')
     display_arg = DeclareLaunchArgument('display', default_value=display)
     broadcast = LaunchConfiguration('broadcast', default='false')
@@ -74,8 +83,19 @@ def launch_setup(context):
         }]
     )
 
+    # Tuner UI - co-launches with the node so the operator can calibrate /
+    # tune / Start+Stop without a second terminal. Disable with tune_ui:=false
+    # for headless / SSH runs without an X display.
+    tune_ui_node = Node(
+        package='app',
+        executable='tune_ui',
+        output='screen',
+        condition=IfCondition(auto_tune_ui),
+    )
+
     return [
         start_arg,
+        auto_tune_ui_arg,
         display_arg,
         broadcast_arg,
         engine_path_arg,
@@ -87,6 +107,7 @@ def launch_setup(context):
         sdk_launch,
         depth_camera_launch,
         custom_sorting_v2_node,
+        tune_ui_node,
     ]
 
 
