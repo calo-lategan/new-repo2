@@ -81,11 +81,44 @@ cp jetarm-sort-v2.desktop ~/.local/share/applications/
 
 On Ubuntu 24.04 (GNOME), right-click the icon on the desktop -> *Allow Launching* the first time. Double-click after that to start the whole stack: SDK, depth camera, sorting node, and the tuner UI all open in one terminal window.
 
-The shell script exports `CAMERA_TYPE=GEMINI`, `CHASSIS_TYPE=Slide_Rails`, `need_compile=False` by default; override them in your shell before launching if your hardware differs.
+### What the launcher actually does
+
+To match the manual startup the robot needs to come up cleanly, `launch_v2.sh` runs:
+
+1. `cd ~/ros2_ws`
+2. `source /opt/ros/humble/setup.bash` and `source install/setup.bash` (the bash equivalent of `setup.zsh`)
+3. `sudo systemctl restart start_app_node.service`
+4. **Waits** for systemd to report the service active **and** for the `ros_robot_controller` topics to appear (this is the equivalent of waiting for the beep)
+5. `ros2 launch app custom_sorting_nodev2.launch.py`
+
+Tunables (all envs):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `WS_DIR` | `$HOME/ros2_ws` | ROS2 workspace root |
+| `SERVICE_NAME` | `start_app_node.service` | Service to restart |
+| `SKIP_SERVICE_RESTART` | `0` | Set to `1` to skip the restart (e.g. when re-launching during the same session) |
+| `SERVICE_READY_TIMEOUT` | `30` | Seconds to wait for the service to be active |
+| `TOPIC_READY_TIMEOUT` | `25` | Seconds to wait for `ros_robot_controller` topics |
+| `EXTRA_BOOT_GRACE` | `3` | Extra seconds after topics appear (covers final init + beep) |
+| `CAMERA_TYPE` | `GEMINI` | Hiwonder env |
+| `CHASSIS_TYPE` | `Slide_Rails` | Hiwonder env |
+
+### Make it fully one-click (no sudo prompt)
+
+By default `sudo systemctl restart start_app_node.service` will prompt for your password the first time. To make the desktop shortcut truly one-click, allow that one command without a password:
+
+```bash
+sudo visudo -f /etc/sudoers.d/jetarm-v2
+# add this line, replacing `ubuntu` with your user:
+ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart start_app_node.service
+```
+
+Permissions on the file should be `0440` (visudo handles this).
 
 ## Operating it (the safe loop)
 
-1. Click the desktop shortcut (or run `ros2 launch app custom_sorting_nodev2.launch.py`). The node boots **STOPPED** and the tuner UI opens.
+1. Click the desktop shortcut. It will restart `start_app_node.service`, wait for the controller topics to come up (~10-25s — equivalent to waiting for the beep), then launch. The node boots **STOPPED** and the tuner UI opens.
 2. (Optional) Press **CALIBRATE** to re-run the bin self-calibration with the current scene.
 3. Adjust sliders (motion_speed, aggression, gripper_close_pulse, etc.) or pick a preset (Slow & safe / Default / Fast & aggressive).
 4. Press **START SORTING** when ready.
