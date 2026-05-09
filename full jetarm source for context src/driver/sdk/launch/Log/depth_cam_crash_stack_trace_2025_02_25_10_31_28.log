@@ -1,0 +1,31 @@
+Received signal: 11
+Stack trace (most recent call last):
+#28   Object "[0xffffffffffffffff]", at 0xffffffffffffffff, in 
+#27   Object "/opt/ros/humble/lib/rclcpp_components/component_container", at 0xaaaaccf61daf, in 
+#26   Object "/lib/aarch64-linux-gnu/libc.so.6", at 0xffff812774cb, in __libc_start_main
+#25   Object "/lib/aarch64-linux-gnu/libc.so.6", at 0xffff812773fb, in 
+#24   Object "/opt/ros/humble/lib/rclcpp_components/component_container", at 0xaaaaccf61bc3, in 
+#23   Object "/opt/ros/humble/lib/rclcpp_components/component_container", at 0xaaaaccf61f2f, in 
+#22   Object "/opt/ros/humble/lib/librclcpp.so", at 0xffff8179d337, in rclcpp::Node::~Node()
+#21   Object "/opt/ros/humble/lib/librclcpp.so", at 0xffff81775ce3, in 
+#20   Object "/opt/ros/humble/lib/librclcpp.so", at 0xffff817a75c3, in 
+#19   Object "/opt/ros/humble/lib/librclcpp.so", at 0xffff817a74d3, in rclcpp::node_interfaces::NodeBase::~NodeBase()
+#18   Object "/opt/ros/humble/lib/librclcpp.so", at 0xffff81775ce3, in 
+#17   Object "/opt/ros/humble/lib/librclcpp.so", at 0xffff817a59d7, in 
+#16   Object "/opt/ros/humble/lib/librclcpp.so", at 0xffff817a5877, in 
+#15   Object "/opt/ros/humble/lib/librcl.so", at 0xffff80c7dd5b, in rcl_node_fini
+#14   Object "/opt/ros/humble/lib/librmw_fastrtps_cpp.so", at 0xffff7e610ebb, in rmw_destroy_node
+#13   Object "/opt/ros/humble/lib/librmw_fastrtps_shared_cpp.so", at 0xffff7e59302b, in rmw_fastrtps_shared_cpp::decrement_context_impl_ref_count(rmw_context_s*)
+#12   Object "/opt/ros/humble/lib/librmw_fastrtps_shared_cpp.so", at 0xffff7e59ae87, in rmw_fastrtps_shared_cpp::destroy_participant(CustomParticipantInfo*)
+#11   Object "/opt/ros/humble/lib/libfastrtps.so.2.6", at 0xffff7bde3837, in eprosima::fastdds::dds::DomainParticipantFactory::delete_participant(eprosima::fastdds::dds::DomainParticipant*)
+#10   Object "/opt/ros/humble/lib/libfastrtps.so.2.6", at 0xffff7bde313f, in eprosima::fastdds::dds::DomainParticipantImpl::~DomainParticipantImpl()
+#9    Object "/opt/ros/humble/lib/libfastrtps.so.2.6", at 0xffff7bd8d5f3, in eprosima::fastrtps::rtps::RTPSDomain::removeRTPSParticipant(eprosima::fastrtps::rtps::RTPSParticipant*)
+#8    Object "/opt/ros/humble/lib/libfastrtps.so.2.6", at 0xffff7bd7d537, in eprosima::fastrtps::rtps::RTPSParticipantImpl::disable()
+#7    Object "/opt/ros/humble/lib/libfastrtps.so.2.6", at 0xffff7bf93633, in eprosima::fastdds::rtps::SharedMemTransport::CloseInputChannel(eprosima::fastrtps::rtps::Locator_t const&)
+#6    Object "/opt/ros/humble/lib/libfastrtps.so.2.6", at 0xffff7bf934c7, in eprosima::fastdds::rtps::SharedMemTransport::delete_input_channel(eprosima::fastdds::rtps::SharedMemChannelResource*)
+#5    Object "/opt/ros/humble/lib/libfastrtps.so.2.6", at 0xffff7bf9321f, in 
+#4    Object "/opt/ros/humble/lib/libfastrtps.so.2.6", at 0xffff7bd2b7f3, in 
+#3    Object "/lib/aarch64-linux-gnu/libc.so.6", at 0xffff812d0c37, in 
+#2    Object "/lib/aarch64-linux-gnu/libc.so.6", at 0xffff8137fd10, in 
+#1    Object "linux-vdso.so.1", at 0xffff9d89e7bb, in 
+#0    Object "/home/ubuntu/third_party_ros2/orbbec_ws/install/orbbec_camera/lib/liborbbec_camera.so", at 0xffff6f77f433, in signalHandler(int)

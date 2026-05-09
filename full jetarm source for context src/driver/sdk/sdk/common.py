@@ -1,4 +1,4 @@
-in #!/usr/bin/env python3
+#!/usr/bin/env python3
 # encoding: utf-8
 # @Author: Aiden
 # @Date: 2022/10/22
@@ -9,6 +9,14 @@ import numpy as np
 import transforms3d as tfs
 from rclpy.node import Node
 from geometry_msgs.msg import Pose, Quaternion
+
+range_rgb = {  
+    'red': (255, 0, 50),     
+    'blue': (0, 50, 255),   
+    'green': (0, 255, 50),   
+    'black': (0, 0, 0),      
+    'white': (255, 255, 255)  
+}
 
 def loginfo(msg):
     Node.get_logger().info('\033[1;32m%s\033[0m' % msg)
@@ -33,11 +41,13 @@ def get_yaml_data(yaml_file):
 
     return data
 
+
 def save_yaml_data(data, yaml_file):
     f = open(yaml_file, 'w', encoding='utf-8')
     yaml.dump(data, f)
 
     f.close()
+
 
 def distance(point_1, point_2):
     """
@@ -48,6 +58,7 @@ def distance(point_1, point_2):
     """
     return math.sqrt((point_1[0] - point_2[0]) ** 2 + (point_1[1] - point_2[1]) ** 2)
 
+
 def box_center(box):
     """
     计算四边形box的中心(calculate the center of quadrangle box)
@@ -55,6 +66,17 @@ def box_center(box):
     :return:  中心坐标（x, y)(center coordinate（x, y))
     """
     return (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+
+
+def bgr8_to_jpeg(value, quality=75):
+    """
+    将cv bgr8格式数据转换为jpg格式(convert data in the format of cv bgr8 into jpg)
+    :param value: 原始数据(original data)
+    :param quality:  jpg质量 最大值100(jpg quality. Maximum value is 100)
+    :return:
+    """
+    return bytes(cv2.imencode('.jpg', value)[1])
+
 
 def point_remapped(point, now, new, data_type=float):
     """
@@ -70,6 +92,28 @@ def point_remapped(point, now, new, data_type=float):
     new_x = x * new_w / now_w
     new_y = y * new_h / now_h
     return data_type(new_x), data_type(new_y)
+
+
+def get_area_max_contour(contours, threshold=50):
+    """
+    获取轮廓中面积最重大的一个, 过滤掉面积过小的情况(get the contour whose area is the largest. Filter out those whose area is too small)
+    :param contours: 轮廓列表(contour list)
+    :param threshold: 面积阈值, 小于这个面积的轮廓会被过滤(area threshold. Contour whose area is less than this value will be filtered out)
+    :return: 如果最大的轮廓面积大于阈值则返回最大的轮廓, 否则返回None(if the maximum contour area is greater than this threshold, return the
+    largest contour, otherwise return None)
+    """
+    contour_area_max = 0
+    area_max_contour = None
+
+    for c in contours:  # 历遍所有轮廓
+        contour_area_temp = math.fabs(cv2.contourArea(c))  # 计算轮廓面积
+        if contour_area_temp > contour_area_max:
+            contour_area_max = contour_area_temp
+            if contour_area_temp > threshold:  # 过滤干扰
+                area_max_contour = c
+
+    return area_max_contour,  contour_area_max  # 返回最大的轮廓
+
 
 def vector_2d_angle(v1, v2):
     """
@@ -186,6 +230,29 @@ def world_to_pixels(world_points, K, T):
         pixel_points.append(pixel)
     return pixel_points
 
+def calculate_pixel_length(world_length, K, T):
+    """
+    计算世界坐标中的长度在像素坐标中的对应长度
+    Args:
+        world_length: 世界坐标中的长度
+        K: 相机内参矩阵
+        T: 外参矩阵
+    Returns:
+        pixel_length: 像素坐标中的长度
+    """
+    # 定义起始点和方向
+    start_point = np.array([0, 0, 0])  # 起始点
+    direction = np.array([0, 1, 0])  # y方向
+
+    # 计算终点坐标
+    end_point = start_point + direction * world_length
+    # 转换两个端点到像素坐标
+    pixels = world_to_pixels([start_point, end_point], K, T)
+    # 计算像素距离
+    pixel_length = np.linalg.norm(pixels[1] - pixels[0])
+    
+    return int(pixel_length)
+
 def extristric_plane_shift(tvec, rmat, delta_z):
     delta_t = np.array([[0], [0], [delta_z]])
     tvec_new = tvec + np.dot(rmat, delta_t)
@@ -198,13 +265,110 @@ def ros_pose_to_list(pose):
     q = np.asarray([pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z])
     return t, q
 
+def draw_tags(image, tags, corners_color=(0, 125, 255), center_color=(0, 255, 0)):
+    for tag in tags:
+        corners = tag.corners.astype(int)
+        center = tag.center.astype(int)
+        # cv2.putText(image, "%d"%tag.tag_id, (int(center[0] - (7 * len("%d"%tag.tag_id))), int(center[1]-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        if corners_color is not None:
+            for p in corners:
+                cv2.circle(image, tuple(p.tolist()), 5, corners_color, -1)
+        if center_color is not None:
+            cv2.circle(image, tuple(center.tolist()), 8, center_color, -1)
+    return image
+
+def show_faces(detect_img, result_img, boxes, landmarks, bbox_color=(0, 255, 0), ll_color=(0, 0, 255)):
+    """Draw bounding boxes and face landmarks on image."""
+    detect_size = detect_img.shape[:2]
+    show_size = result_img.shape[:2]
+    for bb, ll in zip(boxes, landmarks):
+        p1 = point_remapped(bb[:2], detect_size, show_size, data_type=int)
+        p2 = point_remapped(bb[2:4], detect_size, show_size, data_type=int)
+        cv2.rectangle(result_img, p1, p2, bbox_color, 2)
+        for i, p in enumerate(ll):
+            x, y = point_remapped(p, detect_size, show_size, data_type=int)
+            cv2.circle(result_img, (x, y), 2, ll_color, 2)
+    return result_img
+
+
+def mp_face_location(results, img):
+    h, w, c, = img.shape
+    boxes = []
+    keypoints = []
+    if results.detections:
+        for detection in results.detections:
+            x_min = detection.location_data.relative_bounding_box.xmin
+            y_min = detection.location_data.relative_bounding_box.ymin
+            width = detection.location_data.relative_bounding_box.width
+            height = detection.location_data.relative_bounding_box.height
+            x_min, y_min = max(x_min * w, 0), max(y_min * h, 0)
+            x_max, y_max = min(x_min + width * w, w), min(y_min + height * h, h)
+            boxes.append((x_min, y_min, x_max, y_max))
+            relative_keypoints = detection.location_data.relative_keypoints
+            keypoints.append([(point.x * w, point.y * h) for point in relative_keypoints])
+    return boxes, keypoints
+class Colors:
+    # Ultralytics color palette https://ultralytics.com/
+    def __init__(self):
+        # hex = matplotlib.colors.TABLEAU_COLORS.values()
+        hex = ('FF3838', 'FF9D97', 'FF701F', 'FFB21D', 'CFD231', '48F90A', '92CC17', '3DDB86', '1A9334', '00D4BB',
+               '2C99A8', '00C2FF', '344593', '6473FF', '0018EC', '8438FF', '520085', 'CB38FF', 'FF95C8', 'FF37C7')
+        self.palette = [self.hex2rgb('#' + c) for c in hex]
+        self.n = len(self.palette)
+
+    def __call__(self, i, bgr=False):
+        c = self.palette[int(i) % self.n]
+        return (c[2], c[1], c[0]) if bgr else c
+
+    @staticmethod
+    def hex2rgb(h):  # rgb order (PIL)
+        return tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
+
+colors = Colors()  # create instance for 'from utils.plots import colors'
+
+def plot_one_box(x, img, color=None, label=None, line_thickness=None):
+    """
+    description: Plots one bounding box on image img,
+                 this function comes from YoLov5 project.
+    param:
+        x:      a box likes [x1,y1,x2,y2]
+        img:    a opencv image object
+        color:  color to draw rectangle, such as (0,255,0)
+        label:  str
+        line_thickness: int
+    return:
+        no return
+
+    """
+    tl = (
+            line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1
+    )  # line/font thickness
+    color = color or [random.randint(0, 255) for _ in range(3)]
+    c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
+    cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
+    if label:
+        tf = max(tl - 1, 1)  # font thickness
+        t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
+        c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
+        cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
+        cv2.putText(
+            img,
+            label,
+            (c1[0], c1[1] - 2),
+            0,
+            tl / 3,
+            [225, 255, 255],
+            thickness=tf,
+            lineType=cv2.LINE_AA,
+        )
+
 def qua2rpy(qua):
     if type(qua) == Quaternion:
         x, y, z, w = qua.x, qua.y, qua.z, qua.w
     else:
         x, y, z, w = qua[0], qua[1], qua[2], qua[3]
     roll = math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y))
-    pitch = math.asin(np.clip(2 * (w * y - x * z), -1.0, 1.0))
+    pitch = math.asin(2 * (w * y - x * z))
     yaw = math.atan2(2 * (w * z + x * y), 1 - 2 * (z * z + y * y))
   
     return roll, pitch, yaw
@@ -247,5 +411,4 @@ def mat_to_xyz_euler(mat, degrees=True):
     else:
         euler = tfs.euler.mat2euler(r)
     return t, euler
-
 
