@@ -1,0 +1,15 @@
+# Apply this snippet to ~/ros2_ws/src/app/setup.py - add the two new console
+# scripts inside the existing entry_points -> console_scripts list.
+# (You can have v2 and v4 entries side-by-side; they don't conflict.)
+#
+# After (relevant slice):
+#
+#     entry_points={
+#         'console_scripts': [
+#             ...existing entries...
+#             'custom_sortingv2 = app.custom_sortingv2:main',
+#             'tune_ui          = app.tune_ui:main',
+#             'custom_sortingv4 = app.custom_sortingv4:main',
+#             'tune_uiv4        = app.tune_uiv4:main',
+#         ],
+#     },

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=JetArm Sort v4
+Comment=Launch the v4 custom sorting stack with hot-swap models and live tuner
+# Adjust the path below if you copied the script somewhere else.
+Exec=bash -c 'cd "$HOME/jetarm_v4" && ./launch_v4.sh'
+Terminal=true
+Icon=utilities-terminal
+Categories=Development;Robotics;
+StartupNotify=true
