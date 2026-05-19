@@ -30,7 +30,8 @@
 # Env overrides:
 #   SKIP_SERVICE_RESTART=1     skip step 5 (camera must already be up)
 #   WS_DIR=/path/to/ws         override workspace (default $HOME/ros2_ws)
-#   USE_ZSH=1                  source setup.zsh instead of setup.bash
+#   USE_ZSH=1                  re-exec under zsh and source setup.zsh
+#                              (requires zsh installed; default uses bash)
 #   CAMERA_READY_TIMEOUT=45    seconds to wait for the camera topic
 #   JETARM_V4_DEBUG=1          pass debug=true to the node
 #
@@ -49,8 +50,23 @@ CAMERA_READY_TIMEOUT="${CAMERA_READY_TIMEOUT:-45}"
 CAMERA_TOPIC="${CAMERA_TOPIC:-/depth_cam/rgb/image_raw}"
 EXTRA_BOOT_GRACE="${EXTRA_BOOT_GRACE:-2}"
 CONTAINER_READY_TIMEOUT="${CONTAINER_READY_TIMEOUT:-30}"
-USE_ZSH="${USE_ZSH:-1}"
+# This script is bash. We must source the *.bash* setup files - sourcing
+# setup.zsh from bash fails on `${(%):-%N}` and friends. We expose USE_ZSH
+# as an opt-in escape hatch (e.g. if your image only ships setup.zsh) and
+# it forces the script to re-exec itself under zsh.
+USE_ZSH="${USE_ZSH:-0}"
 PROFILES_DIR="${JETARM_V4_PROFILES:-$HOME/jetarm_v4_profiles}"
+
+# If USE_ZSH=1 and we're currently bash, re-exec under zsh so sourcing
+# setup.zsh actually works. zsh must be installed.
+if [ "$USE_ZSH" = "1" ] && [ -z "${ZSH_VERSION:-}" ]; then
+    if command -v zsh >/dev/null 2>&1; then
+        exec zsh "$0" "$@"
+    else
+        echo "[launcher] USE_ZSH=1 but zsh not installed - falling back to bash" >&2
+        USE_ZSH=0
+    fi
+fi
 
 stage() { printf "\033[1;36m[%s]\033[0m %s\n" "$1" "$2" >&2; }
 err()   { printf "\033[1;31m[%s]\033[0m %s\n" "$1" "$2" >&2; }
@@ -109,18 +125,24 @@ stage env "cwd = $(pwd)"
 # affects our current shell context.
 # -----------------------------------------------------------------------------
 source_setup() {
+    # Pick the right setup file for the shell we are CURRENTLY running in.
+    # Sourcing a zsh-syntax file from bash blows up on ${(%):-%N} - we have
+    # to match the file extension to the running shell, not the user's
+    # preferred login shell.
     local base="$1"   # path WITHOUT extension
     local picked=""
-    if [ "$USE_ZSH" = "1" ] && [ -f "${base}.zsh" ]; then picked="${base}.zsh"
-    elif [ -f "${base}.bash" ]; then                       picked="${base}.bash"
-    elif [ -f "${base}.zsh" ]; then                        picked="${base}.zsh"
-    elif [ -f "${base}.sh" ]; then                         picked="${base}.sh"
+    if [ -n "${ZSH_VERSION:-}" ] && [ -f "${base}.zsh" ]; then
+        picked="${base}.zsh"
+    elif [ -f "${base}.bash" ]; then
+        picked="${base}.bash"
+    elif [ -f "${base}.sh" ]; then
+        picked="${base}.sh"
     fi
     if [ -n "$picked" ]; then
         # shellcheck disable=SC1090
         . "$picked"; stage env "sourced $picked"; return 0
     fi
-    err env "no setup.* found under $base"; return 1
+    err env "no compatible setup file found under $base (have you run colcon build?)"; return 1
 }
 
 if ! source_setup "/opt/ros/${ROS_DISTRO}/setup"; then
