@@ -35,18 +35,61 @@
 #   - All v2 features kept: self-calibration, vision+servo grip feedback,
 #     retry/recovery, multi-frame averaging, Tkinter tuner UI.
 #
-# See INSTALL.md for setup. See RESEARCH.md for the design principles.
+#   DEBUG / DIAGNOSTICS
+#   - Set DEBUG env or the `debug` ROS parameter to True for verbose stage
+#     logging at every critical path: engine load, ROI build, first frame,
+#     inference timing, pick/place transitions, service handlers. Every
+#     try-block prints the exception with file/line so you can grep the
+#     terminal for the failure point.
+#   - Heartbeat thread prints a stage summary every 5s (frames/sec, last
+#     inference ms, queue state, current target) so you can tell at a
+#     glance whether the camera is feeding, YOLO is firing, and the loop
+#     is locked onto a target.
+#
+# See INSTALL.md and QUICK_SETUP_HIWONDER.md for setup. See RESEARCH.md
+# for the design principles.
 
 import os
 import cv2
+import sys
 import yaml
 import time
 import math
 import copy
 import queue
+import traceback
 import threading
 import numpy as np
 from pathlib import Path
+
+# Module-level debug toggle. ROS param `debug` can override at runtime via
+# `_debug_enabled` flipping the module flag.
+_DEBUG = os.environ.get('JETARM_V4_DEBUG', '0') == '1'
+
+
+def _stage(tag, msg, exc=None):
+    """Print a stage marker to stderr in a single grep-friendly format.
+    Always prints when called (this is the primary diagnostic surface that
+    the user asked for - terminal-visible problem reports at each stage)."""
+    line = f'[v4][{tag}] {msg}'
+    print(line, file=sys.stderr, flush=True)
+    if exc is not None:
+        print(f'[v4][{tag}] EXCEPTION: {type(exc).__name__}: {exc}',
+              file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
+
+
+def _dbg(tag, msg):
+    """Verbose stage trace - only fires when debug mode is on. Use this for
+    high-volume logging (per-frame, per-tick); use `_stage` for one-shot
+    pivots like 'engine loaded' or 'first frame received'."""
+    if _DEBUG:
+        print(f'[v4][{tag}] {msg}', file=sys.stderr, flush=True)
+
+
+def _set_debug(value):
+    global _DEBUG
+    _DEBUG = bool(value)
 
 import rclpy
 from rclpy.node import Node
@@ -128,12 +171,15 @@ class InferenceWorker(threading.Thread):
 
     def request_engine_swap(self, path):
         if not path:
+            _stage('engine-swap', 'rejected - empty path')
             return False
         if not Path(path).exists():
+            _stage('engine-swap', f'rejected - file missing: {path}')
             self._logger.warn(f'engine swap rejected - file missing: {path}')
             return False
         with self._swap_lock:
             self._pending_engine_path = path
+        _stage('engine-swap', f'queued -> {path}')
         self._logger.info(f'engine swap queued -> {path}')
         return True
 
@@ -144,42 +190,58 @@ class InferenceWorker(threading.Thread):
     # -- thread body --
 
     def _load(self, path):
+        _stage('engine-load', f'starting load: {path}')
+        if not Path(path).exists():
+            _stage('engine-load', f'FATAL - file does not exist: {path}')
+            raise FileNotFoundError(path)
         # Drop the old model first so its CUDA memory is released before the
         # new engine deserializes - critical on the 8GB Orin Nano.
         if self.model is not None:
+            _stage('engine-load', 'releasing previous model')
             try:
                 del self.model
-            except Exception:
-                pass
+            except Exception as e:
+                _stage('engine-load', 'old model release raised', exc=e)
             self.model = None
             if HAS_TORCH:
                 try:
                     torch.cuda.empty_cache()
-                except Exception:
-                    pass
+                    _stage('engine-load', 'torch.cuda.empty_cache() done')
+                except Exception as e:
+                    _stage('engine-load', 'torch.cuda.empty_cache() failed', exc=e)
         self._logger.info(f'loading YOLO engine: {path}')
+        t0 = time.time()
         m = YOLO(path, task='detect')
+        _stage('engine-load', f'YOLO() constructed in {time.time()-t0:.2f}s')
         # Warmup: first inference includes engine deserialization; do it on
         # a dummy frame so the first real frame is fast.
         try:
             dummy = np.zeros((640, 640, 3), dtype=np.uint8)
+            tw = time.time()
             m(dummy, verbose=False)
+            _stage('engine-load', f'warmup pass done in {time.time()-tw:.2f}s')
         except Exception as e:
+            _stage('engine-load', 'warmup pass FAILED (continuing)', exc=e)
             self._logger.warn(f'warmup pass failed (continuing): {e}')
         self.model = m
         self._engine_path = path
         self._load_count += 1
+        _stage('engine-load', f'engine active: {path} '
+                              f'(total load {time.time()-t0:.2f}s, swap #{self._load_count})')
         try:
             self._on_swap(path)
-        except Exception:
-            pass
+        except Exception as e:
+            _stage('engine-load', 'on_swap callback raised', exc=e)
 
     def run(self):
+        _stage('inference', 'worker thread starting')
         try:
             self._load(self._engine_path)
         except Exception as e:
+            _stage('inference', 'INITIAL ENGINE LOAD FAILED - worker exiting', exc=e)
             self._logger.error(f'initial engine load failed: {e}')
             return
+        frames_done = 0
         while not self._stop.is_set():
             self._frame_event.wait(timeout=0.1)
             self._frame_event.clear()
@@ -191,6 +253,7 @@ class InferenceWorker(threading.Thread):
                 try:
                     self._load(pending)
                 except Exception as e:
+                    _stage('engine-swap', f'swap to {pending} FAILED', exc=e)
                     self._logger.error(f'engine swap to {pending} failed: {e}')
             with self._frame_lock:
                 frame = self._latest_frame
@@ -201,10 +264,19 @@ class InferenceWorker(threading.Thread):
             try:
                 results = self.model(frame, verbose=False)
             except Exception as e:
+                _stage('inference', 'predict() raised - skipping frame', exc=e)
                 self._logger.warn(f'inference error: {e}')
                 continue
             with self._frame_lock:
                 self._latest_result = (frame, results, t0)
+            frames_done += 1
+            if frames_done == 1:
+                _stage('inference', f'first inference complete '
+                                    f'({1000*(time.time()-t0):.0f} ms)')
+            elif _DEBUG and frames_done % 30 == 0:
+                _dbg('inference', f'frames={frames_done} '
+                                  f'last={1000*(time.time()-t0):.1f}ms')
+        _stage('inference', 'worker thread stopped')
 
 
 # ---------------------------------------------------------------------------
@@ -393,35 +465,74 @@ class ObjectSortingNodeV4(Node):
         ('place_bin_color_check', True, None),
         ('inference_warmup', True, None),
         ('hot_log_inference_ms', False, None),
+        ('debug', False, None),
         # Free-form per-target overrides as JSON-ish string, parsed lazily.
         # Example: '{"scaff": {"motion_speed": 0.9}, "blue": {"motion_speed": 1.8}}'
         ('target_overrides', '{}', None),
     )
 
     def __init__(self, name='custom_sortingv4'):
+        _stage('init', f'constructing node {name!r}')
         super().__init__(name,
                          allow_undeclared_parameters=True,
                          automatically_declare_parameters_from_overrides=True)
 
         # Apply default profile (if present) BEFORE declaring tunables, so its
         # values become the seed values rather than getting overwritten.
-        self._seeded_from_default = self._apply_default_profile_seed()
-        self._declare_tunables()
+        try:
+            self._seeded_from_default = self._apply_default_profile_seed()
+        except Exception as e:
+            _stage('init', 'default profile seed failed (continuing)', exc=e)
+            self._seeded_from_default = {}
+        try:
+            self._declare_tunables()
+        except Exception as e:
+            _stage('init', 'declare_tunables FAILED', exc=e)
+            raise
         self.add_on_set_parameters_callback(self._on_param_change)
+
+        # Honour `debug` param if the user declared it via overrides.
+        try:
+            if self.has_parameter('debug') and bool(self.get_parameter('debug').value):
+                _set_debug(True)
+                _stage('init', 'debug mode ON (ROS param)')
+        except Exception:
+            pass
+        if _DEBUG:
+            _stage('init', f'environment: CAMERA_TYPE={os.environ.get("CAMERA_TYPE")} '
+                           f'CHASSIS_TYPE={os.environ.get("CHASSIS_TYPE")} '
+                           f'need_compile={os.environ.get("need_compile")}')
 
         # ---- Models / shared state ----
         proto_path = '/home/ubuntu/ros2_ws/src/app/app/hed_model/deploy.prototxt'
         model_path = '/home/ubuntu/ros2_ws/src/app/app/hed_model/hed_pretrained_bsds.caffemodel'
-        self.image_process = image_process.GetObjectSurface(proto_path, model_path)
+        try:
+            if not os.path.exists(proto_path):
+                _stage('init', f'HED prototxt missing: {proto_path}')
+            if not os.path.exists(model_path):
+                _stage('init', f'HED caffemodel missing: {model_path}')
+            self.image_process = image_process.GetObjectSurface(proto_path, model_path)
+            _stage('init', 'HED image_process loaded')
+        except Exception as e:
+            _stage('init', 'HED image_process load FAILED', exc=e)
+            raise
 
         self.lock = threading.RLock()
         self.fps = fps.FPS()
         self.config_file = 'transform.yaml'
         self.calibration_file = 'calibration.yaml'
         self.config_path = "/home/ubuntu/ros2_ws/src/app/config/"
-        self.data = common.get_yaml_data(os.path.join(self.config_path, "lab_config.yaml"))
-        self.lab_data = self.data['/**']['ros__parameters']
-        self.camera_type = os.environ['CAMERA_TYPE']
+        try:
+            self.data = common.get_yaml_data(os.path.join(self.config_path, "lab_config.yaml"))
+            self.lab_data = self.data['/**']['ros__parameters']
+            _stage('init', f'lab_config.yaml loaded from {self.config_path}')
+        except Exception as e:
+            _stage('init', f'lab_config.yaml load FAILED from {self.config_path}', exc=e)
+            raise
+        if 'CAMERA_TYPE' not in os.environ:
+            _stage('init', 'CAMERA_TYPE env var is missing - downstream code WILL fail. '
+                           'Did the launcher source the Hiwonder env?')
+        self.camera_type = os.environ.get('CAMERA_TYPE', 'GEMINI')
 
         self.tag_size = 0.025
 
@@ -473,31 +584,45 @@ class ObjectSortingNodeV4(Node):
                             callback_group=self.svc_group)
 
         # ---- Service clients ----
+        _stage('init', 'waiting for kinematics/set_pose_target service...')
         self.kinematics_client = self.create_client(SetRobotPose,
                                                     'kinematics/set_pose_target',
                                                     callback_group=self.svc_group)
-        self.kinematics_client.wait_for_service()
+        if not self.kinematics_client.wait_for_service(timeout_sec=30.0):
+            _stage('init', 'kinematics/set_pose_target NEVER appeared - '
+                           'is start_app_node.service up? Did jetarm_sdk launch?')
+            raise RuntimeError('kinematics/set_pose_target unavailable')
+        _stage('init', 'kinematics/set_pose_target ready')
         self.set_joint_value_target_client = self.create_client(
             SetJointValue, 'kinematics/set_joint_value_target',
             callback_group=self.svc_group)
-        self.set_joint_value_target_client.wait_for_service()
+        if not self.set_joint_value_target_client.wait_for_service(timeout_sec=10.0):
+            _stage('init', 'kinematics/set_joint_value_target not seen in 10s - continuing')
         self.bus_servo_state_client = self.create_client(
             GetBusServoState, 'ros_robot_controller/bus_servo/get_state',
             callback_group=self.svc_group)
         if not self.bus_servo_state_client.wait_for_service(timeout_sec=5.0):
+            _stage('init', 'bus_servo/get_state unavailable - vision-only fallback')
             self.get_logger().warn('bus_servo/get_state unavailable - vision-only fallback')
             self.bus_servo_state_client = None
+        else:
+            _stage('init', 'bus_servo/get_state ready (full feedback enabled)')
 
         self.motion = MotionController(self, self.joints_pub,
                                        self.kinematics_client,
                                        self.bus_servo_state_client)
 
         # ---- Inference worker (one CUDA context, hot-swappable) ----
-        self.inference = InferenceWorker(self.p('engine_path'), self.get_logger(),
-                                         on_swap=lambda path:
-                                             self.get_logger().info(
-                                                 f'engine active: {path}'))
-        self.inference.start()
+        try:
+            self.inference = InferenceWorker(self.p('engine_path'), self.get_logger(),
+                                             on_swap=lambda path:
+                                                 self.get_logger().info(
+                                                     f'engine active: {path}'))
+            self.inference.start()
+            _stage('init', f'inference worker started (engine={self.p("engine_path")})')
+        except Exception as e:
+            _stage('init', 'inference worker FAILED to start', exc=e)
+            raise
 
         # ---- Camera subscriptions: BEST_EFFORT, depth=1 ----
         self.image_sub = None
@@ -506,7 +631,15 @@ class ObjectSortingNodeV4(Node):
         self.distortion = None
 
         self._startup_done = False
+        self._frames_received = 0
+        self._first_frame_logged = False
+        self._first_camera_info_logged = False
+        self._last_hb_frames = 0
+        self._last_hb_time = time.time()
         self.create_timer(0.0, self._startup, callback_group=self.svc_group)
+        # Periodic heartbeat so the operator can see at a glance whether
+        # the pipeline is alive (camera fed, YOLO firing, target locked).
+        self.create_timer(5.0, self._heartbeat, callback_group=self.svc_group)
 
     # ------------------------------------------------------------------ profile
 
@@ -573,6 +706,9 @@ class ObjectSortingNodeV4(Node):
             if p.name == 'engine_path' and isinstance(p.value, str) and p.value:
                 if hasattr(self, 'inference') and self.inference is not None:
                     self.inference.request_engine_swap(p.value)
+            if p.name == 'debug':
+                _set_debug(bool(p.value))
+                _stage('param', f'debug mode -> {bool(p.value)}')
         return SetParametersResult(successful=True)
 
     def p(self, name):
@@ -606,12 +742,37 @@ class ObjectSortingNodeV4(Node):
         self.last_object_info_list = None
         self.detection_history = {}
 
+    def _heartbeat(self):
+        """Periodic stage summary - prints once every ~5s. Tells you at a
+        glance whether the pipeline is healthy. Always-on (cheap)."""
+        now = time.time()
+        dt = max(0.001, now - self._last_hb_time)
+        fps = (self._frames_received - self._last_hb_frames) / dt
+        self._last_hb_frames = self._frames_received
+        self._last_hb_time = now
+        latest = self.inference.latest() if hasattr(self, 'inference') else None
+        last_inf_ms = -1.0
+        if latest is not None:
+            try:
+                last_inf_ms = 1000.0 * (time.time() - latest[2])
+            except Exception:
+                pass
+        _stage('heartbeat',
+               f'enter={self.enter} sorting={self.enable_sorting} '
+               f'cam_fps={fps:.1f} frames={self._frames_received} '
+               f'roi={"ok" if len(self.roi) else "NONE"} '
+               f'intrinsic={"ok" if self.intrinsic is not None else "NONE"} '
+               f'inference_age_ms={last_inf_ms:.0f} '
+               f'target={self.target[0] if self.target else "none"} '
+               f'transport={self.start_transport}')
+
     def _startup(self):
         if self._startup_done:
             return
         self._startup_done = True
-        threading.Thread(target=self.sorting_loop, daemon=True).start()
-        threading.Thread(target=self.transport_thread, daemon=True).start()
+        _stage('startup', 'spawning sorting + transport threads')
+        threading.Thread(target=self._sorting_loop_wrapped, daemon=True).start()
+        threading.Thread(target=self._transport_thread_wrapped, daemon=True).start()
         if self.get_parameter('start').value:
             self.enter_srv_callback(Trigger.Request(), Trigger.Response())
             req = SetBool.Request(); req.data = True
@@ -627,6 +788,7 @@ class ObjectSortingNodeV4(Node):
         self.create_service(Trigger, '~/init_finish',
                             lambda req, resp: setattr(resp, 'success', True) or resp,
                             callback_group=self.svc_group)
+        _stage('startup', 'v4 init finish')
         self.get_logger().info('\033[1;32mv4 init finish\033[0m')
 
     # ------------------------------------------------------------------ motion helpers
@@ -645,15 +807,29 @@ class ObjectSortingNodeV4(Node):
     # ------------------------------------------------------------------ ROI
 
     def get_roi(self):
-        with open(self.config_path + self.config_file, 'r') as f:
-            config = yaml.safe_load(f)
+        cfg_file = self.config_path + self.config_file
+        _stage('roi', f'reading transform.yaml from {cfg_file}')
+        try:
+            with open(cfg_file, 'r') as f:
+                config = yaml.safe_load(f)
             extristric = np.array(config['extristric'])
             corners = np.array(config['corners']).reshape(-1, 3)
             self.white_area_center = np.array(config['white_area_pose_world'])
-        while True:
+        except FileNotFoundError as e:
+            _stage('roi', f'transform.yaml NOT FOUND - have you run calibration?', exc=e)
+            raise
+        except Exception as e:
+            _stage('roi', 'transform.yaml load failed', exc=e)
+            raise
+        waited = 0.0
+        while waited < 30.0:
             if self.intrinsic is not None and self.distortion is not None:
                 break
-            time.sleep(0.05)
+            time.sleep(0.05); waited += 0.05
+        else:
+            _stage('roi', 'gave up waiting for camera intrinsics after 30s '
+                          '(camera_info topic never arrived)')
+            return
         tvec = extristric[:1]
         rmat = extristric[1:]
         tvec, rmat = common.extristric_plane_shift(np.array(tvec).reshape((3, 1)),
@@ -667,15 +843,22 @@ class ObjectSortingNodeV4(Node):
         y_min = min(imgpts, key=lambda p: p[1])[1]
         y_max = max(imgpts, key=lambda p: p[1])[1]
         self.roi = np.maximum(np.array([y_min, y_max, x_min, x_max]), 0)
+        _stage('roi', f'computed roi (y={self.roi[0]}..{self.roi[1]} '
+                      f'x={self.roi[2]}..{self.roi[3]})')
 
     # ------------------------------------------------------------------ services
 
     def enter_srv_callback(self, request, response):
+        _stage('enter', 'subscribing to /depth_cam/rgb/image_raw + camera_info')
         self.get_logger().info('enter v4')
         self._init_state()
-        self.heart = Heart(self, '~/heartbeat', 5,
-                           lambda _: self.exit_srv_callback(Trigger.Request(),
-                                                            Trigger.Response()))
+        try:
+            self.heart = Heart(self, '~/heartbeat', 5,
+                               lambda _: self.exit_srv_callback(Trigger.Request(),
+                                                                Trigger.Response()))
+        except Exception as e:
+            _stage('enter', 'Heart() failed to construct - continuing without it', exc=e)
+            self.heart = None
         # qos_profile_sensor_data: BEST_EFFORT, KEEP_LAST 5 - matches camera drivers
         self.image_sub = self.create_subscription(
             Image, '/depth_cam/rgb/image_raw', self.image_callback,
@@ -683,6 +866,8 @@ class ObjectSortingNodeV4(Node):
         self.camera_info_sub = self.create_subscription(
             CameraInfo, '/depth_cam/rgb/camera_info', self.camera_info_callback,
             qos_profile_sensor_data, callback_group=self.cam_group)
+        _stage('enter', 'camera subs created - if no [camera] FIRST FRAME shows '
+                        'within ~10s the depth_cam node is not publishing')
         self.start_get_roi = True
         joint_angle = [500, 520, 210, 50, 500]
         set_servo_position(self.joints_pub, 1, ((1, 500), (2, joint_angle[1]),
@@ -1075,24 +1260,52 @@ class ObjectSortingNodeV4(Node):
             return False
         return True
 
+    def _sorting_loop_wrapped(self):
+        try:
+            self.sorting_loop()
+        except Exception as e:
+            _stage('sorting-loop', 'CRASHED - thread exiting', exc=e)
+
+    def _transport_thread_wrapped(self):
+        try:
+            self.transport_thread()
+        except Exception as e:
+            _stage('transport', 'CRASHED - thread exiting', exc=e)
+
     def transport_thread(self):
         while self.running:
             if not self.start_transport:
                 time.sleep(0.05); continue
-            position, yaw, target = self.transport_info
-            if position[0] > 0.22:
-                position[2] += 0.01
-            position = self._apply_kinematics_calibration(position)
-            label = target[0]
-            picked = self._do_pick(position, 80, yaw, label)
-            if picked:
-                placed = self._do_place(label)
-                self.go_home(False)
-                if not placed:
-                    self.get_logger().warn(f'place failed for {label}')
-            else:
-                self.motion.set_gripper(int(self.p('gripper_open_pulse')), 0.3)
-                self.go_home(True)
+            try:
+                position, yaw, target = self.transport_info
+                if position[0] > 0.22:
+                    position[2] += 0.01
+                position = self._apply_kinematics_calibration(position)
+                label = target[0]
+                _stage('transport', f'BEGIN pick {label} at '
+                                    f'({position[0]:.3f},{position[1]:.3f},{position[2]:.3f}) '
+                                    f'yaw_pulse={yaw}')
+                t0 = time.time()
+                picked = self._do_pick(position, 80, yaw, label)
+                _stage('transport',
+                       f'pick {"OK" if picked else "FAIL"} in {time.time()-t0:.2f}s')
+                if picked:
+                    tp = time.time()
+                    placed = self._do_place(label)
+                    _stage('transport',
+                           f'place {"OK" if placed else "FAIL"} in {time.time()-tp:.2f}s')
+                    self.go_home(False)
+                    if not placed:
+                        self.get_logger().warn(f'place failed for {label}')
+                else:
+                    self.motion.set_gripper(int(self.p('gripper_open_pulse')), 0.3)
+                    self.go_home(True)
+            except Exception as e:
+                _stage('transport', 'transport cycle CRASHED - returning home', exc=e)
+                try:
+                    self.go_home(True)
+                except Exception:
+                    pass
             self.target = None
             self.start_transport = False
 
@@ -1203,31 +1416,61 @@ class ObjectSortingNodeV4(Node):
     # ------------------------------------------------------------------ camera cbs
 
     def camera_info_callback(self, msg):
-        self.intrinsic = np.matrix(msg.k).reshape(1, -1, 3)
-        self.distortion = np.array(msg.d)
+        try:
+            self.intrinsic = np.matrix(msg.k).reshape(1, -1, 3)
+            self.distortion = np.array(msg.d)
+            if not self._first_camera_info_logged:
+                self._first_camera_info_logged = True
+                _stage('camera', f'first camera_info received: '
+                                 f'fx={msg.k[0]:.1f} fy={msg.k[4]:.1f} '
+                                 f'cx={msg.k[2]:.1f} cy={msg.k[5]:.1f}')
+        except Exception as e:
+            _stage('camera', 'camera_info parse failed', exc=e)
 
     def image_callback(self, ros_rgb_image):
-        # Zero-copy view (research recommendation: skip cv_bridge copy).
         try:
+            # Zero-copy view (research recommendation: skip cv_bridge copy).
             buf = np.frombuffer(ros_rgb_image.data, dtype=np.uint8)
             bgr = buf.reshape(ros_rgb_image.height, ros_rgb_image.width, -1)
-        except Exception:
+        except Exception as e:
+            _stage('camera', 'frame reshape failed', exc=e)
             return
+        self._frames_received += 1
+        if not self._first_frame_logged:
+            self._first_frame_logged = True
+            _stage('camera', f'FIRST FRAME received: {bgr.shape} '
+                             f'enc={ros_rgb_image.encoding}')
         # Hand off to the inference worker - never block the camera CB.
         self.inference.submit(bgr)
 
 
 def main():
-    rclpy.init()
-    node = ObjectSortingNodeV4('custom_sortingv4')
+    _stage('main', f'starting custom_sortingv4 (DEBUG={_DEBUG})')
+    try:
+        rclpy.init()
+    except Exception as e:
+        _stage('main', 'rclpy.init() FAILED', exc=e); raise
+    try:
+        node = ObjectSortingNodeV4('custom_sortingv4')
+    except Exception as e:
+        _stage('main', 'Node construction FAILED - see stage prints above', exc=e)
+        raise
     executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
+    _stage('main', 'spinning executor (4 threads)')
     try:
         executor.spin()
     except KeyboardInterrupt:
+        _stage('main', 'KeyboardInterrupt - shutting down')
         node.running = False
-        node.inference.stop()
+        try:
+            node.inference.stop()
+        except Exception as e:
+            _stage('main', 'inference.stop() raised', exc=e)
         executor.shutdown()
+    except Exception as e:
+        _stage('main', 'executor.spin() raised', exc=e)
+        raise
 
 
 if __name__ == '__main__':

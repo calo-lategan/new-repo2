@@ -1,20 +1,41 @@
 #!/usr/bin/env bash
 # One-click launcher for the JetArm v4 sorting stack.
 #
-# Mirrors the manual startup the robot needs to come up cleanly:
-#   1. cd ~/ros2_ws
-#   2. source install/setup.bash       (equivalent to setup.zsh from zsh)
-#   3. sudo systemctl restart start_app_node.service
-#   4. wait for the service to finish coming back up (the "beep")
-#   5. ros2 launch app custom_sorting_nodev4.launch.py [profile:=fast ...]
+# Built for the Hiwonder JetArm container environment.
+#
+# The Hiwonder image runs everything inside a container ("hiwonder" or
+# similar). The container needs a moment to come up after the terminal
+# attaches; if we run ROS commands too early we get bogus "command not
+# found" / "no service" errors. This script therefore goes:
+#
+#   1. Detect we're inside the container (wait if not)
+#   2. cd ~/ros2_ws
+#   3. source /opt/ros/humble/setup.zsh   (or .bash on bash)
+#   4. source install/setup.zsh           (or .bash)
+#   5. sudo systemctl restart start_app_node.service
+#       - This is what BOTH brings the camera up AND reclaims it from
+#         anything that's stolen it. Without it: camera dead. With it:
+#         it kicks the bringup.launch.py chain which (after a built-in
+#         18s TimerAction) starts the depth_cam node, which publishes
+#         /depth_cam/rgb/image_raw.
+#   6. Wait for `start_app_node.service` to be active.
+#   7. Wait for the actual camera topic `/depth_cam/rgb/image_raw` to
+#      appear (this is what bringup's TimerAction gates - so we have to
+#      wait at LEAST 18s after the service comes back).
+#   8. ros2 launch app custom_sorting_nodev4.launch.py [args...]
+#
+# Anything that goes wrong is printed in a [stage] format so you can
+# see exactly which step failed. Terminal stays open on error.
+#
+# Env overrides:
+#   SKIP_SERVICE_RESTART=1     skip step 5 (camera must already be up)
+#   WS_DIR=/path/to/ws         override workspace (default $HOME/ros2_ws)
+#   USE_ZSH=1                  source setup.zsh instead of setup.bash
+#   CAMERA_READY_TIMEOUT=45    seconds to wait for the camera topic
+#   JETARM_V4_DEBUG=1          pass debug=true to the node
 #
 # Pass any launch args as positional args, e.g.:
 #   ./launch_v4.sh profile:=fast motion_speed:=2.0
-#
-# Env overrides:
-#   SKIP_SERVICE_RESTART=1     skip step 3
-#   WS_DIR=/path/to/ws         override workspace
-#   JETARM_V4_PROFILES=...     override profiles dir (default ~/jetarm_v4_profiles)
 
 set -u
 
@@ -23,88 +44,226 @@ WS_DIR="${WS_DIR:-$HOME/ros2_ws}"
 SERVICE_NAME="${SERVICE_NAME:-start_app_node.service}"
 SKIP_SERVICE_RESTART="${SKIP_SERVICE_RESTART:-0}"
 SERVICE_READY_TIMEOUT="${SERVICE_READY_TIMEOUT:-30}"
-TOPIC_READY_TIMEOUT="${TOPIC_READY_TIMEOUT:-25}"
-TOPIC_READY_PATTERN="${TOPIC_READY_PATTERN:-ros_robot_controller}"
-EXTRA_BOOT_GRACE="${EXTRA_BOOT_GRACE:-3}"
+CONTROLLER_TOPIC_TIMEOUT="${CONTROLLER_TOPIC_TIMEOUT:-25}"
+CAMERA_READY_TIMEOUT="${CAMERA_READY_TIMEOUT:-45}"
+CAMERA_TOPIC="${CAMERA_TOPIC:-/depth_cam/rgb/image_raw}"
+EXTRA_BOOT_GRACE="${EXTRA_BOOT_GRACE:-2}"
+CONTAINER_READY_TIMEOUT="${CONTAINER_READY_TIMEOUT:-30}"
+USE_ZSH="${USE_ZSH:-1}"
 PROFILES_DIR="${JETARM_V4_PROFILES:-$HOME/jetarm_v4_profiles}"
 
-echo "==> JetArm Sort v4"
-echo "    Workspace : $WS_DIR"
-echo "    ROS distro: $ROS_DISTRO"
-echo "    Service   : $SERVICE_NAME"
-echo "    Profiles  : $PROFILES_DIR"
+stage() { printf "\033[1;36m[%s]\033[0m %s\n" "$1" "$2" >&2; }
+err()   { printf "\033[1;31m[%s]\033[0m %s\n" "$1" "$2" >&2; }
+ok()    { printf "\033[1;32m[%s]\033[0m %s\n" "$1" "$2" >&2; }
 
-# --- profiles dir is created by the node, but seed it on first run ---
+stage launcher "==> JetArm Sort v4"
+stage launcher "    Workspace : $WS_DIR"
+stage launcher "    ROS distro: $ROS_DISTRO"
+stage launcher "    Service   : $SERVICE_NAME"
+stage launcher "    Profiles  : $PROFILES_DIR"
+stage launcher "    Camera    : $CAMERA_TOPIC"
+
+# -----------------------------------------------------------------------------
+# STEP 0: Wait for the Hiwonder container to be ready.
+# -----------------------------------------------------------------------------
+# The desktop shortcut opens a terminal that drops you inside the container,
+# but it may not be fully initialized for a beat. We probe for two markers
+# that mean "the container is alive enough to run ROS":
+#   - the ROS distro setup file exists
+#   - the workspace dir exists
+#   - the `ros2` binary is callable
+# If those aren't true immediately, we wait and retry rather than failing
+# outright.
+
+stage container "waiting up to ${CONTAINER_READY_TIMEOUT}s for container to be ready..."
+container_ready=0
+for ((i=0; i<CONTAINER_READY_TIMEOUT; i++)); do
+    if [ -f "/opt/ros/${ROS_DISTRO}/setup.bash" ] \
+       && [ -d "$WS_DIR" ]; then
+        container_ready=1
+        ok container "container ready (took ${i}s)"
+        break
+    fi
+    sleep 1
+done
+if [ "$container_ready" -ne 1 ]; then
+    err container "container never came up. Check that:"
+    err container "  - you ARE inside the hiwonder container (not the host)"
+    err container "  - /opt/ros/${ROS_DISTRO}/setup.bash exists"
+    err container "  - $WS_DIR exists"
+    read -r -p "Press Enter to close..."
+    exit 1
+fi
+
 mkdir -p "$PROFILES_DIR"
 
-if [ ! -d "$WS_DIR" ]; then
-    echo "ERROR: workspace dir $WS_DIR not found" >&2
+# -----------------------------------------------------------------------------
+# STEP 1+2: cd into workspace.
+# -----------------------------------------------------------------------------
+cd "$WS_DIR" || { err launcher "cd $WS_DIR failed"; read -r -p "Press Enter..."; exit 1; }
+stage env "cwd = $(pwd)"
+
+# -----------------------------------------------------------------------------
+# STEP 3+4: source the ROS env. Prefer setup.zsh per Hiwonder's docs, but
+# fall back to .bash so we work in either shell. Source via `.` so it
+# affects our current shell context.
+# -----------------------------------------------------------------------------
+source_setup() {
+    local base="$1"   # path WITHOUT extension
+    local picked=""
+    if [ "$USE_ZSH" = "1" ] && [ -f "${base}.zsh" ]; then picked="${base}.zsh"
+    elif [ -f "${base}.bash" ]; then                       picked="${base}.bash"
+    elif [ -f "${base}.zsh" ]; then                        picked="${base}.zsh"
+    elif [ -f "${base}.sh" ]; then                         picked="${base}.sh"
+    fi
+    if [ -n "$picked" ]; then
+        # shellcheck disable=SC1090
+        . "$picked"; stage env "sourced $picked"; return 0
+    fi
+    err env "no setup.* found under $base"; return 1
+}
+
+if ! source_setup "/opt/ros/${ROS_DISTRO}/setup"; then
+    err env "/opt/ros/${ROS_DISTRO}/setup.{zsh,bash} not present"
     read -r -p "Press Enter to close..."
     exit 1
 fi
-cd "$WS_DIR" || { read -r -p "Press Enter to close..."; exit 1; }
-
-if [ ! -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]; then
-    echo "ERROR: /opt/ros/${ROS_DISTRO}/setup.bash not found" >&2
+if ! source_setup "${WS_DIR}/install/setup"; then
+    err env "workspace install/setup.* missing - did you run colcon build?"
+    err env "run:  cd $WS_DIR && colcon build --packages-select app && exit"
     read -r -p "Press Enter to close..."
     exit 1
 fi
-# shellcheck disable=SC1090
-source "/opt/ros/${ROS_DISTRO}/setup.bash"
 
-if [ -f "${WS_DIR}/install/setup.bash" ]; then
-    # shellcheck disable=SC1090
-    source "${WS_DIR}/install/setup.bash"
-else
-    echo "WARNING: ${WS_DIR}/install/setup.bash not found - did you colcon build?"
-fi
-
+# Hiwonder env vars - the start_app_node and our v4 node both expect these.
 export CAMERA_TYPE="${CAMERA_TYPE:-GEMINI}"
 export CHASSIS_TYPE="${CHASSIS_TYPE:-Slide_Rails}"
 export need_compile="${need_compile:-False}"
 export JETARM_V4_PROFILES="$PROFILES_DIR"
+stage env "CAMERA_TYPE=$CAMERA_TYPE CHASSIS_TYPE=$CHASSIS_TYPE need_compile=$need_compile"
 
+# Sanity: ros2 must be callable now.
+if ! command -v ros2 >/dev/null 2>&1; then
+    err env "'ros2' not on PATH after sourcing setup - something is very wrong"
+    read -r -p "Press Enter to close..."
+    exit 1
+fi
+
+# -----------------------------------------------------------------------------
+# STEP 5: restart start_app_node.service.
+# This is non-negotiable for the camera:
+#   - Without the service running, /depth_cam/rgb/image_raw is gone.
+#   - If another process stole the camera (rare but happens after crashes
+#     or after running a non-bringup launch that also touches depth_cam),
+#     restarting the service reclaims it via Hiwonder's bringup.launch.py
+#     which kills + relaunches the depth camera node alongside everything
+#     else. NB: bringup has an 18s TimerAction before depth_cam so the
+#     camera does not actually appear immediately - see step 7.
+# -----------------------------------------------------------------------------
 if [ "$SKIP_SERVICE_RESTART" != "1" ]; then
-    echo "==> Restarting $SERVICE_NAME (sudo)..."
+    stage service "restarting $SERVICE_NAME (sudo)..."
     if ! sudo systemctl restart "$SERVICE_NAME"; then
-        echo "ERROR: failed to restart $SERVICE_NAME" >&2
-        echo "       (tip: sudoers rule:"
-        echo "        '<user> ALL=(ALL) NOPASSWD: /bin/systemctl restart $SERVICE_NAME')"
+        err service "failed to restart $SERVICE_NAME"
+        err service "sudoers tip:"
+        err service "  <user> ALL=(ALL) NOPASSWD: /bin/systemctl restart $SERVICE_NAME"
         read -r -p "Press Enter to close..."
         exit 1
     fi
+    ok service "restart issued"
 else
-    echo "==> SKIP_SERVICE_RESTART=1 - leaving $SERVICE_NAME alone"
+    stage service "SKIP_SERVICE_RESTART=1 - leaving $SERVICE_NAME alone"
 fi
 
-echo "==> Waiting up to ${SERVICE_READY_TIMEOUT}s for $SERVICE_NAME to be active..."
+# -----------------------------------------------------------------------------
+# STEP 6: wait for systemd to mark the service active.
+# -----------------------------------------------------------------------------
+stage service "waiting up to ${SERVICE_READY_TIMEOUT}s for systemd active..."
+svc_ok=0
 for ((i=0; i<SERVICE_READY_TIMEOUT; i++)); do
     if systemctl is-active --quiet "$SERVICE_NAME"; then
-        echo "    service is active"; break
+        ok service "active (took ${i}s)"; svc_ok=1; break
+    fi
+    sleep 1
+done
+if [ "$svc_ok" -ne 1 ]; then
+    err service "$SERVICE_NAME never reported active"
+    err service "diagnose with: sudo journalctl -u $SERVICE_NAME -n 60 --no-pager"
+fi
+
+# Controller topics (servo / kinematics) come up first - confirm they
+# exist before we wait for the camera (which is gated by a TimerAction
+# inside Hiwonder's bringup.launch.py).
+stage controllers "waiting up to ${CONTROLLER_TOPIC_TIMEOUT}s for /ros_robot_controller*..."
+ctrl_ok=0
+for ((i=0; i<CONTROLLER_TOPIC_TIMEOUT; i++)); do
+    if ros2 topic list 2>/dev/null | grep -q "ros_robot_controller"; then
+        ok controllers "controller topics visible (took ${i}s)"
+        ctrl_ok=1; break
+    fi
+    sleep 1
+done
+if [ "$ctrl_ok" -ne 1 ]; then
+    err controllers "controller topics never appeared - kinematics will hang"
+    err controllers "check: ros2 topic list  /  sudo journalctl -u $SERVICE_NAME"
+fi
+
+# -----------------------------------------------------------------------------
+# STEP 7: wait for the camera topic specifically.
+# bringup.launch.py runs:    TimerAction(period=18.0, actions=[depth_camera_launch])
+# So the camera will appear no earlier than ~18s after the service starts.
+# We give it CAMERA_READY_TIMEOUT (45s by default) and we also poll for
+# actual messages on the topic, not just its presence, because the topic
+# can be advertised before the driver is publishing.
+# -----------------------------------------------------------------------------
+stage camera "waiting up to ${CAMERA_READY_TIMEOUT}s for $CAMERA_TOPIC to publish..."
+cam_ok=0
+cam_advertised=0
+for ((i=0; i<CAMERA_READY_TIMEOUT; i++)); do
+    if [ "$cam_advertised" -ne 1 ]; then
+        if ros2 topic list 2>/dev/null | grep -q "^${CAMERA_TOPIC}$"; then
+            cam_advertised=1
+            ok camera "topic advertised (took ${i}s) - now waiting for frames"
+        fi
+    else
+        # ros2 topic hz blocks; use a short timeout to probe.
+        if timeout 2 ros2 topic echo --once "$CAMERA_TOPIC" >/dev/null 2>&1; then
+            ok camera "camera publishing frames (took ${i}s total)"
+            cam_ok=1; break
+        fi
     fi
     sleep 1
 done
 
-echo "==> Waiting up to ${TOPIC_READY_TIMEOUT}s for '/${TOPIC_READY_PATTERN}*' topics..."
-for ((i=0; i<TOPIC_READY_TIMEOUT; i++)); do
-    if ros2 topic list 2>/dev/null | grep -q "$TOPIC_READY_PATTERN"; then
-        echo "    controller topics visible"; break
-    fi
-    sleep 1
-done
+if [ "$cam_ok" -ne 1 ]; then
+    err camera "camera did not start publishing within ${CAMERA_READY_TIMEOUT}s"
+    err camera "possible causes:"
+    err camera "  - depth_cam process crashed (check journalctl)"
+    err camera "  - USB unplugged / wrong CAMERA_TYPE env"
+    err camera "  - another node is holding the camera open"
+    err camera "we'll launch anyway - the v4 node will print [camera] errors if it can't see frames"
+fi
 
 if [ "$EXTRA_BOOT_GRACE" -gt 0 ]; then
-    echo "==> Extra ${EXTRA_BOOT_GRACE}s grace for the beep / full init..."
+    stage launcher "extra ${EXTRA_BOOT_GRACE}s grace..."
     sleep "$EXTRA_BOOT_GRACE"
 fi
 
-echo "==> ros2 launch app custom_sorting_nodev4.launch.py $*"
-ros2 launch app custom_sorting_nodev4.launch.py "$@"
+# -----------------------------------------------------------------------------
+# STEP 8: actually launch v4.
+# -----------------------------------------------------------------------------
+LAUNCH_ARGS=("$@")
+if [ "${JETARM_V4_DEBUG:-0}" = "1" ]; then
+    LAUNCH_ARGS+=("debug:=true")
+    export JETARM_V4_DEBUG=1
+fi
+
+stage launcher "ros2 launch app custom_sorting_nodev4.launch.py ${LAUNCH_ARGS[*]}"
+ros2 launch app custom_sorting_nodev4.launch.py "${LAUNCH_ARGS[@]}"
 RC=$?
 
 if [ $RC -ne 0 ]; then
-    echo
-    echo "Launch exited with code $RC"
+    err launcher "launch exited with code $RC"
+    err launcher "see [v4][stage] lines above for the failing step"
     read -r -p "Press Enter to close..."
 fi
 exit $RC

@@ -1,5 +1,10 @@
 # Custom Sorting v4 - install on the Jetson Orin Nano
 
+> **If you are using the Hiwonder container image (almost everyone is),
+> read `QUICK_SETUP_HIWONDER.md` first.** It explains the camera ↔
+> `start_app_node.service` contract, container readiness, and the
+> exact folder layout. This file is the long-form reference.
+
 v4 is a from-research-up rewrite. v2 still works — install v4 alongside it without touching the v2 files.
 
 | File | Purpose |
@@ -148,6 +153,31 @@ ros2 service call /custom_sortingv4/load_profile \
 # Save current as boot default
 ros2 service call /custom_sortingv4/save_as_default std_srvs/srv/Trigger
 ```
+
+## Debugging
+
+Every critical stage of v4 prints a tagged line to stderr in `[v4][stage] message` format. To see them, just watch the terminal that the launcher opened — they're always-on. To get the *verbose* stream (per-frame timing, periodic stats, every kinematics IO), run with debug mode:
+
+```bash
+# from the launcher:
+JETARM_V4_DEBUG=1 ~/jetarm_v4/launch_v4.sh
+
+# at launch time:
+ros2 launch app custom_sorting_nodev4.launch.py debug:=true
+
+# at runtime (no restart):
+ros2 param set /custom_sortingv4 debug true
+```
+
+A heartbeat line prints every 5 s with a one-glance health summary:
+
+```
+[v4][heartbeat] enter=True sorting=True cam_fps=29.7 frames=4488
+                roi=ok intrinsic=ok inference_age_ms=42
+                target=scaff transport=False
+```
+
+If a thread crashes (sorting loop, transport, inference worker) you'll see a `CRASHED` stage line with the full exception traceback instead of the silent thread death that rclpy normally gives you.
 
 ## Notes / gotchas
 
