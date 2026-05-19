@@ -3,17 +3,20 @@
 #
 # What it does (idempotent - safe to re-run):
 #   1. Clones/refreshes this repo into ~/jetarm_v4_src
-#   2. Copies the v4 python files into ~/ros2_ws/src/app/app/
-#   3. Copies the v4 launch file into ~/ros2_ws/src/app/launch/
+#   2. Symlinks the v4 python files into ~/ros2_ws/src/app/app/
+#   3. Symlinks the v4 launch file into ~/ros2_ws/src/app/launch/
 #   4. Adds the v4 console_scripts entries to ~/ros2_ws/src/app/setup.py
 #      (only if they're not already there)
 #   5. Seeds ~/jetarm_v4_profiles/ with default.yaml, fast.yaml, precision.yaml
 #   6. Installs ~/jetarm_v4/launch_v4.sh
 #   7. Installs the desktop shortcut to ~/Desktop and ~/.local/share/applications
-#   8. Runs `colcon build --packages-select app`
+#   8. Runs `colcon build --packages-select app --symlink-install`
 #   9. (optional, with --sudoers) writes a NOPASSWD rule for the systemctl
 #      restart so the desktop shortcut is truly one-click.
 #  10. Prints clear next-step instructions.
+#
+# Why symlinks: a future `git -C ~/jetarm_v4_src pull` is immediately picked
+# up by the next `ros2 launch` - no copy, no rebuild for pure-Python edits.
 #
 # This is designed to be run inside the Hiwonder container. From the host
 # you can either ssh / lxc-attach into the container and run the curl one-
@@ -102,15 +105,40 @@ ok "source ready"
 
 # --- 2. Copy node + UI ---------------------------------------------------
 
-stage "copying v4 sources into $APP_PKG/app/"
-install -m 644 "$V4/custom_sortingv4.py" "$APP_PKG/app/custom_sortingv4.py"
-install -m 644 "$V4/tune_uiv4.py"        "$APP_PKG/app/tune_uiv4.py"
+# We *symlink* the python sources from the git checkout into the ROS2 app
+# package, and we run colcon with --symlink-install. Net effect: a future
+# `git pull` inside the checkout is immediately picked up by the running
+# ros2 node. No copy, no rebuild for pure-Python edits.
+#
+# Only `setup.py` / `package.xml` / launch file changes still need a colcon
+# rebuild - and we already symlink the launch file, so even those edits
+# propagate the moment you re-run a `ros2 launch`.
+link_file() {
+    local src="$1" dst="$2"
+    if [ ! -e "$src" ]; then
+        err "source file missing: $src"; return 1
+    fi
+    # If dst already symlinks to the right place, skip.
+    if [ -L "$dst" ] && [ "$(readlink -f "$dst")" = "$(readlink -f "$src")" ]; then
+        stage "  already linked: $dst"
+        return 0
+    fi
+    # Otherwise replace whatever's there with a symlink.
+    rm -f "$dst"
+    ln -s "$src" "$dst"
+    stage "  linked: $dst -> $src"
+}
 
-# --- 3. Copy launch file -------------------------------------------------
+stage "symlinking v4 sources into $APP_PKG/app/"
+link_file "$V4/custom_sortingv4.py" "$APP_PKG/app/custom_sortingv4.py"
+link_file "$V4/tune_uiv4.py"        "$APP_PKG/app/tune_uiv4.py"
 
-stage "copying launch file into $APP_PKG/launch/"
+# --- 3. Symlink launch file ---------------------------------------------
+
+stage "symlinking launch file into $APP_PKG/launch/"
 mkdir -p "$APP_PKG/launch"
-install -m 644 "$V4/custom_sorting_nodev4.launch.py" "$APP_PKG/launch/custom_sorting_nodev4.launch.py"
+link_file "$V4/custom_sorting_nodev4.launch.py" \
+          "$APP_PKG/launch/custom_sorting_nodev4.launch.py"
 
 # --- 4. Patch setup.py (idempotent) --------------------------------------
 
@@ -192,12 +220,17 @@ chmod +x "$APP_FILE"
 # --- 8. Build -----------------------------------------------------------
 
 if [ "$DO_BUILD" = "1" ]; then
-    stage "building app package (colcon)"
-    (cd "$WS_DIR" && colcon build --packages-select app) || {
+    stage "building app package with --symlink-install"
+    # --symlink-install makes the install/ tree contain symlinks back into
+    # src/, so Python source edits don't need a rebuild. Combined with the
+    # source-file symlinks above, a `git pull` in $SRC_DIR is picked up by
+    # the next `ros2 launch` with no colcon step. Only changes that need
+    # entry_points re-registration (setup.py) need a rebuild.
+    (cd "$WS_DIR" && colcon build --packages-select app --symlink-install) || {
         err "colcon build failed - see output above"
         exit 1
     }
-    ok "colcon build done"
+    ok "colcon build done (symlinked)"
 else
     stage "skipping colcon build (--no-build)"
 fi
@@ -228,11 +261,25 @@ cat <<EOF
 ================================================================
 $(ok 'INSTALL COMPLETE')
 ================================================================
-What was installed:
+Symlinks installed (no rebuild needed for Python edits):
 
   $APP_PKG/app/custom_sortingv4.py
+    -> $V4/custom_sortingv4.py
   $APP_PKG/app/tune_uiv4.py
+    -> $V4/tune_uiv4.py
   $APP_PKG/launch/custom_sorting_nodev4.launch.py
+    -> $V4/custom_sorting_nodev4.launch.py
+
+Workspace built with --symlink-install, so install/ also points back at
+src/. Net effect: when you want to pull updates, just do
+
+  git -C $SRC_DIR pull
+
+and re-launch. No colcon, no copy. Only re-run install.sh if setup.py
+or package.xml changed upstream (entry_points / dependencies).
+
+Other files installed:
+
   $PROFILES_DIR/{default,fast,precision}.yaml
   $LAUNCHER_DIR/launch_v4.sh
   $DESKTOP_FILE
