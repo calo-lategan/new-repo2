@@ -82,8 +82,10 @@ That's it. Double-click the desktop shortcut.
 ```
 [container] wait up to 30s for /opt/ros/humble/setup.* and ~/ros2_ws to exist
 [env]       cd ~/ros2_ws
-[env]       source /opt/ros/humble/setup.zsh
-[env]       source ~/ros2_ws/install/setup.zsh
+[env]       source /opt/ros/humble/setup.bash   # the launcher is a bash script
+[env]       source ~/ros2_ws/install/setup.bash # so it must source the .bash variants
+                                                 #   (USE_ZSH=1 re-execs under zsh
+                                                 #    if you really want setup.zsh)
 [env]       export CAMERA_TYPE=GEMINI CHASSIS_TYPE=Slide_Rails need_compile=False
 [service]   sudo systemctl restart start_app_node.service
 [service]   wait up to 30s for systemctl is-active
