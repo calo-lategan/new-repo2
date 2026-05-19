@@ -201,14 +201,34 @@ stage "installing desktop shortcut"
 mkdir -p "$HOME/.local/share/applications" "$HOME/Desktop"
 DESKTOP_FILE="$HOME/Desktop/jetarm-sort-v4.desktop"
 APP_FILE="$HOME/.local/share/applications/jetarm-sort-v4.desktop"
+
+# Pick a terminal that will load ~/.bashrc (which is what prints the
+# Hiwonder banner / sets CAMERA_TYPE etc.). gnome-terminal -- bash -i -c
+# runs an INTERACTIVE bash so .bashrc IS sourced - which a bare
+# `Terminal=true` + non-interactive `bash -c` does not.
+#
+# After the launcher exits we drop into an interactive shell so the user
+# can read the log / re-run things.
+if command -v gnome-terminal >/dev/null 2>&1; then
+    EXEC_LINE="gnome-terminal --title='JetArm Sort v4' -- bash -i -c '\"$LAUNCHER_DIR/launch_v4.sh\"; exec bash -i'"
+    USE_TERMINAL_FIELD="false"
+elif command -v x-terminal-emulator >/dev/null 2>&1; then
+    EXEC_LINE="x-terminal-emulator -e bash -i -c '\"$LAUNCHER_DIR/launch_v4.sh\"; exec bash -i'"
+    USE_TERMINAL_FIELD="false"
+else
+    # Fallback - rely on the desktop to open a terminal for us.
+    EXEC_LINE="bash -i -c '\"$LAUNCHER_DIR/launch_v4.sh\"; exec bash -i'"
+    USE_TERMINAL_FIELD="true"
+fi
+
 cat > "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
 Type=Application
 Version=1.0
 Name=JetArm Sort v4
 Comment=Launch the v4 custom sorting stack with hot-swap models and live tuner
-Exec=bash -c '"$LAUNCHER_DIR/launch_v4.sh"; exec bash'
-Terminal=true
+Exec=$EXEC_LINE
+Terminal=$USE_TERMINAL_FIELD
 Icon=utilities-terminal
 Categories=Development;Robotics;
 StartupNotify=true

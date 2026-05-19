@@ -38,7 +38,12 @@
 # Pass any launch args as positional args, e.g.:
 #   ./launch_v4.sh profile:=fast motion_speed:=2.0
 
-set -u
+# NOTE on `set -u`: we deliberately DO NOT enable nounset because Hiwonder's
+# /opt/ros/humble/setup.bash and the workspace's install/setup.bash reference
+# variables like AMENT_TRACE_SETUP_FILES without defaulting them. Sourcing
+# them under `set -u` aborts the launcher before any [stage] line prints.
+# We still want pipefail so colcon / curl failures surface.
+set -o pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 WS_DIR="${WS_DIR:-$HOME/ros2_ws}"
@@ -139,8 +144,16 @@ source_setup() {
         picked="${base}.sh"
     fi
     if [ -n "$picked" ]; then
+        # The ROS setup scripts reference variables they don't define
+        # (AMENT_TRACE_SETUP_FILES, COLCON_TRACE, ...). Defensively disable
+        # nounset for the duration of the source even though we already
+        # don't set it globally - belt and braces.
+        local prev_u; case $- in *u*) prev_u=1 ;; *) prev_u=0 ;; esac
+        set +u
         # shellcheck disable=SC1090
-        . "$picked"; stage env "sourced $picked"; return 0
+        . "$picked"
+        [ "$prev_u" = "1" ] && set -u
+        stage env "sourced $picked"; return 0
     fi
     err env "no compatible setup file found under $base (have you run colcon build?)"; return 1
 }
