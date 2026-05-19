@@ -892,50 +892,58 @@ class ObjectSortingNodeV4(Node):
         return response
 
     def enable_sorting_srv_callback(self, request, response):
+        _stage('svc', f'enable_sorting -> {bool(request.data)}')
         self.motion.abort(not request.data)
         self.enable_sorting = bool(request.data)
         response.success = True
         return response
 
     def set_target_srv_callback(self, request, response):
+        _stage('svc', f'set_target {request.data_str}={request.data_bool}')
         if request.data_str in self.target_labels:
             self.target_labels[request.data_str] = request.data_bool
+        else:
+            _stage('svc', f'  unknown label "{request.data_str}" - ignored')
         response.success = True
         return response
 
     def recalibrate_srv_callback(self, request, response):
+        _stage('svc', 'recalibrate requested')
         threading.Thread(target=self._self_calibrate, daemon=True).start()
         response.success = True
         return response
 
     def load_engine_srv_callback(self, request, response):
-        # data_str: path to .engine, data_bool: ignored
+        _stage('svc', f'load_engine -> {request.data_str}')
         ok = self.inference.request_engine_swap(request.data_str)
         if ok:
             try:
                 self.set_parameters([rclpy.parameter.Parameter(
                     'engine_path', value=request.data_str)])
-            except Exception:
-                pass
+            except Exception as e:
+                _stage('svc', 'load_engine: setting engine_path param failed', exc=e)
         response.success = ok
         return response
 
     def save_profile_srv_callback(self, request, response):
-        # data_str: profile name (no extension); data_bool: ignored
+        _stage('svc', f'save_profile -> {request.data_str}')
         try:
             name = (request.data_str or 'profile').strip()
             if not name.endswith('.yaml'):
                 name += '.yaml'
             path = PROFILES_DIR / name
             save_profile_yaml(path, self._all_tunables_dict())
+            _stage('svc', f'  wrote {path}')
             self.get_logger().info(f'profile saved -> {path}')
             response.success = True
         except Exception as e:
+            _stage('svc', 'save_profile FAILED', exc=e)
             self.get_logger().error(f'save_profile failed: {e}')
             response.success = False
         return response
 
     def load_profile_srv_callback(self, request, response):
+        _stage('svc', f'load_profile -> {request.data_str}')
         try:
             name = (request.data_str or 'profile').strip()
             if not name.endswith('.yaml'):
@@ -943,29 +951,34 @@ class ObjectSortingNodeV4(Node):
             path = PROFILES_DIR / name
             params = load_profile_yaml(path)
             if not params:
+                _stage('svc', f'  no params parsed from {path} (file missing or empty?)')
                 response.success = False
                 return response
             ros_params = []
             for k, v in params.items():
                 try:
                     ros_params.append(rclpy.parameter.Parameter(k, value=v))
-                except Exception:
-                    pass
+                except Exception as e:
+                    _stage('svc', f'  skipping param {k}={v!r}', exc=e)
             if ros_params:
                 self.set_parameters(ros_params)
+            _stage('svc', f'  applied {len(ros_params)} params from {path}')
             self.get_logger().info(f'profile loaded <- {path} ({len(ros_params)} params)')
             response.success = True
         except Exception as e:
+            _stage('svc', 'load_profile FAILED', exc=e)
             self.get_logger().error(f'load_profile failed: {e}')
             response.success = False
         return response
 
     def save_as_default_srv_callback(self, request, response):
+        _stage('svc', f'save_as_default -> {DEFAULT_PROFILE_PATH}')
         try:
             save_profile_yaml(DEFAULT_PROFILE_PATH, self._all_tunables_dict())
             self.get_logger().info(f'default profile saved -> {DEFAULT_PROFILE_PATH}')
             response.success = True
         except Exception as e:
+            _stage('svc', 'save_as_default FAILED', exc=e)
             self.get_logger().error(f'save_as_default failed: {e}')
             response.success = False
         return response
@@ -973,6 +986,7 @@ class ObjectSortingNodeV4(Node):
     # ------------------------------------------------------------------ self-cal
 
     def _self_calibrate(self):
+        _stage('self-cal', 'starting')
         self.get_logger().info('v4 self-calibration starting')
         deadline = time.time() + 15
         while time.time() < deadline:
@@ -981,11 +995,13 @@ class ObjectSortingNodeV4(Node):
                 break
             time.sleep(0.2)
         else:
+            _stage('self-cal', 'camera/ROI never ready - aborting')
             self.get_logger().warn('self-cal: camera/ROI never ready')
             return
         # Use the most recent inference frame so we don't fight the camera CB.
         latest = self.inference.latest()
         if latest is None:
+            _stage('self-cal', 'no inference frames yet - aborting')
             self.get_logger().warn('self-cal: no inference frames yet')
             return
         bgr = latest[0]
@@ -1020,10 +1036,18 @@ class ObjectSortingNodeV4(Node):
                     self.place_position[color] = [expected[0] + dx,
                                                   expected[1] + dy,
                                                   expected[2]]
+                    _stage('self-cal', f'{color}: corrected '
+                                       f'({dx*1000:+.1f},{dy*1000:+.1f}) mm')
                     self.get_logger().info(
                         f'self-cal: {color} corrected ({dx*1000:+.1f}, {dy*1000:+.1f}) mm')
+                else:
+                    _stage('self-cal', f'{color}: detected delta too large '
+                                       f'({dx*1000:+.1f},{dy*1000:+.1f}) mm '
+                                       f'- skipped (probably saw an item, not the bin)')
             except Exception as e:
+                _stage('self-cal', f'{color} failed', exc=e)
                 self.get_logger().warn(f'self-cal {color} failed: {e}')
+        _stage('self-cal', 'done')
         self.get_logger().info('v4 self-calibration done')
 
     def _pixel_to_world(self, pixel, height=0.03):
@@ -1183,10 +1207,13 @@ class ObjectSortingNodeV4(Node):
         attempted_close = close_pulse
         z_nudge = 0.0
         while attempt <= retries and not self.motion.aborted:
+            _dbg('pick', f'attempt {attempt+1}/{retries+1} close_pulse={attempted_close} '
+                         f'z_nudge={z_nudge:+.3f}')
             hover = [position[0], position[1], position[2] + hover_h]
             if self.motion.goto_pose(hover, pitch,
                                      duration=max(0.5, 1.1 * speed / aggression),
                                      parallel_base=parallel_base) is None:
+                _stage('pick', f'hover IK failed at attempt {attempt+1}')
                 return False
             self.motion.set_wrist(yaw, 0.25 * speed)
             self.motion.set_gripper(open_pulse, 0.2 * speed)
@@ -1195,6 +1222,7 @@ class ObjectSortingNodeV4(Node):
             if self.motion.goto_pose(descend, pitch,
                                      duration=max(0.35, 0.7 * speed / aggression),
                                      parallel_base=False) is None:
+                _stage('pick', f'descend IK failed at attempt {attempt+1}')
                 return False
             if use_servo_fb:
                 outcome = self.motion.grip_with_feedback(
@@ -1202,26 +1230,32 @@ class ObjectSortingNodeV4(Node):
             else:
                 self.motion.set_gripper(attempted_close, close_dur)
                 outcome = 'grabbed'
+            _stage('pick', f'attempt {attempt+1} servo outcome: {outcome}')
             if self.motion.goto_pose(hover, pitch,
                                      duration=max(0.35, 0.7 * speed / aggression),
                                      parallel_base=False) is None:
+                _stage('pick', f'lift IK failed at attempt {attempt+1}')
                 return False
             if outcome == 'stalled':
                 attempted_close = max(open_pulse + 40, attempted_close - step)
                 z_nudge += 0.003
             elif outcome == 'missed':
                 if not self._vision_target_present_at(label, position):
+                    _stage('pick', 'missed and target no longer visible - giving up')
                     return False
                 attempted_close = min(full_closed - 5, attempted_close + step)
                 z_nudge -= 0.002
             else:
                 if self.p('vision_confirm_pick'):
                     if self._vision_target_present_at(label, position):
+                        _stage('pick', 'servo said grabbed but vision still sees it - retry')
                         attempted_close = min(full_closed - 5, attempted_close + step)
                         attempt += 1
                         continue
+                _stage('pick', f'SUCCESS on attempt {attempt+1}')
                 return True
             attempt += 1
+        _stage('pick', f'exhausted {retries+1} attempts - giving up')
         return False
 
     def _do_place(self, label):
@@ -1312,16 +1346,25 @@ class ObjectSortingNodeV4(Node):
     # ------------------------------------------------------------------ sorting loop
 
     def sorting_loop(self):
+        _stage('sorting-loop', 'thread started, waiting for enter+frames')
         avg_frames = 1
+        ticks = 0
         while self.running:
             if not self.enter:
                 time.sleep(0.05); continue
             latest = self.inference.latest()
             if latest is None:
                 time.sleep(0.005); continue
+            ticks += 1
+            if ticks == 1:
+                _stage('sorting-loop', 'first inference result reached the loop')
             bgr_image, results, ts = latest
             if self.start_get_roi and self.intrinsic is not None and self.distortion is not None:
-                self.get_roi()
+                try:
+                    self.get_roi()
+                except Exception as e:
+                    _stage('sorting-loop', 'get_roi raised - retrying next tick', exc=e)
+                    time.sleep(0.5); continue
                 self.start_get_roi = False
             roi = self.roi.copy() if len(self.roi) else []
             intrinsic = self.intrinsic
@@ -1386,6 +1429,11 @@ class ObjectSortingNodeV4(Node):
                             avg_pos = [sum(p[i] for p in hist) / len(hist) for i in range(3)]
                             self.detection_history[t[0]] = hist
                             yaw_pulse = 500 + int(result[0] / 240 * 1000)
+                            _stage('sorting-loop',
+                                   f'LOCK -> {t[0]} at '
+                                   f'({avg_pos[0]:.3f},{avg_pos[1]:.3f},{avg_pos[2]:.3f}) '
+                                   f'yaw_pulse={yaw_pulse} '
+                                   f'(avg over {len(hist)} frame{"" if len(hist)==1 else "s"})')
                             self.transport_info = [avg_pos, yaw_pulse, t]
                             self.target = t
                             self.start_transport = True

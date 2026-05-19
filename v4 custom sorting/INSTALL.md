@@ -7,6 +7,61 @@
 
 v4 is a from-research-up rewrite. v2 still works — install v4 alongside it without touching the v2 files.
 
+---
+
+## One-paste install (recommended)
+
+Open a terminal **inside the Hiwonder container** and run:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/calo-lategan/new-repo2/main/v4%20custom%20sorting/install.sh) --sudoers
+```
+
+That's it. It will:
+
+1. Clone the repo into `~/jetarm_v4_src`
+2. Copy `custom_sortingv4.py` + `tune_uiv4.py` to `~/ros2_ws/src/app/app/`
+3. Copy the launch file to `~/ros2_ws/src/app/launch/`
+4. Idempotently add the two `console_scripts` entries to `setup.py`
+5. Seed `~/jetarm_v4_profiles/` with `default.yaml`, `fast.yaml`, `precision.yaml`
+6. Install `~/jetarm_v4/launch_v4.sh`
+7. Drop the `JetArm Sort v4` desktop shortcut on your Desktop and in the app menu
+8. Run `colcon build --packages-select app`
+9. (because of `--sudoers`) Install a `NOPASSWD` sudoers rule for the one `systemctl restart start_app_node.service` command so the desktop shortcut never prompts for a password
+
+Drop `--sudoers` if you want to skip the sudoers step and enter your password each launch.
+
+Once it finishes:
+
+- Double-click **JetArm Sort v4** on your desktop, OR
+- Run `~/jetarm_v4/launch_v4.sh` from a terminal
+
+If you want to see every internal step printed live to the terminal as the robot starts up (recommended for the first few runs), launch with debug:
+
+```bash
+JETARM_V4_DEBUG=1 ~/jetarm_v4/launch_v4.sh
+```
+
+### Updating later
+
+Run the one-paste command again — `install.sh` is idempotent. It will refresh the source, re-copy the files, re-run `colcon build`, and keep your existing profile YAMLs.
+
+### Uninstalling
+
+```bash
+rm -rf ~/jetarm_v4 ~/jetarm_v4_profiles ~/jetarm_v4_src \
+       ~/ros2_ws/src/app/app/custom_sortingv4.py \
+       ~/ros2_ws/src/app/app/tune_uiv4.py \
+       ~/ros2_ws/src/app/launch/custom_sorting_nodev4.launch.py \
+       ~/Desktop/jetarm-sort-v4.desktop \
+       ~/.local/share/applications/jetarm-sort-v4.desktop
+sudo rm -f /etc/sudoers.d/jetarm-v4
+# also remove the two console_scripts lines from ~/ros2_ws/src/app/setup.py
+# and re-run: cd ~/ros2_ws && colcon build --packages-select app
+```
+
+---
+
 | File | Purpose |
 |------|---------|
 | `custom_sortingv4.py` | Faster + hot-swappable sorting node (see RESEARCH.md for the design rationale). |
