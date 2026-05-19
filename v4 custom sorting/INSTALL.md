@@ -42,9 +42,16 @@ If you want to see every internal step printed live to the terminal as the robot
 JETARM_V4_DEBUG=1 ~/jetarm_v4/launch_v4.sh
 ```
 
-### Updating later
+### Updating later (no rebuild)
 
-Run the one-paste command again — `install.sh` is idempotent. It will refresh the source, re-copy the files, re-run `colcon build`, and keep your existing profile YAMLs.
+The installer symlinks the v4 sources into `~/ros2_ws/src/app/...` and builds the workspace with `--symlink-install`. That means pure-Python edits don't need a rebuild — pulling fresh code is enough:
+
+```bash
+git -C ~/jetarm_v4_src pull
+~/jetarm_v4/launch_v4.sh    # next launch picks up the new code
+```
+
+Re-run the one-paste installer **only when** something structural changed upstream — new `setup.py` entry point, new launch file, new dependency. Re-running is also always safe (idempotent): existing symlinks and profile YAMLs are preserved.
 
 ### Uninstalling
 
