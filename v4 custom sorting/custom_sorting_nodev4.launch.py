@@ -50,6 +50,10 @@ def launch_setup(context):
     self_calibrate = LaunchConfiguration('startup_self_calibrate', default='true')
     self_calibrate_arg = DeclareLaunchArgument(
         'startup_self_calibrate', default_value=self_calibrate)
+    debug = LaunchConfiguration('debug', default='false')
+    debug_arg = DeclareLaunchArgument(
+        'debug', default_value=debug,
+        description='Verbose stage logging from custom_sortingv4 + tune_uiv4.')
 
     if compiled == 'True':
         sdk_package_path = get_package_share_directory('sdk')
@@ -98,6 +102,7 @@ def launch_setup(context):
             'servo_feedback_enabled': servo_feedback,
             'vision_confirm_pick': vision_confirm,
             'startup_self_calibrate': self_calibrate,
+            'debug': debug,
         }]
     )
 
@@ -120,6 +125,7 @@ def launch_setup(context):
         servo_feedback_arg,
         vision_confirm_arg,
         self_calibrate_arg,
+        debug_arg,
         sdk_launch,
         depth_camera_launch,
         custom_sorting_v4_node,
