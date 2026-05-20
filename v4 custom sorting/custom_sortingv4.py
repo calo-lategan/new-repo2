@@ -513,9 +513,34 @@ class ObjectSortingNodeV4(Node):
                 _stage('init', f'HED caffemodel missing: {model_path}')
             self.image_process = image_process.GetObjectSurface(proto_path, model_path)
             _stage('init', 'HED image_process loaded')
+            # Upstream image_process.GetObjectSurface hard-codes
+            #   net.setPreferableBackend(DNN_BACKEND_CUDA)
+            #   net.setPreferableTarget(DNN_TARGET_CUDA_FP16)
+            # which crashes on this image's OpenCV 4.13 build with
+            #   "preferableBackend != DNN_BACKEND_CUDA || ..."
+            # Try the CUDA path once at startup; if it raises, downgrade
+            # the net to CPU so we don't crash mid-frame later.
+            try:
+                _probe = np.zeros((16, 16, 3), dtype=np.uint8)
+                self.image_process.get_top_surface(_probe)
+                _stage('init', 'HED CUDA backend OK')
+            except cv2.error as e:
+                _stage('init', f'HED CUDA backend rejected by OpenCV - downgrading '
+                               f'to CPU. (msg: {str(e).splitlines()[0]})')
+                try:
+                    self.image_process.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+                    self.image_process.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+                    self.image_process.get_top_surface(_probe)
+                    _stage('init', 'HED CPU backend OK')
+                except Exception as e2:
+                    _stage('init', 'HED CPU backend ALSO failed - get_top_surface() '
+                                   'will be skipped entirely. Color blob detection '
+                                   'falls back to raw frame (works fine on flat bins).',
+                           exc=e2)
+                    self.image_process = None
         except Exception as e:
-            _stage('init', 'HED image_process load FAILED', exc=e)
-            raise
+            _stage('init', 'HED image_process load FAILED - continuing without it', exc=e)
+            self.image_process = None
 
         self.lock = threading.RLock()
         self.fps = fps.FPS()
@@ -1117,7 +1142,22 @@ class ObjectSortingNodeV4(Node):
                                   (int(x2 + roi[2]), int(y2 + roi[0])),
                                   (0, 0, 255), 2)
         # 2) Color blob detection (red/green/blue)
-        roi_img_surface = self.image_process.get_top_surface(roi_img)
+        # HED top-surface preprocessing is optional - if Hiwonder's cv2.dnn
+        # CUDA backend is unhappy on this OpenCV build, we already replaced
+        # self.image_process with None at startup. Fall through to raw frame.
+        if self.image_process is not None:
+            try:
+                roi_img_surface = self.image_process.get_top_surface(roi_img)
+            except cv2.error as e:
+                if not getattr(self, '_hed_runtime_disabled', False):
+                    _stage('detect', 'get_top_surface() raised cv2.error '
+                                     'at runtime - disabling HED for the '
+                                     f'rest of the session. (msg: {str(e).splitlines()[0]})')
+                    self._hed_runtime_disabled = True
+                self.image_process = None
+                roi_img_surface = roi_img
+        else:
+            roi_img_surface = roi_img
         image_lab = cv2.cvtColor(roi_img_surface, cv2.COLOR_BGR2LAB)
         min_area = float(self.p('min_object_area'))
         max_area = float(self.p('max_object_area'))
