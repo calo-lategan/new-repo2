@@ -16,6 +16,7 @@
 import os
 import sys
 import argparse
+import subprocess
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -163,7 +164,7 @@ class TunerUI:
         self.client = client
         self.root = tk.Tk()
         self.root.title('JetArm v4 - live tuner')
-        self.root.geometry('700x980')
+        self.root.geometry('760x1100')
         self._building = True
         self._build()
         self._building = False
@@ -210,6 +211,50 @@ class TunerUI:
                        'stopped, then START. SAVE AS DEFAULT writes current '
                        'settings to default.yaml so they load on next boot.'
                   ).pack(anchor='w', padx=8, pady=(0, 4))
+
+        # ---- Camera-view controls ----
+        cam = ttk.LabelFrame(self.root, text='Camera view')
+        cam.pack(fill='x', padx=8, pady=(0, 4))
+        self.cam_status_var = tk.StringVar(value='closed')
+        cam_status_row = ttk.Frame(cam); cam_status_row.pack(fill='x', padx=6, pady=4)
+        ttk.Label(cam_status_row, text='Status:').pack(side='left')
+        self.cam_status_label = tk.Label(cam_status_row,
+                                         textvariable=self.cam_status_var,
+                                         fg='white', bg='#666666',
+                                         font=('TkDefaultFont', 10, 'bold'),
+                                         padx=8, pady=2)
+        self.cam_status_label.pack(side='left', padx=8)
+        ttk.Label(cam_status_row, text='Topic:').pack(side='left', padx=(12, 4))
+        self.cam_topic_entry = ttk.Entry(cam_status_row, width=42)
+        self.cam_topic_entry.insert(0, '/custom_sortingv4/image_result')
+        self.cam_topic_entry.pack(side='left', fill='x', expand=True)
+
+        cam_btn_row = ttk.Frame(cam); cam_btn_row.pack(fill='x', padx=6, pady=4)
+        tk.Button(cam_btn_row, text='Open rqt_image_view', bg='#2e8b57',
+                  fg='white', font=('TkDefaultFont', 10, 'bold'),
+                  width=18, height=2,
+                  command=self._on_open_rqt).pack(side='left', padx=4)
+        tk.Button(cam_btn_row, text='Open image_view', bg='#3366aa',
+                  fg='white', font=('TkDefaultFont', 10, 'bold'),
+                  width=16, height=2,
+                  command=self._on_open_image_view).pack(side='left', padx=4)
+        tk.Button(cam_btn_row, text='Open browser', bg='#774488',
+                  fg='white', font=('TkDefaultFont', 10, 'bold'),
+                  width=14, height=2,
+                  command=self._on_open_browser).pack(side='left', padx=4)
+        tk.Button(cam_btn_row, text='Close viewer', bg='#aa3333',
+                  fg='white', font=('TkDefaultFont', 10, 'bold'),
+                  width=14, height=2,
+                  command=self._on_close_viewer).pack(side='left', padx=4)
+        ttk.Label(cam, foreground='#555',
+                  text='Each button replaces the currently open viewer with a '
+                       'new one. Browser uses Hiwonder web_video_server, IP '
+                       'detected via hostname -I.'
+                  ).pack(anchor='w', padx=8, pady=(0, 4))
+
+        # Track the currently spawned viewer subprocess (if any). Browser
+        # opens are fire-and-forget (we don't try to close browser tabs).
+        self._viewer_proc = None
 
         # ---- Tabs ----
         notebook = ttk.Notebook(self.root)
@@ -518,14 +563,144 @@ class TunerUI:
         for k, v in mapping.items():
             self.client.set_value(k, v)
 
+    # ---- Camera viewer process management -----------------------------
+
+    def _cam_topic(self):
+        t = self.cam_topic_entry.get().strip() or '/custom_sortingv4/image_result'
+        if not t.startswith('/'):
+            t = '/' + t
+        return t
+
+    def _set_cam_status(self, text, color):
+        self.cam_status_var.set(text)
+        self.cam_status_label.configure(bg=color)
+
+    def _close_viewer_proc(self):
+        """Terminate the currently tracked viewer subprocess if alive.
+        Best-effort - we send SIGTERM then SIGKILL if it doesn't die."""
+        import signal
+        proc = self._viewer_proc
+        self._viewer_proc = None
+        if proc is None:
+            return
+        if proc.poll() is not None:
+            return  # already dead
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try: proc.wait(timeout=1.0)
+                except Exception: pass
+        except Exception:
+            pass
+
+    def _spawn_viewer(self, cmd, label):
+        def go():
+            self._set_cam_status('opening...', '#3366aa')
+            self._close_viewer_proc()
+            try:
+                self._viewer_proc = subprocess.Popen(
+                    cmd, stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    start_new_session=True)
+                self._set_cam_status(f'{label} (pid={self._viewer_proc.pid})',
+                                     '#2e8b57')
+            except FileNotFoundError:
+                self._set_cam_status(f'{cmd[0]} not installed', '#aa3333')
+                messagebox.showerror(
+                    'Viewer not found',
+                    f"Could not start '{cmd[0]}'.\n"
+                    f"Install it or use a different viewer.")
+            except Exception as e:
+                self._set_cam_status('spawn failed', '#aa3333')
+                messagebox.showerror('Viewer error', f'{type(e).__name__}: {e}')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_open_rqt(self):
+        self._spawn_viewer(['rqt_image_view', self._cam_topic()], 'rqt_image_view')
+
+    def _on_open_image_view(self):
+        self._spawn_viewer(
+            ['ros2', 'run', 'image_view', 'image_view',
+             '--ros-args', '-r', f'image:={self._cam_topic()}'],
+            'image_view')
+
+    def _on_open_browser(self):
+        # Browser is a separate path: we don't track a subprocess to "close"
+        # (the user closes the tab). Still kill any GUI viewer that was open
+        # so we genuinely "swap".
+        def go():
+            self._close_viewer_proc()
+            self._set_cam_status('opening browser...', '#3366aa')
+            try:
+                ip = self._detect_ip()
+                url = f'http://{ip}:8080/stream?topic={self._cam_topic()}'
+                opener = self._pick_browser()
+                if opener is None:
+                    messagebox.showinfo(
+                        'No browser found',
+                        f"Open this URL manually:\n\n{url}")
+                    self._set_cam_status(f'open manually: {url}', '#aa6633')
+                    return
+                subprocess.Popen([opener, url],
+                                 stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+                self._set_cam_status(f'browser @ {ip}:8080', '#2e8b57')
+            except Exception as e:
+                self._set_cam_status('browser failed', '#aa3333')
+                messagebox.showerror('Browser error', f'{type(e).__name__}: {e}')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_close_viewer(self):
+        def go():
+            self._close_viewer_proc()
+            self._set_cam_status('closed', '#666666')
+        threading.Thread(target=go, daemon=True).start()
+
+    @staticmethod
+    def _detect_ip():
+        try:
+            out = subprocess.check_output(['hostname', '-I'], timeout=2).decode()
+            ip = out.strip().split()[0] if out.strip() else ''
+            if ip and not ip.startswith('127.'):
+                return ip
+        except Exception:
+            pass
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(1.0)
+            s.connect(('1.1.1.1', 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return 'localhost'
+
+    @staticmethod
+    def _pick_browser():
+        import shutil
+        for b in ('xdg-open', 'sensible-browser', 'firefox',
+                  'chromium', 'chromium-browser', 'google-chrome'):
+            if shutil.which(b):
+                return b
+        return None
+
     def run(self):
         self.root.mainloop()
 
 
 def main():
+    # rclpy / ros2 launch always pass `--ros-args ...` to every Node
+    # executable. argparse rejects unknown args by default, which crashes
+    # the UI process on startup. Use parse_known_args and discard the rest.
     ap = argparse.ArgumentParser()
     ap.add_argument('--node-name', default='custom_sortingv4')
-    args = ap.parse_args()
+    args, _ros_args = ap.parse_known_args()
     rclpy.init()
     client = TunerClient(args.node_name)
     if not client.wait_ready(timeout=10.0):
