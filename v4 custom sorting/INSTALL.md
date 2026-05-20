@@ -216,6 +216,32 @@ ros2 service call /custom_sortingv4/load_profile \
 ros2 service call /custom_sortingv4/save_as_default std_srvs/srv/Trigger
 ```
 
+## Live camera view (browser)
+
+There is **no cv2 popup window** in v4 — the previous one would hang because
+the HighGUI Qt event loop can't be pumped from a background thread on the
+Jetson's containerized desktop. Instead, the annotated frame (boxes,
+lock-on lines, ROI overlay) is published to a ROS image topic that
+Hiwonder's `web_video_server` (already running on the image) serves over
+HTTP.
+
+Open in any browser on the same network (or on the Jetson itself):
+
+```
+http://<jetson-ip>:8080/stream?topic=/custom_sortingv4/image_result
+```
+
+To watch the raw, unannotated camera feed instead:
+
+```
+http://<jetson-ip>:8080/stream?topic=/depth_cam/rgb/image_raw
+```
+
+Find the Jetson's IP with `hostname -I` (first column).
+
+The `display:=true` launch argument is kept for backwards compatibility
+but is now a no-op.
+
 ## Debugging
 
 Every critical stage of v4 prints a tagged line to stderr in `[v4][stage] message` format. To see them, just watch the terminal that the launcher opened — they're always-on. To get the *verbose* stream (per-frame timing, periodic stats, every kinematics IO), run with debug mode:
