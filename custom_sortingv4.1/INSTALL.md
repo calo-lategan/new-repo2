@@ -58,7 +58,7 @@ The tuner UI has a `Camera view` row with four big buttons. **A viewer auto-open
 - **Open browser** (purple) — opens `http://<jetson-ip>:8080/stream?topic=/custom_sortingv4_1/image_result&th=100`. IP detected via `hostname -I`. `web_video_server` is now started by our launch on port 8080 (it used to come from the factory service we disable), so this works standalone.
 - **Close viewer** (red) — kills the currently tracked viewer subprocess.
 
-The publisher uses the `sensor_data` QoS profile (best-effort, depth 5), which is what every standard ROS 2 image consumer subscribes with. Without that, the publisher's depth-1 reliable queue overwrote frames before the viewer drained them and the canvas stayed blank.
+The publisher uses default RELIABLE QoS with depth=10 — that matches what `image_view`, `rqt_image_view`, and `web_video_server` request by default in humble. (The earlier round briefly tried `sensor_data` (BEST_EFFORT) which turned out to be incompatible — those consumers demand RELIABLE.)
 
 ### Disable auto-popup on launch
 
@@ -104,9 +104,9 @@ systemctl is-enabled  start_app_node.service           # expect "disabled"
 ss -tlnp | grep 8080
 curl -sI http://localhost:8080/ | head -1              # expect "HTTP/1.1 200"
 
-# 7. Confirm sensor_data QoS on the publisher
+# 7. Confirm RELIABLE QoS on the publisher (matches image_view / web_video_server)
 ros2 topic info /custom_sortingv4_1/image_result --verbose
-#    Look for: Reliability: BEST_EFFORT (sensor_data)
+#    Look for: Reliability: RELIABLE, History (Depth): 10
 
 # 8. If rqt window is blank/black, dump its log
 cat /tmp/jetarm_v4_1_rqt.log

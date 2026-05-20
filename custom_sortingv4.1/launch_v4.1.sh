@@ -211,12 +211,42 @@ if ! source_setup "${WS_DIR}/install/setup"; then
     exit 1
 fi
 
+# Source third-party ROS 2 workspaces. The orbbec_camera plugin lives in
+# a separate workspace; the Hiwonder factory service was previously
+# sourcing it implicitly via its bringup chain. Since we now stop+disable
+# that service every launch, we must source the third-party workspaces
+# ourselves - otherwise the depth_cam component container fails with
+# "Could not find requested resource in ament index" and cam_fps stays
+# at 0 forever.
+for ws_setup in \
+    "${ORBBEC_WS:-/home/ubuntu/third_party_ros2/orbbec_ws}/install/setup" \
+    "${THIRD_PARTY_ROS_DIR:-/home/ubuntu/third_party_ros2}/setup" \
+; do
+    if [ -f "${ws_setup}.bash" ] || [ -f "${ws_setup}.zsh" ]; then
+        if source_setup "$ws_setup"; then
+            :  # source_setup already logged the [env] line
+        fi
+    fi
+done
+
 # Hiwonder env vars - the start_app_node and our v4 node both expect these.
 export CAMERA_TYPE="${CAMERA_TYPE:-GEMINI}"
 export CHASSIS_TYPE="${CHASSIS_TYPE:-Slide_Rails}"
 export need_compile="${need_compile:-False}"
 export JETARM_V4_PROFILES="$PROFILES_DIR"
 stage env "CAMERA_TYPE=$CAMERA_TYPE CHASSIS_TYPE=$CHASSIS_TYPE need_compile=$need_compile"
+# Print whether orbbec_camera is now reachable via ament index. If
+# missing here, depth_cam load will fail with the "ament index" error.
+if command -v ros2 >/dev/null 2>&1; then
+    if ros2 pkg list 2>/dev/null | grep -q '^orbbec_camera$'; then
+        stage env "orbbec_camera: OK on ament index"
+    else
+        err env "orbbec_camera: MISSING on ament index - depth_cam will fail to load"
+        err env "  source the orbbec workspace explicitly:"
+        err env "    source /home/ubuntu/third_party_ros2/orbbec_ws/install/setup.bash"
+        err env "  or set ORBBEC_WS=/path/to/orbbec_ws and re-run the launcher"
+    fi
+fi
 
 # Sanity: ros2 must be callable now.
 if ! command -v ros2 >/dev/null 2>&1; then

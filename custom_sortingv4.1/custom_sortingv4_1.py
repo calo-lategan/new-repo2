@@ -93,7 +93,6 @@ def _set_debug(value):
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
 from rcl_interfaces.msg import SetParametersResult, ParameterDescriptor, FloatingPointRange, IntegerRange
 from rcl_interfaces.srv import GetParameters, ListParameters, SetParameters
 from rcl_interfaces.msg import Parameter as ParameterMsg, ParameterValue, ParameterType
@@ -586,13 +585,13 @@ class ObjectSortingNodeV4(Node):
 
         # ---- Pubs / subs ----
         self.joints_pub = self.create_publisher(ServosPosition, 'servo_controller', 1)
-        # sensor_data QoS (BEST_EFFORT, KEEP_LAST, depth 5) - matches what
-        # rqt_image_view, image_view, and web_video_server subscribe with
-        # by default in ROS 2 humble. Using the default profile (RELIABLE,
-        # depth 1) at 55+ fps causes pub-side queue overwrite before the
-        # subscriber drains, producing the "blank viewer" symptom.
+        # Default reliability (RELIABLE), depth 10. ros2 humble's
+        # image_view and web_video_server both subscribe with RELIABLE
+        # by default - matching them is what makes them deliver frames.
+        # depth=10 (was 1) gives the slower consumers room to drain
+        # without the pub queue overwriting at high fps.
         self.result_publisher = self.create_publisher(
-            Image, '/custom_sortingv4_1/image_result', qos_profile_sensor_data)
+            Image, '/custom_sortingv4_1/image_result', 10)
 
         # ---- Services (lifecycle + control) ----
         self.create_service(Trigger, '~/enter', self.enter_srv_callback,
@@ -1595,7 +1594,7 @@ class ObjectSortingNodeV4(Node):
                 _stage('publish', f'first frame published: shape={bgr.shape} '
                                   f'step={msg.step} '
                                   f'contig={bool(bgr.flags["C_CONTIGUOUS"])} '
-                                  f'qos=sensor_data '
+                                  f'qos=reliable/depth10 '
                                   f'topic=/custom_sortingv4_1/image_result')
         except Exception as e:
             _stage('camera', 'cv_bridge output publish failed', exc=e)

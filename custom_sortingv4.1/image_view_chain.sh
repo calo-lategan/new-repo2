@@ -76,18 +76,28 @@ open_browser() {
     setsid "$cmd" "$url" </dev/null >/dev/null 2>&1 &
 }
 
-# Quick probe that web_video_server is actually serving the topic. We don't
-# block on this - the browser will surface its own error if it isn't.
+# Quick probe that web_video_server is actually serving the topic. We
+# prefer `ss` / `netstat` (port listening check) over `curl` because
+# web_video_server's root path may return non-2xx and -f would falsely
+# report "not responding". v4.1 starts web_video_server from our launch
+# file directly - no factory service required.
 probe_web_server() {
     local ip; ip=$(detect_ip)
-    if command -v curl >/dev/null 2>&1; then
-        if curl -fsS -m 2 "http://${ip}:${WEB_PORT}/" >/dev/null 2>&1; then
-            log "web_video_server reachable on ${ip}:${WEB_PORT}"
-        else
-            err "warning: web_video_server not responding on ${ip}:${WEB_PORT} - "
-            err "          browser fallback may show 'connection refused'."
-            err "          check:  sudo systemctl status start_app_node.service"
-        fi
+    local listening=0
+    if command -v ss >/dev/null 2>&1; then
+        ss -tln 2>/dev/null | grep -q ":${WEB_PORT}\b" && listening=1
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -tln 2>/dev/null | grep -q ":${WEB_PORT}\b" && listening=1
+    elif command -v curl >/dev/null 2>&1; then
+        # Last-resort HTTP probe. Drop -f; any HTTP response means it's up.
+        curl -sS -m 2 -o /dev/null "http://${ip}:${WEB_PORT}/" 2>/dev/null && listening=1
+    fi
+    if [ "$listening" = "1" ]; then
+        log "web_video_server listening on :${WEB_PORT}"
+    else
+        err "warning: nothing listening on :${WEB_PORT} - browser will get 'connection refused'."
+        err "          web_video_server is supposed to start from our launch file;"
+        err "          check:  ros2 node list | grep web_video_server"
     fi
 }
 
