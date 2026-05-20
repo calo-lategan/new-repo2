@@ -259,6 +259,26 @@ IMAGE_VIEW_BROWSER_DISABLE=1 ~/jetarm_v4/launch_v4.sh
 
 The `display:=true` launch argument is preserved but is now a no-op.
 
+## Camera is "always on" — sorting is what you toggle
+
+The v4 node subscribes to `/depth_cam/rgb/image_raw` the moment it starts, **not** when you press START. So:
+
+- The live viewer (`rqt_image_view` / browser) shows the camera feed as soon as the launcher reaches the node — even with sorting stopped.
+- A 15 Hz republisher pushes the latest raw frame to `~/image_result` whenever sorting is off, so the viewer always has something to display.
+- YOLO inference is gated behind `enable_sorting` — when stopped, no frames go to the model and the GPU is idle.
+- Press **START SORTING** in the tuner → image_callback starts submitting frames to YOLO → annotated frames replace the raw feed in the viewer → picks happen.
+- Press **STOP** → no more inference, no more picks, but the camera feed stays visible.
+
+### Service interaction
+
+The launcher uses `systemctl start` (not `restart`) so an already-active `start_app_node.service` is never disturbed. The duplicate `depth_camera_launch` that v4 used to include was removed — Hiwonder's bringup chain is the sole owner of the camera node, and v4 just subscribes to its topic. No more `Could not find requested resource in ament index` errors from a duplicate `/depth_cam/camera_container`.
+
+If the service is in a bad state and you really do need a kill-and-restart:
+
+```bash
+FORCE_SERVICE_RESTART=1 ~/jetarm_v4/launch_v4.sh
+```
+
 ## Debugging
 
 Every critical stage of v4 prints a tagged line to stderr in `[v4][stage] message` format. To see them, just watch the terminal that the launcher opened — they're always-on. To get the *verbose* stream (per-frame timing, periodic stats, every kinematics IO), run with debug mode:

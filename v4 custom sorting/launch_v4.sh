@@ -12,7 +12,10 @@
 #   2. cd ~/ros2_ws
 #   3. source /opt/ros/humble/setup.zsh   (or .bash on bash)
 #   4. source install/setup.zsh           (or .bash)
-#   5. sudo systemctl restart start_app_node.service
+#   5. sudo systemctl start  start_app_node.service     # idempotent;
+#                                                       # only acts if inactive.
+#                                                       # FORCE_SERVICE_RESTART=1
+#                                                       # for the old restart.
 #       - This is what BOTH brings the camera up AND reclaims it from
 #         anything that's stolen it. Without it: camera dead. With it:
 #         it kicks the bringup.launch.py chain which (after a built-in
@@ -28,7 +31,12 @@
 # see exactly which step failed. Terminal stays open on error.
 #
 # Env overrides:
-#   SKIP_SERVICE_RESTART=1     skip step 5 (camera must already be up)
+#   FORCE_SERVICE_RESTART=1    kill+restart the service (old behavior).
+#                              Use only when the service is in a bad state -
+#                              it disturbs a running camera.
+#   SKIP_SERVICE_RESTART=1     don't even check service state. Camera must
+#                              already be publishing or the camera-readiness
+#                              check will fail.
 #   WS_DIR=/path/to/ws         override workspace (default $HOME/ros2_ws)
 #   USE_ZSH=1                  re-exec under zsh and source setup.zsh
 #                              (requires zsh installed; default uses bash)
@@ -48,7 +56,13 @@ set -o pipefail
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 WS_DIR="${WS_DIR:-$HOME/ros2_ws}"
 SERVICE_NAME="${SERVICE_NAME:-start_app_node.service}"
+# Default: only `systemctl start` (idempotent, no-op if already active).
+# Old SKIP_SERVICE_RESTART=1 still works but is redundant now - we never
+# RESTART by default; we only start if inactive. Set FORCE_SERVICE_RESTART=1
+# when you want the old kill-and-restart behavior (e.g. recovering from a
+# stuck service).
 SKIP_SERVICE_RESTART="${SKIP_SERVICE_RESTART:-0}"
+FORCE_SERVICE_RESTART="${FORCE_SERVICE_RESTART:-0}"
 SERVICE_READY_TIMEOUT="${SERVICE_READY_TIMEOUT:-30}"
 CONTROLLER_TOPIC_TIMEOUT="${CONTROLLER_TOPIC_TIMEOUT:-25}"
 CAMERA_READY_TIMEOUT="${CAMERA_READY_TIMEOUT:-45}"
@@ -188,15 +202,22 @@ fi
 # STEP 5: restart start_app_node.service.
 # This is non-negotiable for the camera:
 #   - Without the service running, /depth_cam/rgb/image_raw is gone.
-#   - If another process stole the camera (rare but happens after crashes
-#     or after running a non-bringup launch that also touches depth_cam),
-#     restarting the service reclaims it via Hiwonder's bringup.launch.py
-#     which kills + relaunches the depth camera node alongside everything
-#     else. NB: bringup has an 18s TimerAction before depth_cam so the
-#     camera does not actually appear immediately - see step 7.
+#   - HOWEVER: `systemctl restart` while the service is healthy is itself
+#     disruptive (it kills the running depth_cam node and the 18s
+#     TimerAction has to play out again). So we default to `systemctl
+#     start` which is idempotent - it does NOTHING if the service is
+#     already active. That way an active, working camera is never
+#     disturbed.
+#   - FORCE_SERVICE_RESTART=1 brings back the kill-and-restart behavior
+#     (use when the service is in a bad state).
+#   - SKIP_SERVICE_RESTART=1 honored for back-compat: skip the whole
+#     thing. If the service is inactive anyway you'll get a loud warning
+#     and the launch will fail-fast at the camera-readiness check.
 # -----------------------------------------------------------------------------
-if [ "$SKIP_SERVICE_RESTART" != "1" ]; then
-    stage service "restarting $SERVICE_NAME (sudo)..."
+if [ "$SKIP_SERVICE_RESTART" = "1" ]; then
+    stage service "SKIP_SERVICE_RESTART=1 - leaving $SERVICE_NAME alone"
+elif [ "$FORCE_SERVICE_RESTART" = "1" ]; then
+    stage service "FORCE_SERVICE_RESTART=1 - restarting $SERVICE_NAME (sudo)..."
     if ! sudo systemctl restart "$SERVICE_NAME"; then
         err service "failed to restart $SERVICE_NAME"
         err service "sudoers tip:"
@@ -206,7 +227,20 @@ if [ "$SKIP_SERVICE_RESTART" != "1" ]; then
     fi
     ok service "restart issued"
 else
-    stage service "SKIP_SERVICE_RESTART=1 - leaving $SERVICE_NAME alone"
+    # Default: idempotent start - only acts when service is inactive.
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        ok service "$SERVICE_NAME already active - not disturbing it"
+    else
+        stage service "$SERVICE_NAME not active - starting (sudo)..."
+        if ! sudo systemctl start "$SERVICE_NAME"; then
+            err service "failed to start $SERVICE_NAME"
+            err service "sudoers tip:"
+            err service "  <user> ALL=(ALL) NOPASSWD: /bin/systemctl restart $SERVICE_NAME, /bin/systemctl start $SERVICE_NAME"
+            read -r -p "Press Enter to close..."
+            exit 1
+        fi
+        ok service "start issued"
+    fi
 fi
 
 # -----------------------------------------------------------------------------
