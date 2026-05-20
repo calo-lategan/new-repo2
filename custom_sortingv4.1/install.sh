@@ -202,19 +202,26 @@ install -m 755 "$V4/re-enable-factory.sh"  "$LAUNCHER_DIR/re-enable-factory.sh"
 # container image. Try to install rqt_image_view via apt (it pulls in
 # image_view as a dep). If apt isn't available or it fails we just
 # warn and let the chain script's browser fallback handle it.
-if ! command -v rqt_image_view >/dev/null 2>&1; then
-    stage "rqt_image_view not found - attempting apt install (sudo)"
+if ! command -v rqt_image_view >/dev/null 2>&1 \
+   || ! ros2 pkg list 2>/dev/null | grep -q '^web_video_server$'; then
+    stage "rqt_image_view / web_video_server missing - attempting apt install (sudo)"
     if command -v apt-get >/dev/null 2>&1; then
         if sudo -n true 2>/dev/null; then
-            # passwordless sudo available
+            # passwordless sudo available. web_video_server is now started
+            # by our launch (since we disabled the factory service), so we
+            # need it locally available.
             sudo apt-get install -y --no-install-recommends \
                 ros-${ROS_DISTRO:-humble}-rqt-image-view \
                 ros-${ROS_DISTRO:-humble}-image-view \
-                >/dev/null 2>&1 && ok "image viewers installed" || \
+                ros-${ROS_DISTRO:-humble}-web-video-server \
+                >/dev/null 2>&1 && ok "viewers + web_video_server installed" || \
                 stage "  apt install failed - browser fallback will be used"
         else
             stage "  sudo requires password - skipping. To install manually:"
-            stage "    sudo apt install -y ros-${ROS_DISTRO:-humble}-rqt-image-view ros-${ROS_DISTRO:-humble}-image-view"
+            stage "    sudo apt install -y \\"
+            stage "        ros-${ROS_DISTRO:-humble}-rqt-image-view \\"
+            stage "        ros-${ROS_DISTRO:-humble}-image-view \\"
+            stage "        ros-${ROS_DISTRO:-humble}-web-video-server"
         fi
     else
         stage "  no apt-get on PATH - skipping. Browser fallback will be used."
