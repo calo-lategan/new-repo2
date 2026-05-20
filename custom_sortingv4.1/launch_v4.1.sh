@@ -234,18 +234,51 @@ export CAMERA_TYPE="${CAMERA_TYPE:-GEMINI}"
 export CHASSIS_TYPE="${CHASSIS_TYPE:-Slide_Rails}"
 export need_compile="${need_compile:-False}"
 export JETARM_V4_PROFILES="$PROFILES_DIR"
+
+# ROS_DOMAIN_ID pin. ROS 2 DDS partitions topics by domain - if the
+# launcher process is in domain 0 (desktop shortcut) and an interactive
+# terminal has ROS_DOMAIN_ID=5 in zshrc, they can't see each other's
+# topics. We pin to a known value and print it loudly so anyone running
+# probes in another terminal can match it.
+#
+# Override with:  ROS_DOMAIN_ID=5 ~/jetarm_v4_1/launch_v4.1.sh
+# Or persistently:  echo "ROS_DOMAIN_ID=5" > ~/.jetarm_v4_1.env  (sourced below)
+if [ -f "$HOME/.jetarm_v4_1.env" ]; then
+    # shellcheck disable=SC1091
+    . "$HOME/.jetarm_v4_1.env"
+fi
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
+
 stage env "CAMERA_TYPE=$CAMERA_TYPE CHASSIS_TYPE=$CHASSIS_TYPE need_compile=$need_compile"
-# Print whether orbbec_camera is now reachable via ament index. If
-# missing here, depth_cam load will fail with the "ament index" error.
-if command -v ros2 >/dev/null 2>&1; then
-    if ros2 pkg list 2>/dev/null | grep -q '^orbbec_camera$'; then
-        stage env "orbbec_camera: OK on ament index"
-    else
-        err env "orbbec_camera: MISSING on ament index - depth_cam will fail to load"
-        err env "  source the orbbec workspace explicitly:"
-        err env "    source /home/ubuntu/third_party_ros2/orbbec_ws/install/setup.bash"
-        err env "  or set ORBBEC_WS=/path/to/orbbec_ws and re-run the launcher"
-    fi
+stage env "ROS_DOMAIN_ID=$ROS_DOMAIN_ID    <-- match this in other terminals!"
+stage env "  to probe from another shell:"
+stage env "    export ROS_DOMAIN_ID=$ROS_DOMAIN_ID"
+stage env "    source /opt/ros/humble/setup.bash"
+stage env "    source ~/ros2_ws/install/setup.bash"
+
+# Check whether orbbec_camera will be loadable by the depth_cam component
+# container. `ros2 pkg list` is unreliable here: it only sees packages
+# that registered themselves to the ament_index/packages resource, which
+# the third-party orbbec_ws doesn't always do. The component container
+# uses ament_index_cpp's `get_resource_lists` for "rclcpp_components",
+# which is what we should actually check. Look for the resource file
+# directly - if it exists, the container will find the plugin.
+ORBBEC_RES="$( ls -1 /home/ubuntu/third_party_ros2/orbbec_ws/install/orbbec_camera/share/ament_index/resource_index/rclcpp_components/orbbec_camera 2>/dev/null \
+              || find "${ORBBEC_WS:-/home/ubuntu/third_party_ros2/orbbec_ws}/install" \
+                      -path '*/ament_index/resource_index/rclcpp_components/orbbec_camera' \
+                      -print -quit 2>/dev/null )"
+if [ -n "$ORBBEC_RES" ]; then
+    stage env "orbbec_camera: rclcpp_components resource OK ($ORBBEC_RES)"
+elif [ -f /home/ubuntu/third_party_ros2/orbbec_ws/install/orbbec_camera/lib/liborbbec_camera.so ]; then
+    # Fall back to checking the library file - the resource file may live
+    # under a different prefix.
+    stage env "orbbec_camera: library file present (resource lookup deferred to component container)"
+else
+    err env "orbbec_camera: cannot find library or resource file"
+    err env "  expected one of:"
+    err env "    /home/ubuntu/third_party_ros2/orbbec_ws/install/orbbec_camera/lib/liborbbec_camera.so"
+    err env "    \$ORBBEC_WS/install/orbbec_camera/lib/liborbbec_camera.so"
+    err env "  set ORBBEC_WS=/path/to/orbbec_ws to override"
 fi
 
 # Sanity: ros2 must be callable now.

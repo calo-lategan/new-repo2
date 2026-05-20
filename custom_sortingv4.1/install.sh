@@ -193,9 +193,10 @@ done
 
 stage "installing launcher in $LAUNCHER_DIR"
 mkdir -p "$LAUNCHER_DIR"
-install -m 755 "$V4/launch_v4.1.sh"        "$LAUNCHER_DIR/launch_v4.1.sh"
-install -m 755 "$V4/image_view_chain.sh"   "$LAUNCHER_DIR/image_view_chain.sh"
-install -m 755 "$V4/re-enable-factory.sh"  "$LAUNCHER_DIR/re-enable-factory.sh"
+install -m 755 "$V4/launch_v4.1.sh"         "$LAUNCHER_DIR/launch_v4.1.sh"
+install -m 755 "$V4/image_view_chain.sh"    "$LAUNCHER_DIR/image_view_chain.sh"
+install -m 755 "$V4/re-enable-factory.sh"   "$LAUNCHER_DIR/re-enable-factory.sh"
+install -m 755 "$V4/match_launcher_env.sh"  "$LAUNCHER_DIR/match_launcher_env.sh"
 
 # --- 6b. Best-effort install of an image viewer --------------------------
 # image_view / rqt_image_view aren't always preinstalled on the Hiwonder

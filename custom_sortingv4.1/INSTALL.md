@@ -78,9 +78,30 @@ The publisher uses default RELIABLE QoS with depth=10 — that matches what `ima
 
 ---
 
-## Debugging
+## Debugging from a second terminal — match the launcher's ROS env
 
-If a viewer still shows a blank window, the live frames may not be flowing. Diagnose:
+**The single most common reason for "blank viewer" / "topic not published yet" is `ROS_DOMAIN_ID` mismatch.** The launcher prints its domain in the banner:
+
+```
+[env] ROS_DOMAIN_ID=0    <-- match this in other terminals!
+```
+
+To probe the running stack from a second terminal, source the helper that ships with v4.1:
+
+```bash
+source ~/jetarm_v4_1/match_launcher_env.sh
+```
+
+That sets `ROS_DOMAIN_ID` to whatever the launcher used, sources ROS humble + the workspace + orbbec_ws, and prints the visible nodes so you can confirm discovery worked.
+
+Override the domain by either:
+
+- One-shot: `ROS_DOMAIN_ID=5 ~/jetarm_v4_1/launch_v4.1.sh` (then set the same `ROS_DOMAIN_ID=5` before sourcing `match_launcher_env.sh`)
+- Persistent: put `ROS_DOMAIN_ID=5` in `~/.jetarm_v4_1.env` — both the launcher and `match_launcher_env.sh` source it.
+
+## Debugging frame flow
+
+If a viewer still shows a blank window AFTER matching the domain, the live frames may not be flowing. Diagnose:
 
 ```bash
 # 1. Is the topic actually publishing?
