@@ -193,7 +193,8 @@ done
 
 stage "installing launcher in $LAUNCHER_DIR"
 mkdir -p "$LAUNCHER_DIR"
-install -m 755 "$V4/launch_v4.sh" "$LAUNCHER_DIR/launch_v4.sh"
+install -m 755 "$V4/launch_v4.sh"          "$LAUNCHER_DIR/launch_v4.sh"
+install -m 755 "$V4/image_view_chain.sh"   "$LAUNCHER_DIR/image_view_chain.sh"
 
 # --- 7. Desktop shortcut -------------------------------------------------
 

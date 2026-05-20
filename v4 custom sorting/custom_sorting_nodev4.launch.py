@@ -1,5 +1,4 @@
 import os
-import shutil
 from launch_ros.actions import Node
 from launch import LaunchDescription, LaunchService
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -130,27 +129,26 @@ def launch_setup(context):
         condition=IfCondition(auto_tune_ui),
     )
 
-    # --- Auto-opened desktop image viewer ---------------------------------
-    # Pick the best available viewer command at launch-graph build time.
-    # Order of preference:
-    #   1. rqt_image_view <topic>          (Qt window, robust, can switch topic in UI)
-    #   2. ros2 run image_view image_view --ros-args -r image:=<topic>
-    # If neither is on PATH, the user can still view via web_video_server.
+    # --- Auto-opened desktop image viewer (with browser fallback) ---------
+    # Delegate to the image_view_chain.sh wrapper which:
+    #   1. Tries rqt_image_view <topic>
+    #   2. Falls back to `ros2 run image_view image_view`
+    #   3. When the GUI viewer exits (closed by user OR failed to spawn),
+    #      auto-opens the system browser at
+    #         http://<jetson-ip>:8080/stream?topic=<topic>
+    #      using hostname -I to figure out the IP.
+    # That way the user never needs to look up an IP, AND if they close
+    # the GUI window they still have a working view in the browser.
     image_view_topic_value = image_view_topic.perform(context).strip()
-    viewer_cmd = None
-    if shutil.which('rqt_image_view') is not None:
-        viewer_cmd = ['rqt_image_view', image_view_topic_value]
-    elif shutil.which('ros2') is not None:
-        # Fallback - the C++ image_view via ros2 run
-        viewer_cmd = ['ros2', 'run', 'image_view', 'image_view',
-                      '--ros-args', '-r', f'image:={image_view_topic_value}']
-    else:
-        print('[launch] WARNING: no image viewer (rqt_image_view / image_view) '
-              'found on PATH - skipping auto-opened image viewer. View at '
-              f'http://<jetson-ip>:8080/stream?topic={image_view_topic_value}')
+    chain_script = os.path.expanduser('~/jetarm_v4/image_view_chain.sh')
+    chain_present = os.path.exists(chain_script)
+    if not chain_present:
+        print(f'[launch] WARNING: {chain_script} not present - '
+              f'image viewer auto-open disabled. Re-run install.sh or '
+              f'see INSTALL.md.')
 
     image_viewer_action = None
-    if viewer_cmd is not None:
+    if chain_present:
         # Delay 6s so the node has booted, the YOLO engine has warmed up,
         # and the ~/image_result topic is being published. Otherwise the
         # viewer opens a window that just says "no image".
@@ -158,7 +156,7 @@ def launch_setup(context):
             period=6.0,
             actions=[
                 ExecuteProcess(
-                    cmd=viewer_cmd,
+                    cmd=[chain_script, image_view_topic_value],
                     output='screen',
                     condition=IfCondition(open_image_view),
                 )
