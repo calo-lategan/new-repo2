@@ -815,8 +815,15 @@ class ObjectSortingNodeV4(Node):
             extristric = np.array(config['extristric'])
             corners = np.array(config['corners']).reshape(-1, 3)
             self.white_area_center = np.array(config['white_area_pose_world'])
+            _stage('roi', f'  yaml loaded: extristric.shape={extristric.shape} '
+                          f'corners.shape={corners.shape} '
+                          f'white_area_center.shape={self.white_area_center.shape}')
         except FileNotFoundError as e:
             _stage('roi', f'transform.yaml NOT FOUND - have you run calibration?', exc=e)
+            raise
+        except KeyError as e:
+            _stage('roi', f'transform.yaml missing required key {e!s} - '
+                          f'rerun calibration_node.launch.py', exc=e)
             raise
         except Exception as e:
             _stage('roi', 'transform.yaml load failed', exc=e)
@@ -827,24 +834,51 @@ class ObjectSortingNodeV4(Node):
                 break
             time.sleep(0.05); waited += 0.05
         else:
+            # PREVIOUSLY this was a silent `return` which left self.roi == []
+            # and let the caller clear start_get_roi - so the loop never
+            # retried. Raise instead so the caller's except fires and we
+            # keep trying until intrinsics arrive.
             _stage('roi', 'gave up waiting for camera intrinsics after 30s '
                           '(camera_info topic never arrived)')
-            return
-        tvec = extristric[:1]
-        rmat = extristric[1:]
-        tvec, rmat = common.extristric_plane_shift(np.array(tvec).reshape((3, 1)),
-                                                   np.array(rmat), 0.03)
-        self.extristric = tvec, rmat
-        imgpts, _ = cv2.projectPoints(corners[:-1], np.array(rmat), np.array(tvec),
-                                      self.intrinsic, self.distortion)
-        imgpts = np.int32(imgpts).reshape(-1, 2)
+            raise TimeoutError('camera_info never arrived')
+        try:
+            intr_shape = self.intrinsic.shape if hasattr(self.intrinsic, 'shape') else type(self.intrinsic)
+            dist_shape = self.distortion.shape if hasattr(self.distortion, 'shape') else type(self.distortion)
+            _stage('roi', f'  intrinsic ready after {waited:.2f}s '
+                          f'(shape={intr_shape}) distortion.shape={dist_shape}')
+        except Exception:
+            pass
+        try:
+            tvec = extristric[:1]
+            rmat = extristric[1:]
+            tvec, rmat = common.extristric_plane_shift(np.array(tvec).reshape((3, 1)),
+                                                       np.array(rmat), 0.03)
+            self.extristric = tvec, rmat
+            _stage('roi', '  extrinsic plane shift done')
+        except Exception as e:
+            _stage('roi', 'extristric_plane_shift FAILED', exc=e)
+            raise
+        try:
+            imgpts, _ = cv2.projectPoints(corners[:-1], np.array(rmat), np.array(tvec),
+                                          self.intrinsic, self.distortion)
+            imgpts = np.int32(imgpts).reshape(-1, 2)
+            _stage('roi', f'  projected {len(imgpts)} corners to image pixels')
+        except Exception as e:
+            _stage('roi', 'cv2.projectPoints FAILED - check self.intrinsic shape '
+                          f'(currently {getattr(self.intrinsic, "shape", "?")}, '
+                          'cv2 wants 3x3)', exc=e)
+            raise
+        if len(imgpts) == 0:
+            _stage('roi', 'projectPoints returned zero pixels - cannot build ROI')
+            raise RuntimeError('empty imgpts')
         x_min = min(imgpts, key=lambda p: p[0])[0]
         x_max = max(imgpts, key=lambda p: p[0])[0]
         y_min = min(imgpts, key=lambda p: p[1])[1]
         y_max = max(imgpts, key=lambda p: p[1])[1]
         self.roi = np.maximum(np.array([y_min, y_max, x_min, x_max]), 0)
-        _stage('roi', f'computed roi (y={self.roi[0]}..{self.roi[1]} '
-                      f'x={self.roi[2]}..{self.roi[3]})')
+        _stage('roi', f'  computed roi (y={self.roi[0]}..{self.roi[1]} '
+                      f'x={self.roi[2]}..{self.roi[3]}) on intrinsic '
+                      f'shape={getattr(self.intrinsic, "shape", "?")}')
 
     # ------------------------------------------------------------------ services
 
@@ -1365,7 +1399,16 @@ class ObjectSortingNodeV4(Node):
                 except Exception as e:
                     _stage('sorting-loop', 'get_roi raised - retrying next tick', exc=e)
                     time.sleep(0.5); continue
+                # Belt-and-braces: even if get_roi() somehow returns without
+                # raising AND without setting self.roi, keep retrying instead
+                # of latching start_get_roi=False (which was the v4 silent
+                # failure that left roi=NONE forever).
+                if not (hasattr(self.roi, '__len__') and len(self.roi)):
+                    _stage('sorting-loop',
+                           'get_roi returned but self.roi is empty - retrying')
+                    time.sleep(0.5); continue
                 self.start_get_roi = False
+                _stage('sorting-loop', 'ROI built - detection branch is now live')
             roi = self.roi.copy() if len(self.roi) else []
             intrinsic = self.intrinsic
             avg_frames = max(1, int(self.p('detection_avg_frames')))
@@ -1445,11 +1488,15 @@ class ObjectSortingNodeV4(Node):
                     self.target = None
             else:
                 display_image = bgr_image.copy()
-            if self.get_parameter('display').value:
-                cv2.imshow('result_image_v4', display_image)
-                cv2.waitKey(1)
-            # Skip the cv_bridge round-trip; build the Image msg directly
-            # from the numpy buffer.
+            # cv2.imshow was historically called here (and in upstream
+            # object_sorting.py) - but on the Jetson Orin's containerized
+            # desktop the HighGUI window goes "Not Responding" because the
+            # sorting-loop thread can't pump the Qt event loop fast enough,
+            # and you end up with a black hanging popup. Drop it entirely.
+            # The annotated image is published to ~/image_result which the
+            # Hiwonder web_video_server serves at
+            #   http://<jetson-ip>:8080/stream?topic=/custom_sortingv4/image_result
+            # `display:=true` is now a no-op (kept for launch-arg compat).
             self._publish_image(display_image)
             time.sleep(0.001)
 
