@@ -607,30 +607,51 @@ class TunerUI:
                     start_new_session=True)
                 self._set_cam_status(f'{label} (pid={self._viewer_proc.pid})',
                                      '#2e8b57')
+                # Surface to the launcher terminal too - users were missing
+                # spawn results because the tuner status bar is easy to miss.
+                print(f'[viewer] spawned {label} (pid={self._viewer_proc.pid}) '
+                      f'cmd={cmd[0]} ...', flush=True)
             except FileNotFoundError:
                 self._set_cam_status(f'{cmd[0]} not installed', '#aa3333')
+                print(f'[viewer] spawn FAILED: {cmd[0]} not on PATH', flush=True)
                 messagebox.showerror(
                     'Viewer not found',
                     f"Could not start '{cmd[0]}'.\n"
                     f"Install it or use a different viewer.")
             except Exception as e:
                 self._set_cam_status('spawn failed', '#aa3333')
+                print(f'[viewer] spawn FAILED: {type(e).__name__}: {e}', flush=True)
                 messagebox.showerror('Viewer error', f'{type(e).__name__}: {e}')
         threading.Thread(target=go, daemon=True).start()
 
+    @staticmethod
+    def _viewer_env_prefix():
+        # See image_view_chain.sh for why all three are needed in the
+        # Hiwonder Docker container. Keep these in sync between the
+        # buttons and the auto-popup chain.
+        return ("export QT_X11_NO_MITSHM=1; "
+                "export QT_QPA_PLATFORM=xcb; "
+                "export LIBGL_ALWAYS_SOFTWARE=1; ")
+
     def _on_open_rqt(self):
-        # QT_X11_NO_MITSHM=1: Qt MIT-SHM path fails silently inside the
-        # Hiwonder Docker container and rqt windows render blank.
+        # tee rqt output to /tmp so the user can `cat` it if rqt errors.
         bash_cmd = (
-            "export QT_X11_NO_MITSHM=1; "
-            "source /opt/ros/humble/setup.bash; "
-            "source ~/ros2_ws/install/setup.bash; "
-            f"rqt_image_view {self._cam_topic()}; exec bash"
+            self._viewer_env_prefix()
+            + "source /opt/ros/humble/setup.bash; "
+            + "source ~/ros2_ws/install/setup.bash; "
+            + f"rqt_image_view {self._cam_topic()} 2>&1 "
+            + "| tee /tmp/jetarm_v4_1_rqt.log; exec bash"
         )
         self._spawn_viewer(['terminator', '-x', 'bash', '-c', bash_cmd], 'rqt_image_view')
 
     def _on_open_image_view(self):
-        bash_cmd = f"export QT_X11_NO_MITSHM=1; source /opt/ros/humble/setup.bash; source ~/ros2_ws/install/setup.bash; ros2 run image_view image_view --ros-args -r image:={self._cam_topic()}; exec bash"
+        bash_cmd = (
+            self._viewer_env_prefix()
+            + "source /opt/ros/humble/setup.bash; "
+            + "source ~/ros2_ws/install/setup.bash; "
+            + f"ros2 run image_view image_view --ros-args -r image:={self._cam_topic()} "
+            + "2>&1 | tee /tmp/jetarm_v4_1_image_view.log; exec bash"
+        )
         self._spawn_viewer(['terminator', '-x', 'bash', '-c', bash_cmd], 'image_view')
 
     def _on_open_browser(self):

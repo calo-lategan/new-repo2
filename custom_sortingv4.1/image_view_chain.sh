@@ -16,9 +16,15 @@
 #   IMAGE_VIEW_THROTTLE_MS=100                    web_video_server &th= value
 
 set +u  # ROS setup files reference unset vars
-# Qt MIT-SHM is broken inside the Hiwonder Docker container - both
-# rqt_image_view and image_view render blank windows without this.
-export QT_X11_NO_MITSHM=1
+# Qt + GL env that makes rqt_image_view / image_view actually render
+# inside the Hiwonder Docker container's forwarded X11 socket. With
+# only QT_X11_NO_MITSHM the window chrome appears but the image area
+# stays black - the other two unblock the image canvas.
+export QT_X11_NO_MITSHM=1        # MIT-SHM unsupported on forwarded socket
+export QT_QPA_PLATFORM=xcb       # auto-detect picks wayland/eglfs sometimes
+export LIBGL_ALWAYS_SOFTWARE=1   # NVIDIA libGL in the container can't talk
+                                 # to the host X server's GLX; sw raster
+                                 # of a 640x480 image is cheap
 
 TOPIC="${1:-/custom_sortingv4_1/image_result}"
 WEB_PORT="${IMAGE_VIEW_WEB_SERVER_PORT:-8080}"

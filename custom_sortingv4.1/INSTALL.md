@@ -44,27 +44,29 @@ Once it finishes, double-click **JetArm Sort v4.1** on your desktop.
 1. **Stops + disables** `start_app_node.service` (idempotent — runs every launch). The Hiwonder factory app grabs the camera + serial port + runs its own pick/sort code, which conflicts with v4.1. We never want it running alongside us.
 2. Waits for the Hiwonder container to be ready (`/opt/ros/humble/setup.bash` exists, `~/ros2_ws/` exists).
 3. Sources ROS 2 humble + the local install tree.
-4. Boots the v4.1 sorting node + the tuner UI.
-5. Does **NOT** auto-open a camera viewer. You click the **Open rqt_image_view** / **Open image_view** / **Open browser** button in the tuner when you want one.
+4. Boots: the v4.1 sorting node, the tuner UI, **and `web_video_server`** (because the factory service we just disabled was the thing that used to start it — we now start it ourselves on port 8080).
+5. After ~8 s the `image_view_chain.sh` fires automatically and opens `rqt_image_view` in its own terminator window (you can disable this with `image_view:=false`).
 
 ---
 
 ## Camera view (no IP lookup, no fights with Docker)
 
-The tuner UI has a `Camera view` row with four big buttons:
+The tuner UI has a `Camera view` row with four big buttons. **A viewer auto-opens at launch**; these buttons replace/swap it:
 
-- **Open rqt_image_view** (green) — Qt window with topic dropdown. Runs inside a `terminator` so `QT_X11_NO_MITSHM=1` is exported and the window actually renders (without that, MIT-SHM fails silently inside the Hiwonder Docker container and the window stays blank).
-- **Open image_view** (blue) — the C++ classic, same X11 env.
-- **Open browser** (purple) — opens `http://<jetson-ip>:8080/stream?topic=/custom_sortingv4_1/image_result&th=100`. IP is detected via `hostname -I` so you don't have to type it. The `&th=100` is what makes the web_video_server stream render — without it, ROS 2 humble's `web_video_server` 3.x sometimes shows a blank stream.
+- **Open rqt_image_view** (green) — Qt window with topic dropdown. Runs inside `terminator` with `QT_X11_NO_MITSHM=1`, `QT_QPA_PLATFORM=xcb`, and `LIBGL_ALWAYS_SOFTWARE=1` exported — that's the combination that makes rqt actually render inside the Hiwonder Docker container's forwarded X11. Output is also tee'd to `/tmp/jetarm_v4_1_rqt.log` so you can `cat` it if the window misbehaves.
+- **Open image_view** (blue) — the C++ classic, same X11 env, output tee'd to `/tmp/jetarm_v4_1_image_view.log`.
+- **Open browser** (purple) — opens `http://<jetson-ip>:8080/stream?topic=/custom_sortingv4_1/image_result&th=100`. IP detected via `hostname -I`. `web_video_server` is now started by our launch on port 8080 (it used to come from the factory service we disable), so this works standalone.
 - **Close viewer** (red) — kills the currently tracked viewer subprocess.
 
-Each "Open" replaces the previously open viewer. The chain is the same when launched with `image_view:=true` (which is no longer the default).
+The publisher uses the `sensor_data` QoS profile (best-effort, depth 5), which is what every standard ROS 2 image consumer subscribes with. Without that, the publisher's depth-1 reliable queue overwrote frames before the viewer drained them and the canvas stayed blank.
 
-### Auto-open the viewer on launch (old behavior)
+### Disable auto-popup on launch
 
 ```bash
-~/jetarm_v4_1/launch_v4.1.sh image_view:=true
+~/jetarm_v4_1/launch_v4.1.sh image_view:=false
 ```
+
+(The buttons still work.)
 
 ### Point the viewer at a different topic
 
@@ -97,6 +99,17 @@ firefox "http://$(hostname -I | awk '{print $1}'):8080/stream?topic=/custom_sort
 # 5. Confirm factory service is stopped + disabled
 systemctl is-active   start_app_node.service           # expect "inactive"
 systemctl is-enabled  start_app_node.service           # expect "disabled"
+
+# 6. Confirm web_video_server is listening (we start it now)
+ss -tlnp | grep 8080
+curl -sI http://localhost:8080/ | head -1              # expect "HTTP/1.1 200"
+
+# 7. Confirm sensor_data QoS on the publisher
+ros2 topic info /custom_sortingv4_1/image_result --verbose
+#    Look for: Reliability: BEST_EFFORT (sensor_data)
+
+# 8. If rqt window is blank/black, dump its log
+cat /tmp/jetarm_v4_1_rqt.log
 ```
 
 On the node side, the first time `_publish_image` succeeds it prints:

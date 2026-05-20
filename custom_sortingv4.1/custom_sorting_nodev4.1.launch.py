@@ -61,14 +61,14 @@ def launch_setup(context):
     # Auto-open a desktop window showing the annotated camera feed. Default
     # is on. Falls back gracefully if neither rqt_image_view nor image_view
     # are available.
-    # DEFAULT OFF. The tuner UI has Open rqt_image_view / Open image_view /
-    # Open browser buttons - the user clicks them on demand. Pass
-    # `image_view:=true` to restore the old auto-popup behavior for one run.
-    open_image_view = LaunchConfiguration('image_view', default='false')
+    # Auto-open the image_view_chain (rqt -> image_view -> browser) at
+    # launch. The tuner UI buttons swap/replace the viewer after launch.
+    # Pass `image_view:=false` if you don't want the auto-popup.
+    open_image_view = LaunchConfiguration('image_view', default='true')
     open_image_view_arg = DeclareLaunchArgument(
         'image_view', default_value=open_image_view,
         description='Auto-open the image_view_chain on launch '
-                    '(default false; use the tuner UI buttons instead).')
+                    '(default true; pass image_view:=false to disable).')
     image_view_topic = LaunchConfiguration(
         'image_view_topic', default='/custom_sortingv4_1/image_result')
     image_view_topic_arg = DeclareLaunchArgument(
@@ -142,6 +142,22 @@ def launch_setup(context):
         condition=IfCondition(auto_tune_ui),
     )
 
+    # web_video_server: serves http://<host>:8080/stream?topic=... for the
+    # browser viewer. Was previously brought up by Hiwonder's factory
+    # start_app_node.service, which we now permanently disable on launch
+    # - so we have to start it ourselves.
+    web_video_server_node = Node(
+        package='web_video_server',
+        executable='web_video_server',
+        name='web_video_server',
+        output='log',
+        parameters=[{
+            'port': 8080,
+            'default_stream_type': 'mjpeg',
+            'verbose': False,
+        }],
+    )
+
     # --- Auto-opened desktop image viewer (with browser fallback) ---------
     # Delegate to the image_view_chain.sh wrapper which:
     #   1. Tries rqt_image_view <topic>
@@ -165,8 +181,10 @@ def launch_setup(context):
         # Delay 6s so the node has booted, the YOLO engine has warmed up,
         # and the ~/image_result topic is being published. Otherwise the
         # viewer opens a window that just says "no image".
+        # 8s (was 6s) so web_video_server has time to bind :8080 before
+        # the chain script's probe_web_server hits the URL.
         image_viewer_action = TimerAction(
-            period=6.0,
+            period=8.0,
             actions=[
                 ExecuteProcess(
                     cmd=[chain_script, image_view_topic_value],
@@ -195,6 +213,7 @@ def launch_setup(context):
         depth_camera_launch,
         custom_sorting_v4_node,
         tune_ui_node,
+        web_video_server_node,
     ]
     if image_viewer_action is not None:
         actions.append(image_viewer_action)
