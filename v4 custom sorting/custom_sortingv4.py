@@ -649,11 +649,23 @@ class ObjectSortingNodeV4(Node):
             _stage('init', 'inference worker FAILED to start', exc=e)
             raise
 
-        # ---- Camera subscriptions: BEST_EFFORT, depth=1 ----
-        self.image_sub = None
-        self.camera_info_sub = None
+        # ---- Camera subscriptions: BEST_EFFORT, depth=1 --------------------
+        # ALWAYS-ON from process startup so the operator can see the camera
+        # feed the moment v4 boots - the camera should be "ready to run even
+        # when the robot is stopped". image_callback gates inference behind
+        # self.enable_sorting so YOLO doesn't burn GPU when stopped, but the
+        # raw frame still feeds the live viewer (see _raw_republish_tick).
         self.intrinsic = None
         self.distortion = None
+        self._latest_raw_bgr = None
+        self.image_sub = self.create_subscription(
+            Image, '/depth_cam/rgb/image_raw', self.image_callback,
+            qos_profile_sensor_data, callback_group=self.cam_group)
+        self.camera_info_sub = self.create_subscription(
+            CameraInfo, '/depth_cam/rgb/camera_info', self.camera_info_callback,
+            qos_profile_sensor_data, callback_group=self.cam_group)
+        _stage('init', 'camera subscriptions created (always-on) - '
+                       'topic /depth_cam/rgb/image_raw + camera_info')
 
         self._startup_done = False
         self._frames_received = 0
@@ -665,6 +677,12 @@ class ObjectSortingNodeV4(Node):
         # Periodic heartbeat so the operator can see at a glance whether
         # the pipeline is alive (camera fed, YOLO firing, target locked).
         self.create_timer(5.0, self._heartbeat, callback_group=self.svc_group)
+        # Low-rate raw-frame republisher: keeps ~/image_result alive (so the
+        # rqt_image_view / browser viewer always shows the camera) even when
+        # sorting is off. When sorting IS on, sorting_loop publishes its own
+        # annotated frame and this tick becomes a no-op.
+        self.create_timer(0.067, self._raw_republish_tick,
+                          callback_group=self.svc_group)
 
     # ------------------------------------------------------------------ profile
 
@@ -908,7 +926,13 @@ class ObjectSortingNodeV4(Node):
     # ------------------------------------------------------------------ services
 
     def enter_srv_callback(self, request, response):
-        _stage('enter', 'subscribing to /depth_cam/rgb/image_raw + camera_info')
+        # Camera subs are created in __init__ now (always-on), so enter no
+        # longer touches them. It still does the v2/v4-compat work of:
+        #   * resetting transient state (counters, last_position, ...)
+        #   * starting the heartbeat watchdog
+        #   * requesting an ROI rebuild
+        #   * moving the arm home
+        _stage('enter', 'enter requested (camera subs were already alive)')
         self.get_logger().info('enter v4')
         self._init_state()
         try:
@@ -918,15 +942,6 @@ class ObjectSortingNodeV4(Node):
         except Exception as e:
             _stage('enter', 'Heart() failed to construct - continuing without it', exc=e)
             self.heart = None
-        # qos_profile_sensor_data: BEST_EFFORT, KEEP_LAST 5 - matches camera drivers
-        self.image_sub = self.create_subscription(
-            Image, '/depth_cam/rgb/image_raw', self.image_callback,
-            qos_profile_sensor_data, callback_group=self.cam_group)
-        self.camera_info_sub = self.create_subscription(
-            CameraInfo, '/depth_cam/rgb/camera_info', self.camera_info_callback,
-            qos_profile_sensor_data, callback_group=self.cam_group)
-        _stage('enter', 'camera subs created - if no [camera] FIRST FRAME shows '
-                        'within ~10s the depth_cam node is not publishing')
         self.start_get_roi = True
         joint_angle = [500, 520, 210, 50, 500]
         set_servo_position(self.joints_pub, 1, ((1, 500), (2, joint_angle[1]),
@@ -937,11 +952,9 @@ class ObjectSortingNodeV4(Node):
         return response
 
     def exit_srv_callback(self, request, response):
+        # Camera subs stay alive across enter/exit so the live viewer keeps
+        # working when the robot is stopped. exit just halts sorting/motion.
         if self.enter:
-            if self.image_sub is not None:
-                self.destroy_subscription(self.image_sub); self.image_sub = None
-            if self.camera_info_sub is not None:
-                self.destroy_subscription(self.camera_info_sub); self.camera_info_sub = None
             if self.heart is not None:
                 self.heart.destroy(); self.heart = None
             self.enter = False
@@ -1057,13 +1070,14 @@ class ObjectSortingNodeV4(Node):
             _stage('self-cal', 'camera/ROI never ready - aborting')
             self.get_logger().warn('self-cal: camera/ROI never ready')
             return
-        # Use the most recent inference frame so we don't fight the camera CB.
-        latest = self.inference.latest()
-        if latest is None:
-            _stage('self-cal', 'no inference frames yet - aborting')
-            self.get_logger().warn('self-cal: no inference frames yet')
+        # Use the most recent raw camera frame (always-on slot) - we no
+        # longer need to wait for the inference worker, which is gated
+        # behind enable_sorting.
+        bgr = self._latest_raw_bgr
+        if bgr is None:
+            _stage('self-cal', 'no camera frame received yet - aborting')
+            self.get_logger().warn('self-cal: no camera frame received yet')
             return
-        bgr = latest[0]
         roi = self.roi.copy()
         roi_img = bgr[roi[0]:roi[1], roi[2]:roi[3]]
         image_lab = cv2.cvtColor(roi_img, cv2.COLOR_BGR2LAB)
@@ -1575,8 +1589,30 @@ class ObjectSortingNodeV4(Node):
             self._first_frame_logged = True
             _stage('camera', f'FIRST FRAME received: {bgr.shape} '
                              f'enc={ros_rgb_image.encoding}')
-        # Hand off to the inference worker - never block the camera CB.
-        self.inference.submit(bgr)
+        # Always remember the latest raw frame so the republish timer
+        # can keep the live viewer alive when sorting is off.
+        self._latest_raw_bgr = bgr
+        # Only feed the YOLO inference worker when sorting is active.
+        # Stopped == no GPU burn, but the camera feed stays visible via
+        # the raw-republisher timer.
+        if self.enable_sorting:
+            self.inference.submit(bgr)
+
+    def _raw_republish_tick(self):
+        """Republish the latest raw camera frame to ~/image_result whenever
+        sorting is OFF. When sorting is ON, sorting_loop publishes its own
+        annotated frame and this becomes a no-op (no double publish)."""
+        if self.enable_sorting:
+            return
+        bgr = self._latest_raw_bgr
+        if bgr is None:
+            return
+        try:
+            self._publish_image(bgr)
+        except Exception as e:
+            if not getattr(self, '_raw_pub_warned', False):
+                _stage('camera', 'raw republish failed (one-time warn)', exc=e)
+                self._raw_pub_warned = True
 
 
 def main():
