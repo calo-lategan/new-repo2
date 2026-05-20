@@ -202,29 +202,29 @@ install -m 755 "$V4/re-enable-factory.sh"  "$LAUNCHER_DIR/re-enable-factory.sh"
 # container image. Try to install rqt_image_view via apt (it pulls in
 # image_view as a dep). If apt isn't available or it fails we just
 # warn and let the chain script's browser fallback handle it.
-if ! command -v rqt_image_view >/dev/null 2>&1 \
-   || ! ros2 pkg list 2>/dev/null | grep -q '^web_video_server$'; then
-    stage "rqt_image_view / web_video_server missing - attempting apt install (sudo)"
+need_rqt=0; need_iv=0; need_wvs=0
+command -v rqt_image_view >/dev/null 2>&1 || need_rqt=1
+# image_view is a ROS pkg, not a bin on PATH; check via ros2 pkg list
+ros2 pkg list 2>/dev/null | grep -q '^image_view$' || need_iv=1
+ros2 pkg list 2>/dev/null | grep -q '^web_video_server$' || need_wvs=1
+
+if [ $((need_rqt + need_iv + need_wvs)) -gt 0 ]; then
+    pkgs=()
+    [ $need_rqt = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-rqt-image-view")
+    [ $need_iv  = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-image-view")
+    [ $need_wvs = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-web-video-server")
+    stage "missing viewer packages: ${pkgs[*]}"
     if command -v apt-get >/dev/null 2>&1; then
-        if sudo -n true 2>/dev/null; then
-            # passwordless sudo available. web_video_server is now started
-            # by our launch (since we disabled the factory service), so we
-            # need it locally available.
-            sudo apt-get install -y --no-install-recommends \
-                ros-${ROS_DISTRO:-humble}-rqt-image-view \
-                ros-${ROS_DISTRO:-humble}-image-view \
-                ros-${ROS_DISTRO:-humble}-web-video-server \
-                >/dev/null 2>&1 && ok "viewers + web_video_server installed" || \
-                stage "  apt install failed - browser fallback will be used"
+        stage "running interactive 'sudo apt-get install' (may prompt for password)"
+        if sudo apt-get install -y --no-install-recommends "${pkgs[@]}"; then
+            ok "viewer packages installed"
         else
-            stage "  sudo requires password - skipping. To install manually:"
-            stage "    sudo apt install -y \\"
-            stage "        ros-${ROS_DISTRO:-humble}-rqt-image-view \\"
-            stage "        ros-${ROS_DISTRO:-humble}-image-view \\"
-            stage "        ros-${ROS_DISTRO:-humble}-web-video-server"
+            err "apt install failed. Install manually:"
+            err "  sudo apt install -y ${pkgs[*]}"
         fi
     else
-        stage "  no apt-get on PATH - skipping. Browser fallback will be used."
+        err "no apt-get on PATH - install manually:"
+        err "  sudo apt install -y ${pkgs[*]}"
     fi
 fi
 
