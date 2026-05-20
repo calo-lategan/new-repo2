@@ -2,13 +2,17 @@ import os
 from launch_ros.actions import Node
 from launch import LaunchDescription, LaunchService
 from launch.substitutions import LaunchConfiguration
+from ament_index_python.packages import get_package_share_directory
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.actions import (
-    DeclareLaunchArgument, OpaqueFunction, ExecuteProcess, TimerAction,
+    IncludeLaunchDescription, DeclareLaunchArgument, OpaqueFunction,
+    ExecuteProcess, TimerAction,
 )
 from launch.conditions import IfCondition
 
 
 def launch_setup(context):
+    compiled = os.environ.get('need_compile', 'False')
     # Boots paused so the user has to press START in the tuner UI.
     start = LaunchConfiguration('start', default='false')
     start_arg = DeclareLaunchArgument('start', default_value=start)
@@ -67,15 +71,30 @@ def launch_setup(context):
         'image_view_topic', default_value=image_view_topic,
         description='Topic to show in the auto-opened image viewer.')
 
-    # NOTE: we no longer IncludeLaunchDescription for sdk_launch or
-    # depth_camera_launch. Those belong to Hiwonder's bringup chain
-    # (start_app_node.service -> bringup.launch.py). When v4's launch
-    # included them too, the duplicate /depth_cam/camera_container caused
-    # the orbbec_camera composable node to fail to load:
-    #   "Could not find requested resource in ament index"
-    # The launcher (launch_v4.sh) ensures the service is active; from
-    # there our node just subscribes to the existing /depth_cam/rgb/image_raw
-    # topic.
+    # We INCLUDE sdk_launch and depth_camera_launch so our launch is
+    # self-sufficient: even if Hiwonder's start_app_node.service hasn't
+    # successfully brought everything up yet (or its sub-launches died),
+    # our launch will bring its own copies of the SDK + depth camera.
+    # bringup also launches these but both share the same package paths,
+    # and the ament-index resolution for orbbec_camera works AS LONG AS
+    # the service is running (which the launcher ensures via
+    # `systemctl start`). When bringup also tries to launch them, one
+    # side wins and the other quietly fails - which is what the working
+    # earlier versions relied on. Don't remove these includes again.
+    if compiled == 'True':
+        sdk_package_path = get_package_share_directory('sdk')
+        peripherals_package_path = get_package_share_directory('peripherals')
+    else:
+        sdk_package_path = '/home/ubuntu/ros2_ws/src/driver/sdk'
+        peripherals_package_path = '/home/ubuntu/ros2_ws/src/peripherals'
+    depth_camera_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(peripherals_package_path, 'launch/depth_camera.launch.py')),
+    )
+    sdk_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(sdk_package_path, 'launch/jetarm_sdk.launch.py')),
+    )
 
     # --- Resolve the optional named profile to a YAML file path -----------
     # If the user passed `profile:=fast`, look for ~/jetarm_v4_profiles/fast.yaml
@@ -168,6 +187,8 @@ def launch_setup(context):
         debug_arg,
         open_image_view_arg,
         image_view_topic_arg,
+        sdk_launch,
+        depth_camera_launch,
         custom_sorting_v4_node,
         tune_ui_node,
     ]

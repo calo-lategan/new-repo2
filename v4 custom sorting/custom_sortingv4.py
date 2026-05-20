@@ -344,6 +344,10 @@ class MotionController:
     def goto_pose(self, position, pitch, duration, parallel_base=True):
         if self._abort:
             return None
+        if self.kinematics_client is None:
+            # Init couldn't find the IK service; can't move. Returning None
+            # makes the pick loop treat it as a failed step and bail.
+            return None
         msg = set_pose_target(position, pitch, [-180.0, 180.0], 1.0, duration=duration)
         future = self.kinematics_client.call_async(msg)
         res = self._await_future(future, timeout=2.0)
@@ -609,15 +613,24 @@ class ObjectSortingNodeV4(Node):
                             callback_group=self.svc_group)
 
         # ---- Service clients ----
+        # NB: kinematics comes up via the SDK launch (which our launch
+        # includes). It takes a few seconds after process start to appear.
+        # If it never shows we DON'T raise - we keep the node alive so the
+        # camera-always-on subscription still feeds the live viewer and
+        # the operator can see what's happening. Pick/place will be gated
+        # at runtime by the `self.kinematics_client is None` check.
         _stage('init', 'waiting for kinematics/set_pose_target service...')
         self.kinematics_client = self.create_client(SetRobotPose,
                                                     'kinematics/set_pose_target',
                                                     callback_group=self.svc_group)
-        if not self.kinematics_client.wait_for_service(timeout_sec=30.0):
-            _stage('init', 'kinematics/set_pose_target NEVER appeared - '
-                           'is start_app_node.service up? Did jetarm_sdk launch?')
-            raise RuntimeError('kinematics/set_pose_target unavailable')
-        _stage('init', 'kinematics/set_pose_target ready')
+        if not self.kinematics_client.wait_for_service(timeout_sec=60.0):
+            _stage('init', 'kinematics/set_pose_target NEVER appeared in 60s - '
+                           'continuing without it. Live camera view will still '
+                           'work; pick/place will fail when attempted. Check: '
+                           'sudo journalctl -u start_app_node.service -n 80 --no-pager')
+            self.kinematics_client = None
+        else:
+            _stage('init', 'kinematics/set_pose_target ready')
         self.set_joint_value_target_client = self.create_client(
             SetJointValue, 'kinematics/set_joint_value_target',
             callback_group=self.svc_group)
