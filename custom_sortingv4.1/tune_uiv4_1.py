@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # coding: utf8
-# Live tuner UI for custom_sortingv4.
+# Live tuner UI for custom_sortingv4_1.
 #
 # Adds over v2's tune_ui:
 #  - Engine hot-swap: file picker / dropdown of available .engine files.
-#    Calls /custom_sortingv4/load_engine - the inference worker swaps
+#    Calls /custom_sortingv4_1/load_engine - the inference worker swaps
 #    between frames, no restart needed.
 #  - Profile manager: list, save, load named profiles from
 #    ~/jetarm_v4_profiles/.
@@ -72,7 +72,7 @@ BOOL_PARAMS = [
 
 class TunerClient(Node):
     def __init__(self, target_node):
-        super().__init__('custom_sortingv4_tuner')
+        super().__init__('custom_sortingv4_1_tuner')
         self.target = target_node
         self.set_cli = self.create_client(SetParameters, f'/{target_node}/set_parameters')
         self.get_cli = self.create_client(GetParameters, f'/{target_node}/get_parameters')
@@ -163,7 +163,7 @@ class TunerUI:
     def __init__(self, client):
         self.client = client
         self.root = tk.Tk()
-        self.root.title('JetArm v4 - live tuner')
+        self.root.title('JetArm v4.1 - live tuner')
         self.root.geometry('760x1100')
         self._building = True
         self._build()
@@ -226,7 +226,7 @@ class TunerUI:
         self.cam_status_label.pack(side='left', padx=8)
         ttk.Label(cam_status_row, text='Topic:').pack(side='left', padx=(12, 4))
         self.cam_topic_entry = ttk.Entry(cam_status_row, width=42)
-        self.cam_topic_entry.insert(0, '/custom_sortingv4/image_result')
+        self.cam_topic_entry.insert(0, '/custom_sortingv4_1/image_result')
         self.cam_topic_entry.pack(side='left', fill='x', expand=True)
 
         cam_btn_row = ttk.Frame(cam); cam_btn_row.pack(fill='x', padx=6, pady=4)
@@ -566,7 +566,7 @@ class TunerUI:
     # ---- Camera viewer process management -----------------------------
 
     def _cam_topic(self):
-        t = self.cam_topic_entry.get().strip() or '/custom_sortingv4/image_result'
+        t = self.cam_topic_entry.get().strip() or '/custom_sortingv4_1/image_result'
         if not t.startswith('/'):
             t = '/' + t
         return t
@@ -619,7 +619,14 @@ class TunerUI:
         threading.Thread(target=go, daemon=True).start()
 
     def _on_open_rqt(self):
-        bash_cmd = f"source /opt/ros/humble/setup.bash; source ~/ros2_ws/install/setup.bash; rqt_image_view {self._cam_topic()}; exec bash"
+        # QT_X11_NO_MITSHM=1: Qt MIT-SHM path fails silently inside the
+        # Hiwonder Docker container and rqt windows render blank.
+        bash_cmd = (
+            "export QT_X11_NO_MITSHM=1; "
+            "source /opt/ros/humble/setup.bash; "
+            "source ~/ros2_ws/install/setup.bash; "
+            f"rqt_image_view {self._cam_topic()}; exec bash"
+        )
         self._spawn_viewer(['terminator', '-x', 'bash', '-c', bash_cmd], 'rqt_image_view')
 
     def _on_open_image_view(self):
@@ -698,7 +705,7 @@ def main():
     # executable. argparse rejects unknown args by default, which crashes
     # the UI process on startup. Use parse_known_args and discard the rest.
     ap = argparse.ArgumentParser()
-    ap.add_argument('--node-name', default='custom_sortingv4')
+    ap.add_argument('--node-name', default='custom_sortingv4_1')
     args, _ros_args = ap.parse_known_args()
     rclpy.init()
     client = TunerClient(args.node_name)

@@ -25,7 +25,7 @@
 #   7. Wait for the actual camera topic `/depth_cam/rgb/image_raw` to
 #      appear (this is what bringup's TimerAction gates - so we have to
 #      wait at LEAST 18s after the service comes back).
-#   8. ros2 launch app custom_sorting_nodev4.launch.py [args...]
+#   8. ros2 launch app custom_sorting_nodev4.1.launch.py [args...]
 #
 # Anything that goes wrong is printed in a [stage] format so you can
 # see exactly which step failed. Terminal stays open on error.
@@ -91,7 +91,7 @@ stage() { printf "\033[1;36m[%s]\033[0m %s\n" "$1" "$2" >&2; }
 err()   { printf "\033[1;31m[%s]\033[0m %s\n" "$1" "$2" >&2; }
 ok()    { printf "\033[1;32m[%s]\033[0m %s\n" "$1" "$2" >&2; }
 
-stage launcher "==> JetArm Sort v4"
+stage launcher "==> JetArm Sort v4.1"
 stage launcher "    Workspace : $WS_DIR"
 stage launcher "    ROS distro: $ROS_DISTRO"
 stage launcher "    Service   : $SERVICE_NAME"
@@ -99,7 +99,34 @@ stage launcher "    Profiles  : $PROFILES_DIR"
 stage launcher "    Camera    : $CAMERA_TOPIC"
 
 # -----------------------------------------------------------------------------
-# STEP 0: Wait for the Hiwonder container to be ready.
+# STEP 0 (always first): stop + disable the factory app.
+# -----------------------------------------------------------------------------
+# Same intent as `SKIP_SERVICE_RESTART=1` - we never want the factory
+# bringup chain running alongside our launch (it grabs the camera, the
+# serial port, and runs all its own pick/sort nodes that would conflict
+# with v4.1). Idempotent: if already disabled and stopped, both commands
+# no-op silently. Runs every launch so even a manual `systemctl enable`
+# before reboot gets undone next time we start v4.1.
+FACTORY_SERVICE="${FACTORY_SERVICE:-start_app_node.service}"
+if systemctl is-active --quiet "$FACTORY_SERVICE" 2>/dev/null; then
+    stage service "stopping factory service ($FACTORY_SERVICE)"
+    sudo -n systemctl stop "$FACTORY_SERVICE" 2>/dev/null \
+        || sudo systemctl stop "$FACTORY_SERVICE" 2>/dev/null \
+        || err service "failed to stop $FACTORY_SERVICE (continuing - add sudoers rule)"
+fi
+if systemctl is-enabled --quiet "$FACTORY_SERVICE" 2>/dev/null; then
+    stage service "disabling factory service ($FACTORY_SERVICE) - won't autostart on boot"
+    sudo -n systemctl disable "$FACTORY_SERVICE" 2>/dev/null \
+        || sudo systemctl disable "$FACTORY_SERVICE" 2>/dev/null \
+        || err service "failed to disable $FACTORY_SERVICE (continuing - add sudoers rule)"
+fi
+# After this point, the rest of the script must not touch the service.
+# Force SKIP_SERVICE_RESTART=1 explicitly so the legacy restart/start
+# block lower down is bypassed regardless of caller env.
+export SKIP_SERVICE_RESTART=1
+
+# -----------------------------------------------------------------------------
+# STEP 1: Wait for the Hiwonder container to be ready.
 # -----------------------------------------------------------------------------
 # The desktop shortcut opens a terminal that drops you inside the container,
 # but it may not be fully initialized for a beat. We probe for two markers
@@ -326,8 +353,8 @@ if [ "${JETARM_V4_DEBUG:-0}" = "1" ]; then
     export JETARM_V4_DEBUG=1
 fi
 
-stage launcher "ros2 launch app custom_sorting_nodev4.launch.py ${LAUNCH_ARGS[*]}"
-ros2 launch app custom_sorting_nodev4.launch.py "${LAUNCH_ARGS[@]}"
+stage launcher "ros2 launch app custom_sorting_nodev4.1.launch.py ${LAUNCH_ARGS[*]}"
+ros2 launch app custom_sorting_nodev4.1.launch.py "${LAUNCH_ARGS[@]}"
 RC=$?
 
 if [ $RC -ne 0 ]; then

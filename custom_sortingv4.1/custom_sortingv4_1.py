@@ -476,7 +476,7 @@ class ObjectSortingNodeV4(Node):
         ('target_overrides', '{}', None),
     )
 
-    def __init__(self, name='custom_sortingv4'):
+    def __init__(self, name='custom_sortingv4_1'):
         _stage('init', f'constructing node {name!r}')
         super().__init__(name,
                          allow_undeclared_parameters=True,
@@ -586,7 +586,7 @@ class ObjectSortingNodeV4(Node):
 
         # ---- Pubs / subs ----
         self.joints_pub = self.create_publisher(ServosPosition, 'servo_controller', 1)
-        self.result_publisher = self.create_publisher(Image, '/custom_sortingv4/image_result', 1)
+        self.result_publisher = self.create_publisher(Image, '/custom_sortingv4_1/image_result', 1)
 
         # ---- Services (lifecycle + control) ----
         self.create_service(Trigger, '~/enter', self.enter_srv_callback,
@@ -1566,17 +1566,30 @@ class ObjectSortingNodeV4(Node):
             # and you end up with a black hanging popup. Drop it entirely.
             # The annotated image is published to ~/image_result which the
             # Hiwonder web_video_server serves at
-            #   http://<jetson-ip>:8080/stream?topic=/custom_sortingv4/image_result
+            #   http://<jetson-ip>:8080/stream?topic=/custom_sortingv4_1/image_result
             # `display:=true` is now a no-op (kept for launch-arg compat).
             self._publish_image(display_image)
             time.sleep(0.001)
 
     def _publish_image(self, bgr):
         try:
+            # Some upstream paths can hand us a numpy view (sliced ROI,
+            # transposed, etc.) which causes cv_bridge to emit a message
+            # with a stride that doesn't match `step = width * channels`.
+            # rqt_image_view, image_view, and web_video_server then render
+            # blank windows. Force a contiguous copy here once - cheap
+            # (~0.5ms on a 640x480 bgr8 frame on the Orin Nano).
+            bgr = np.ascontiguousarray(bgr)
             msg = self.bridge.cv2_to_imgmsg(bgr, 'bgr8')
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = 'camera_color_optical_frame'
             self.result_publisher.publish(msg)
+            if not getattr(self, '_first_publish_logged', False):
+                self._first_publish_logged = True
+                _stage('publish', f'first frame published: shape={bgr.shape} '
+                                  f'step={msg.step} '
+                                  f'contig={bool(bgr.flags["C_CONTIGUOUS"])} '
+                                  f'topic=/custom_sortingv4_1/image_result')
         except Exception as e:
             _stage('camera', 'cv_bridge output publish failed', exc=e)
 
@@ -1625,7 +1638,7 @@ class ObjectSortingNodeV4(Node):
                 self._raw_pub_warned = True
 
 def main():
-    _stage('main', 'starting custom_sortingv4')
+    _stage('main', 'starting custom_sortingv4_1')
     import rclpy
     from rclpy.executors import MultiThreadedExecutor
     try:
@@ -1633,7 +1646,7 @@ def main():
     except Exception as e:
         _stage('main', 'rclpy.init() FAILED', exc=e); raise
     try:
-        node = ObjectSortingNodeV4('custom_sortingv4')
+        node = ObjectSortingNodeV4('custom_sortingv4_1')
     except Exception as e:
         _stage('main', 'Node construction FAILED - see stage prints above', exc=e)
         raise

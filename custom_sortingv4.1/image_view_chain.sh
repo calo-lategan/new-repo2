@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# v4 image-view chain: rqt_image_view -> image_view -> browser.
+# v4.1 image-view chain: rqt_image_view -> image_view -> browser.
 #
 # Auto-opens a desktop image viewer for the annotated camera feed.
 # Whichever viewer runs, when it exits (closed by user or crashed)
@@ -7,17 +7,22 @@
 # native viewer is available we go straight to the browser.
 #
 # Usage:
-#   image_view_chain.sh [topic]              default: /custom_sortingv4/image_result
+#   image_view_chain.sh [topic]              default: /custom_sortingv4_1/image_result
 #
 # Env:
 #   IMAGE_VIEW_BROWSER=firefox|chromium|xdg-open  override picked browser
 #   IMAGE_VIEW_BROWSER_DISABLE=1                  skip browser fallback
 #   IMAGE_VIEW_WEB_SERVER_PORT=8080                web_video_server port
+#   IMAGE_VIEW_THROTTLE_MS=100                    web_video_server &th= value
 
 set +u  # ROS setup files reference unset vars
+# Qt MIT-SHM is broken inside the Hiwonder Docker container - both
+# rqt_image_view and image_view render blank windows without this.
+export QT_X11_NO_MITSHM=1
 
-TOPIC="${1:-/custom_sortingv4/image_result}"
+TOPIC="${1:-/custom_sortingv4_1/image_result}"
 WEB_PORT="${IMAGE_VIEW_WEB_SERVER_PORT:-8080}"
+THROTTLE_MS="${IMAGE_VIEW_THROTTLE_MS:-100}"
 
 log() { printf "\033[1;36m[image-view]\033[0m %s\n" "$*"; }
 err() { printf "\033[1;31m[image-view]\033[0m %s\n" "$*" >&2; }
@@ -41,7 +46,9 @@ open_browser() {
     fi
     local ip url cmd
     ip=$(detect_ip)
-    url="http://${ip}:${WEB_PORT}/stream?topic=${TOPIC}"
+    # &th=<ms> throttles web_video_server's polling. Without it some
+    # browsers + web_video_server 3.x render a blank/stalled stream.
+    url="http://${ip}:${WEB_PORT}/stream?topic=${TOPIC}&th=${THROTTLE_MS}"
     log "browser fallback URL: $url"
     # Honor explicit override
     if [ -n "${IMAGE_VIEW_BROWSER:-}" ] && command -v "$IMAGE_VIEW_BROWSER" >/dev/null 2>&1; then
