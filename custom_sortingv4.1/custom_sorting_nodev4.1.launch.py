@@ -56,17 +56,21 @@ def launch_setup(context):
     debug = LaunchConfiguration('debug', default='false')
     debug_arg = DeclareLaunchArgument(
         'debug', default_value=debug,
-        description='Verbose stage logging from custom_sortingv4 + tune_uiv4.')
+        description='Verbose stage logging from custom_sortingv4_1 + tune_uiv4_1.')
 
     # Auto-open a desktop window showing the annotated camera feed. Default
     # is on. Falls back gracefully if neither rqt_image_view nor image_view
     # are available.
-    open_image_view = LaunchConfiguration('image_view', default='true')
+    # DEFAULT OFF. The tuner UI has Open rqt_image_view / Open image_view /
+    # Open browser buttons - the user clicks them on demand. Pass
+    # `image_view:=true` to restore the old auto-popup behavior for one run.
+    open_image_view = LaunchConfiguration('image_view', default='false')
     open_image_view_arg = DeclareLaunchArgument(
         'image_view', default_value=open_image_view,
-        description='Auto-open rqt_image_view on /custom_sortingv4/image_result.')
+        description='Auto-open the image_view_chain on launch '
+                    '(default false; use the tuner UI buttons instead).')
     image_view_topic = LaunchConfiguration(
-        'image_view_topic', default='/custom_sortingv4/image_result')
+        'image_view_topic', default='/custom_sortingv4_1/image_result')
     image_view_topic_arg = DeclareLaunchArgument(
         'image_view_topic', default_value=image_view_topic,
         description='Topic to show in the auto-opened image viewer.')
@@ -115,7 +119,7 @@ def launch_setup(context):
 
     custom_sorting_v4_node = Node(
         package='app',
-        executable='custom_sortingv4',
+        executable='custom_sortingv4_1',
         output='screen',
         parameters=extra_params + [{
             'start': start,
@@ -133,7 +137,7 @@ def launch_setup(context):
 
     tune_ui_node = Node(
         package='app',
-        executable='tune_uiv4',
+        executable='tune_uiv4_1',
         output='screen',
         condition=IfCondition(auto_tune_ui),
     )
@@ -149,7 +153,7 @@ def launch_setup(context):
     # That way the user never needs to look up an IP, AND if they close
     # the GUI window they still have a working view in the browser.
     image_view_topic_value = image_view_topic.perform(context).strip()
-    chain_script = os.path.expanduser('~/jetarm_v4/image_view_chain.sh')
+    chain_script = os.path.expanduser('~/jetarm_v4_1/image_view_chain.sh')
     chain_present = os.path.exists(chain_script)
     if not chain_present:
         print(f'[launch] WARNING: {chain_script} not present - '
