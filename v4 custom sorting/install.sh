@@ -196,6 +196,30 @@ mkdir -p "$LAUNCHER_DIR"
 install -m 755 "$V4/launch_v4.sh"          "$LAUNCHER_DIR/launch_v4.sh"
 install -m 755 "$V4/image_view_chain.sh"   "$LAUNCHER_DIR/image_view_chain.sh"
 
+# --- 6b. Best-effort install of an image viewer --------------------------
+# image_view / rqt_image_view aren't always preinstalled on the Hiwonder
+# container image. Try to install rqt_image_view via apt (it pulls in
+# image_view as a dep). If apt isn't available or it fails we just
+# warn and let the chain script's browser fallback handle it.
+if ! command -v rqt_image_view >/dev/null 2>&1; then
+    stage "rqt_image_view not found - attempting apt install (sudo)"
+    if command -v apt-get >/dev/null 2>&1; then
+        if sudo -n true 2>/dev/null; then
+            # passwordless sudo available
+            sudo apt-get install -y --no-install-recommends \
+                ros-${ROS_DISTRO:-humble}-rqt-image-view \
+                ros-${ROS_DISTRO:-humble}-image-view \
+                >/dev/null 2>&1 && ok "image viewers installed" || \
+                stage "  apt install failed - browser fallback will be used"
+        else
+            stage "  sudo requires password - skipping. To install manually:"
+            stage "    sudo apt install -y ros-${ROS_DISTRO:-humble}-rqt-image-view ros-${ROS_DISTRO:-humble}-image-view"
+        fi
+    else
+        stage "  no apt-get on PATH - skipping. Browser fallback will be used."
+    fi
+fi
+
 # --- 7. Desktop shortcut -------------------------------------------------
 
 stage "installing desktop shortcut"
