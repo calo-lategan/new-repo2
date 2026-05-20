@@ -216,31 +216,37 @@ ros2 service call /custom_sortingv4/load_profile \
 ros2 service call /custom_sortingv4/save_as_default std_srvs/srv/Trigger
 ```
 
-## Live camera view (browser)
+## Live camera view (auto-opens)
 
-There is **no cv2 popup window** in v4 — the previous one would hang because
-the HighGUI Qt event loop can't be pumped from a background thread on the
-Jetson's containerized desktop. Instead, the annotated frame (boxes,
-lock-on lines, ROI overlay) is published to a ROS image topic that
-Hiwonder's `web_video_server` (already running on the image) serves over
-HTTP.
+v4 auto-opens an `rqt_image_view` window on the annotated frame about 6 seconds after launch. You don't have to do anything — the window appears alongside the tuner UI. The 6 s gap lets the YOLO engine warm up so the viewer connects to a topic that's actually publishing.
 
-Open in any browser on the same network (or on the Jetson itself):
+The previous cv2 popup was dropped because its Qt event loop couldn't be pumped from a background thread on the Jetson's containerized desktop (you'd get a black "not responding" window). `rqt_image_view` runs in its own process, so it can't be starved by the sorting loop or the inference worker.
+
+Switch viewer off with `image_view:=false` if you're running headless / over SSH without X forwarding:
+
+```bash
+~/jetarm_v4/launch_v4.sh image_view:=false
+```
+
+View a different topic without restarting (e.g. the raw camera feed):
+
+```bash
+~/jetarm_v4/launch_v4.sh image_view_topic:=/depth_cam/rgb/image_raw
+```
+
+In the running `rqt_image_view` window itself, you can also pick any image topic from a dropdown at the top — handy for switching between annotated and raw mid-session.
+
+### Fallback (browser)
+
+If `rqt_image_view` and `image_view` are both missing on your image (rare), the launcher prints a warning and skips the viewer. Hiwonder's `web_video_server` is still running, so you can view the same stream in a browser:
 
 ```
 http://<jetson-ip>:8080/stream?topic=/custom_sortingv4/image_result
 ```
 
-To watch the raw, unannotated camera feed instead:
+(`hostname -I` gives you the Jetson's IP.)
 
-```
-http://<jetson-ip>:8080/stream?topic=/depth_cam/rgb/image_raw
-```
-
-Find the Jetson's IP with `hostname -I` (first column).
-
-The `display:=true` launch argument is kept for backwards compatibility
-but is now a no-op.
+The `display:=true` launch argument is preserved but is now a no-op.
 
 ## Debugging
 

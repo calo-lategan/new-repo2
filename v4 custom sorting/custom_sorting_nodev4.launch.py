@@ -1,10 +1,14 @@
 import os
+import shutil
 from launch_ros.actions import Node
 from launch import LaunchDescription, LaunchService
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from ament_index_python.packages import get_package_share_directory
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, OpaqueFunction
+from launch.actions import (
+    IncludeLaunchDescription, DeclareLaunchArgument, OpaqueFunction,
+    ExecuteProcess, TimerAction,
+)
 from launch.conditions import IfCondition
 
 
@@ -54,6 +58,19 @@ def launch_setup(context):
     debug_arg = DeclareLaunchArgument(
         'debug', default_value=debug,
         description='Verbose stage logging from custom_sortingv4 + tune_uiv4.')
+
+    # Auto-open a desktop window showing the annotated camera feed. Default
+    # is on. Falls back gracefully if neither rqt_image_view nor image_view
+    # are available.
+    open_image_view = LaunchConfiguration('image_view', default='true')
+    open_image_view_arg = DeclareLaunchArgument(
+        'image_view', default_value=open_image_view,
+        description='Auto-open rqt_image_view on /custom_sortingv4/image_result.')
+    image_view_topic = LaunchConfiguration(
+        'image_view_topic', default='/custom_sortingv4/image_result')
+    image_view_topic_arg = DeclareLaunchArgument(
+        'image_view_topic', default_value=image_view_topic,
+        description='Topic to show in the auto-opened image viewer.')
 
     if compiled == 'True':
         sdk_package_path = get_package_share_directory('sdk')
@@ -113,7 +130,42 @@ def launch_setup(context):
         condition=IfCondition(auto_tune_ui),
     )
 
-    return [
+    # --- Auto-opened desktop image viewer ---------------------------------
+    # Pick the best available viewer command at launch-graph build time.
+    # Order of preference:
+    #   1. rqt_image_view <topic>          (Qt window, robust, can switch topic in UI)
+    #   2. ros2 run image_view image_view --ros-args -r image:=<topic>
+    # If neither is on PATH, the user can still view via web_video_server.
+    image_view_topic_value = image_view_topic.perform(context).strip()
+    viewer_cmd = None
+    if shutil.which('rqt_image_view') is not None:
+        viewer_cmd = ['rqt_image_view', image_view_topic_value]
+    elif shutil.which('ros2') is not None:
+        # Fallback - the C++ image_view via ros2 run
+        viewer_cmd = ['ros2', 'run', 'image_view', 'image_view',
+                      '--ros-args', '-r', f'image:={image_view_topic_value}']
+    else:
+        print('[launch] WARNING: no image viewer (rqt_image_view / image_view) '
+              'found on PATH - skipping auto-opened image viewer. View at '
+              f'http://<jetson-ip>:8080/stream?topic={image_view_topic_value}')
+
+    image_viewer_action = None
+    if viewer_cmd is not None:
+        # Delay 6s so the node has booted, the YOLO engine has warmed up,
+        # and the ~/image_result topic is being published. Otherwise the
+        # viewer opens a window that just says "no image".
+        image_viewer_action = TimerAction(
+            period=6.0,
+            actions=[
+                ExecuteProcess(
+                    cmd=viewer_cmd,
+                    output='screen',
+                    condition=IfCondition(open_image_view),
+                )
+            ],
+        )
+
+    actions = [
         start_arg,
         auto_tune_ui_arg,
         display_arg,
@@ -126,11 +178,16 @@ def launch_setup(context):
         vision_confirm_arg,
         self_calibrate_arg,
         debug_arg,
+        open_image_view_arg,
+        image_view_topic_arg,
         sdk_launch,
         depth_camera_launch,
         custom_sorting_v4_node,
         tune_ui_node,
     ]
+    if image_viewer_action is not None:
+        actions.append(image_viewer_action)
+    return actions
 
 
 def generate_launch_description():
