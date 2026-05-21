@@ -203,17 +203,21 @@ install -m 755 "$V4/match_launcher_env.sh"  "$LAUNCHER_DIR/match_launcher_env.sh
 # container image. Try to install rqt_image_view via apt (it pulls in
 # image_view as a dep). If apt isn't available or it fails we just
 # warn and let the chain script's browser fallback handle it.
-need_rqt=0; need_iv=0; need_wvs=0
+need_rqt=0; need_iv=0; need_wvs=0; need_zenity=0
 command -v rqt_image_view >/dev/null 2>&1 || need_rqt=1
 # image_view is a ROS pkg, not a bin on PATH; check via ros2 pkg list
 ros2 pkg list 2>/dev/null | grep -q '^image_view$' || need_iv=1
 ros2 pkg list 2>/dev/null | grep -q '^web_video_server$' || need_wvs=1
+# zenity: launcher modal falls back to a text picker without it, but the
+# GUI is nicer when launching from the desktop icon.
+command -v zenity >/dev/null 2>&1 || need_zenity=1
 
-if [ $((need_rqt + need_iv + need_wvs)) -gt 0 ]; then
+if [ $((need_rqt + need_iv + need_wvs + need_zenity)) -gt 0 ]; then
     pkgs=()
-    [ $need_rqt = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-rqt-image-view")
-    [ $need_iv  = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-image-view")
-    [ $need_wvs = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-web-video-server")
+    [ $need_rqt    = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-rqt-image-view")
+    [ $need_iv     = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-image-view")
+    [ $need_wvs    = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-web-video-server")
+    [ $need_zenity = 1 ] && pkgs+=("zenity")
     stage "missing viewer packages: ${pkgs[*]}"
     if command -v apt-get >/dev/null 2>&1; then
         stage "running interactive 'sudo apt-get install' (may prompt for password)"

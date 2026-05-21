@@ -108,23 +108,64 @@ stage launcher "    Camera    : $CAMERA_TOPIC"
 # Sets MODAL_ARGS based on the user's pick; merged into LAUNCH_ARGS later.
 # -----------------------------------------------------------------------------
 MODAL_ARGS=()
-if [ "${SKIP_MODAL:-0}" != "1" ] \
-   && [ $# -eq 0 ] \
-   && [ -n "${DISPLAY:-}" ] \
-   && command -v zenity >/dev/null 2>&1; then
-    stage launcher "showing launch profile picker..."
-    MODE=$(zenity --list --radiolist \
-        --title="JetArm Sort v4.1 - pick a profile" \
-        --text="Select what to launch:" \
-        --width=560 --height=340 \
-        --column="Pick" --column="Profile" --column="What it does" \
-        FALSE "default"     "Standard: sorting node + tuner UI + rqt auto-popup" \
-        TRUE  "debug"       "Default + verbose ROS log + extra stage prints" \
-        FALSE "headless"    "No rqt auto-popup. Buttons in tuner UI still work." \
-        FALSE "camera-off"  "Boot with camera subscription paused (debug pub path)" \
-        FALSE "ai-off"      "Boot with inference paused (raw camera view only)" \
-        FALSE "no-ui"       "Skip the Tkinter tuner UI (background only)" \
-        2>/dev/null) || MODE="__cancel__"
+MODE=""
+# Pick mechanism: zenity GUI when available + we have a DISPLAY, otherwise
+# a text-mode prompt in the terminal. Either way, "debug" is the default
+# pick (just hit ENTER). Round 11 added the text fallback because the
+# Hiwonder image doesn't ship zenity and the modal was silently skipped
+# when launched from the desktop icon.
+if [ "${SKIP_MODAL:-0}" != "1" ] && [ $# -eq 0 ]; then
+    if [ -n "${DISPLAY:-}" ] && command -v zenity >/dev/null 2>&1; then
+        stage launcher "showing launch profile picker (zenity)..."
+        MODE=$(zenity --list --radiolist \
+            --title="JetArm Sort v4.1 - pick a profile" \
+            --text="Select what to launch:" \
+            --width=560 --height=340 \
+            --column="Pick" --column="Profile" --column="What it does" \
+            FALSE "default"     "Standard: sorting node + tuner UI + rqt auto-popup" \
+            TRUE  "debug"       "Default + verbose ROS log + extra stage prints" \
+            FALSE "headless"    "No rqt auto-popup. Buttons in tuner UI still work." \
+            FALSE "camera-off"  "Boot with camera subscription paused (debug pub path)" \
+            FALSE "ai-off"      "Boot with inference paused (raw camera view only)" \
+            FALSE "no-ui"       "Skip the Tkinter tuner UI (background only)" \
+            2>/dev/null) || MODE="__cancel__"
+    else
+        # Text-mode fallback: works in any terminal, no zenity required.
+        # 10s read timeout falls back to "debug" if the user just walks away.
+        if [ -n "${DISPLAY:-}" ] && ! command -v zenity >/dev/null 2>&1; then
+            stage launcher "zenity not installed - using text-mode profile picker"
+            stage launcher "  (install with: sudo apt install -y zenity)"
+        else
+            stage launcher "no DISPLAY - using text-mode profile picker"
+        fi
+        printf '\n\033[1;36m========== JetArm Sort v4.1 - pick a profile ==========\033[0m\n'
+        printf '  1) default     Standard: sorting node + tuner UI + rqt auto-popup\n'
+        printf '  2) debug       Default + verbose ROS log + extra stage prints  \033[1m[DEFAULT]\033[0m\n'
+        printf '  3) headless    No rqt auto-popup (tuner UI buttons still work)\n'
+        printf '  4) camera-off  Boot with camera subscription paused\n'
+        printf '  5) ai-off      Boot with inference paused (raw camera only)\n'
+        printf '  6) no-ui       Skip the Tkinter tuner UI (background only)\n'
+        printf '  q) quit\n'
+        printf '\033[1;36m=======================================================\033[0m\n'
+        printf 'Enter choice [1-6/q, default=2 debug, 10s timeout]: '
+        REPLY=""
+        if ! read -r -t 10 REPLY; then
+            printf '\n'
+            stage launcher "no input within 10s - defaulting to debug"
+            REPLY=2
+        fi
+        case "${REPLY:-2}" in
+            1) MODE="default" ;;
+            2|"") MODE="debug" ;;
+            3) MODE="headless" ;;
+            4) MODE="camera-off" ;;
+            5) MODE="ai-off" ;;
+            6) MODE="no-ui" ;;
+            q|Q) MODE="__cancel__" ;;
+            *) stage launcher "unrecognised choice '$REPLY' - defaulting to debug"
+               MODE="debug" ;;
+        esac
+    fi
     case "$MODE" in
         __cancel__|"")
             stage launcher "modal cancelled - exiting without launch"
