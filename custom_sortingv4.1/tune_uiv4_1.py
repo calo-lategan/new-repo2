@@ -43,6 +43,12 @@ FLOAT_PARAMS = [
     ('approach_dwell',        0.0, 1.0, 0.05),
     ('lock_distance_thresh',  0.001, 0.05, 0.001),
     ('gripper_close_duration', 0.1, 2.0, 0.05),
+    # Round 7: YOLO knobs + throttles.
+    ('yolo_conf_thresh',      0.05, 0.95, 0.01),
+    ('yolo_iou_thresh',       0.10, 0.90, 0.01),
+    ('inference_max_hz',      0.0,  60.0, 1.0),   # 0 = uncapped
+    ('publish_max_hz',        0.0,  60.0, 1.0),   # 0 = uncapped
+    ('publish_scale',         0.25, 1.0, 0.05),   # downsample before publish
 ]
 
 INT_PARAMS = [
@@ -57,6 +63,9 @@ INT_PARAMS = [
     ('gripper_slack',            5, 80, 1),
     ('gripper_step_pulse',       5, 100, 1),
     ('max_pick_retries',         0, 6, 1),
+    # Round 7: YOLO knobs.
+    ('yolo_max_det',             1, 300, 1),
+    ('yolo_imgsz',               160, 1280, 32),   # multiples of 32 - 320/416/512/640
 ]
 
 BOOL_PARAMS = [
@@ -67,6 +76,9 @@ BOOL_PARAMS = [
     'place_bin_color_check',
     'inference_warmup',
     'hot_log_inference_ms',
+    # Round 7: independent stop/start of camera subscription + inference.
+    'enable_camera_sub',
+    'enable_inference',
 ]
 
 
@@ -206,10 +218,31 @@ class TunerUI:
                                      width=16, height=2, command=self._on_save_default)
         self.savedef_btn.pack(side='left', padx=4)
 
+        # ---- Independent stop/start: camera subscription + YOLO inference ----
+        # These let the user A/B the load contributions on the Orin Nano:
+        # pause AI to see camera-only fps; pause camera to see the AI loop
+        # run on the last frame; pause both for a baseline.
+        toggle_row = ttk.Frame(ctrl); toggle_row.pack(fill='x', padx=6, pady=(0, 4))
+        self.cam_toggle_btn = tk.Button(
+            toggle_row, text='Pause camera', bg='#996633', fg='white',
+            font=('TkDefaultFont', 10, 'bold'), width=14, height=2,
+            command=self._on_toggle_camera_sub)
+        self.cam_toggle_btn.pack(side='left', padx=4)
+        self.ai_toggle_btn = tk.Button(
+            toggle_row, text='Pause AI', bg='#664488', fg='white',
+            font=('TkDefaultFont', 10, 'bold'), width=14, height=2,
+            command=self._on_toggle_inference)
+        self.ai_toggle_btn.pack(side='left', padx=4)
+        # Live perf-status label: cam_fps / pub_fps / inference age.
+        self.perf_var = tk.StringVar(value='perf: cam=- pub=- inf=-')
+        ttk.Label(toggle_row, textvariable=self.perf_var,
+                  foreground='#226666', font=('TkDefaultFont', 10)
+                  ).pack(side='left', padx=12)
+
         ttk.Label(ctrl, foreground='#555',
-                  text='Tip: STOP halts vision + motion. Adjust freely while '
-                       'stopped, then START. SAVE AS DEFAULT writes current '
-                       'settings to default.yaml so they load on next boot.'
+                  text='Tip: STOP halts vision + motion. Pause camera/AI for '
+                       'independent toggle without quitting. Adjust sliders '
+                       'freely while stopped, then START.'
                   ).pack(anchor='w', padx=8, pady=(0, 4))
 
         # ---- Camera-view controls ----
@@ -549,6 +582,34 @@ class TunerUI:
                              '#aa3333' if ok else '#aa6633')
         threading.Thread(target=go, daemon=True).start()
 
+    def _on_toggle_camera_sub(self):
+        # Pause/Resume the node's subscription to /depth_cam/rgb/image_raw.
+        # This is OUR subscription only - the orbbec driver keeps publishing.
+        # When paused: cam_fps -> 0, _raw_republish_tick still republishes
+        # the last frame so a viewer doesn't go fully blank.
+        def go():
+            current = bool(self.client.get_values(['enable_camera_sub'])
+                           .get('enable_camera_sub', True))
+            self.client.set_value('enable_camera_sub', not current)
+            new_state = not current
+            self.cam_toggle_btn.configure(
+                text='Resume camera' if not new_state else 'Pause camera',
+                bg='#aa6600' if not new_state else '#996633')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_toggle_inference(self):
+        # Pause/Resume the InferenceWorker. Camera path keeps running and
+        # publishing raw frames; we just don't burn GPU cycles on YOLO.
+        def go():
+            current = bool(self.client.get_values(['enable_inference'])
+                           .get('enable_inference', True))
+            self.client.set_value('enable_inference', not current)
+            new_state = not current
+            self.ai_toggle_btn.configure(
+                text='Resume AI' if not new_state else 'Pause AI',
+                bg='#aa3399' if not new_state else '#664488')
+        threading.Thread(target=go, daemon=True).start()
+
     def _on_save_default(self):
         def go():
             ok = self.client.call_save_default()
@@ -626,12 +687,21 @@ class TunerUI:
 
     @staticmethod
     def _viewer_env_prefix():
-        # See image_view_chain.sh for why all three are needed in the
-        # Hiwonder Docker container. Keep these in sync between the
-        # buttons and the auto-popup chain.
-        return ("export QT_X11_NO_MITSHM=1; "
-                "export QT_QPA_PLATFORM=xcb; "
-                "export LIBGL_ALWAYS_SOFTWARE=1; ")
+        # Round 2 set QT_X11_NO_MITSHM=1 + QT_QPA_PLATFORM=xcb +
+        # LIBGL_ALWAYS_SOFTWARE=1 to fight a blank-window issue. Those
+        # three together force Qt off the GPU and onto CPU software
+        # rendering, which throttles 640x480 BGR8 paint to ~5-10 fps.
+        # The viewer-blank issue was actually rqt_image_view not being
+        # invoked via `ros2 run`. That's fixed since round 5, so the
+        # safe-mode env vars are no longer needed.
+        #
+        # Set JETARM_V4_1_QT_SAFE=1 in ~/.jetarm_v4_1.env to restore
+        # the safe-mode fallback if Qt mis-renders on a different host.
+        if os.environ.get('JETARM_V4_1_QT_SAFE', '0') == '1':
+            return ("export QT_X11_NO_MITSHM=1; "
+                    "export QT_QPA_PLATFORM=xcb; "
+                    "export LIBGL_ALWAYS_SOFTWARE=1; ")
+        return ""
 
     def _on_open_rqt(self):
         # rqt_image_view is a ROS 2 ament Python plugin - not a system

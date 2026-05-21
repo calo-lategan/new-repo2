@@ -179,6 +179,48 @@ JETARM_V4_DEBUG=1 ~/jetarm_v4_1/launch_v4.1.sh
 
 ---
 
+## Performance + tunables (round 7)
+
+### What runs where on the Orin Nano
+
+| Step | Hardware |
+|---|---|
+| **YOLO TensorRT inference** | **GPU** (Ampere CUDA + FP16 Tensor cores). Confirmed by `[TRT] TensorRT-managed allocation` lines on every launch. |
+| **rqt / image_view viewer paint** | **GPU** by default in round 7+. Earlier rounds forced software rendering via `LIBGL_ALWAYS_SOFTWARE=1` — removed. |
+| OpenCV drawing (rectangle, putText, line) | CPU. ~1 ms/frame — not the bottleneck. |
+| cv_bridge + DDS publish | CPU. ~1-2 ms/frame. |
+| Orbbec USB capture | CPU. Driver-level, unavoidable. |
+| HED edge detection (color-blob branch only) | CPU (container's OpenCV not built with CUDA). Not on the YOLO scaff path. |
+
+If for any reason Qt mis-renders on your host, restore the round-2 safe mode:
+
+```bash
+echo 'JETARM_V4_1_QT_SAFE=1' >> ~/.jetarm_v4_1.env
+```
+
+### New live tunables in the Vision tab
+
+| Slider | Default | Effect |
+|---|---|---|
+| `yolo_conf_thresh` | 0.25 | Confidence threshold. 0.5 = stricter (fewer false positives); 0.1 = looser. |
+| `yolo_iou_thresh` | 0.7 | NMS IoU. Lower = more overlapping boxes get suppressed. |
+| `yolo_max_det` | 100 | Max detections per frame. |
+| `yolo_imgsz` | 640 | YOLO input size. Drop to 320 for ~3× inference speedup. Multiples of 32. |
+| `inference_max_hz` | 0 | Cap inference rate (0 = uncapped). Lower if GPU thermals get hot. |
+| `publish_max_hz` | 0 | Cap result-publisher rate. Match your viewer's actual paint rate to save bandwidth. |
+| `publish_scale` | 1.0 | Downsample annotated frame before publish (0.5 → 320×240, ~4× less bytes). |
+
+All take effect live — no restart needed.
+
+### New top-bar buttons
+
+- **Pause camera** — drops our subscription to `/depth_cam/rgb/image_raw`. orbbec keeps publishing, we stop consuming. `cam_fps` heartbeat drops to 0. The raw-republish tick keeps emitting the last frame, so the viewer doesn't go blank.
+- **Pause AI** — pauses the `InferenceWorker`. The camera path keeps running and publishing raw frames (no annotation overlay). Use this to A/B "camera-only fps" vs "camera + AI fps".
+
+Heartbeat line now shows both: `cam=LIVE/PAUSED ai=LIVE/PAUSED cam_fps=N.N pub_fps=N.N`.
+
+---
+
 ## Bringing back the factory app
 
 The launcher disables `start_app_node.service` on every run. To go back to Hiwonder's factory bringup:

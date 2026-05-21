@@ -155,8 +155,32 @@ class InferenceWorker(threading.Thread):
         self._latest_result = None    # (frame, detections, ts)
         self._frame_event = threading.Event()
         self._stop = threading.Event()
+        self._paused = threading.Event()   # round 7: external pause (UI button)
         self.model = None
         self._load_count = 0
+        # Runtime YOLO knobs. Updated by the v4 node from ROS params via
+        # set_yolo_knobs(); used per-inference in run(). Defaults match
+        # ultralytics' own defaults so behavior is identical until tuned.
+        self.yolo_conf = 0.25
+        self.yolo_iou = 0.7
+        self.yolo_max_det = 100
+        self.yolo_imgsz = 640
+        self.inference_max_hz = 0.0   # 0 = uncapped
+        self._last_run_t = 0.0
+
+    def set_yolo_knobs(self, conf=None, iou=None, max_det=None, imgsz=None, hz=None):
+        if conf is not None:    self.yolo_conf = float(conf)
+        if iou is not None:     self.yolo_iou = float(iou)
+        if max_det is not None: self.yolo_max_det = int(max_det)
+        if imgsz is not None:   self.yolo_imgsz = int(imgsz)
+        if hz is not None:      self.inference_max_hz = float(hz)
+
+    def pause(self):
+        self._paused.set()
+
+    def resume(self):
+        self._paused.clear()
+        self._frame_event.set()  # nudge run() out of any wait
 
     # -- producer / consumer --
 
@@ -245,6 +269,11 @@ class InferenceWorker(threading.Thread):
         while not self._stop.is_set():
             self._frame_event.wait(timeout=0.1)
             self._frame_event.clear()
+            # External pause (UI 'Pause AI' button). Sleep cheaply so the
+            # CPU/GPU are idle until the user resumes.
+            if self._paused.is_set():
+                time.sleep(0.05)
+                continue
             # Service a queued hot-swap before pulling the next frame.
             with self._swap_lock:
                 pending = self._pending_engine_path
@@ -260,9 +289,19 @@ class InferenceWorker(threading.Thread):
                 self._latest_frame = None
             if frame is None or self.model is None:
                 continue
+            # Inference rate throttle. 0 = uncapped (default).
+            if self.inference_max_hz > 0.0:
+                min_dt = 1.0 / self.inference_max_hz
+                elapsed = time.time() - self._last_run_t
+                if elapsed < min_dt:
+                    time.sleep(min_dt - elapsed)
             t0 = time.time()
+            self._last_run_t = t0
             try:
-                results = self.model(frame, verbose=False)
+                results = self.model(
+                    frame, verbose=False,
+                    conf=self.yolo_conf, iou=self.yolo_iou,
+                    max_det=self.yolo_max_det, imgsz=self.yolo_imgsz)
             except Exception as e:
                 _stage('inference', 'predict() raised - skipping frame', exc=e)
                 self._logger.warn(f'inference error: {e}')
@@ -473,6 +512,18 @@ class ObjectSortingNodeV4(Node):
         # Free-form per-target overrides as JSON-ish string, parsed lazily.
         # Example: '{"scaff": {"motion_speed": 0.9}, "blue": {"motion_speed": 1.8}}'
         ('target_overrides', '{}', None),
+        # YOLO runtime knobs - passed straight into self.model(...).
+        ('yolo_conf_thresh', 0.25, (0.05, 0.95)),
+        ('yolo_iou_thresh',  0.7,  (0.10, 0.90)),
+        ('yolo_max_det',     100,  (1, 300)),
+        ('yolo_imgsz',       640,  (160, 1280)),  # 320/416/512/640 are typical; smaller = faster
+        # Frame-rate throttles. 0 = uncapped.
+        ('inference_max_hz', 0.0,  (0.0, 60.0)),  # cap inference work on GPU
+        ('publish_max_hz',   0.0,  (0.0, 60.0)),  # cap how often we emit annotated frames
+        ('publish_scale',    1.0,  (0.25, 1.0)),  # downsample before publish (1.0 = native)
+        # Independent stop/start (UI buttons map to these).
+        ('enable_camera_sub', True, None),        # drop our /depth_cam/rgb/image_raw subscription
+        ('enable_inference',  True, None),        # pause the InferenceWorker
     )
 
     def __init__(self, name='custom_sortingv4_1'):
@@ -665,7 +716,17 @@ class ObjectSortingNodeV4(Node):
                                              on_swap=lambda path:
                                                  self.get_logger().info(
                                                      f'engine active: {path}'))
+            # Push runtime YOLO knobs from ROS params into the worker.
+            self.inference.set_yolo_knobs(
+                conf=self.p('yolo_conf_thresh'),
+                iou=self.p('yolo_iou_thresh'),
+                max_det=self.p('yolo_max_det'),
+                imgsz=self.p('yolo_imgsz'),
+                hz=self.p('inference_max_hz'))
             self.inference.start()
+            # Honor enable_inference at startup (if user has it preset to false).
+            if not bool(self.p('enable_inference')):
+                self.inference.pause()
             _stage('init', f'inference worker started (engine={self.p("engine_path")})')
         except Exception as e:
             _stage('init', 'inference worker FAILED to start', exc=e)
@@ -774,6 +835,42 @@ class ObjectSortingNodeV4(Node):
             if p.name == 'debug':
                 _set_debug(bool(p.value))
                 _stage('param', f'debug mode -> {bool(p.value)}')
+            # Live-update YOLO knobs as the user moves the sliders.
+            if p.name in ('yolo_conf_thresh', 'yolo_iou_thresh',
+                          'yolo_max_det', 'yolo_imgsz', 'inference_max_hz') \
+                    and hasattr(self, 'inference') and self.inference is not None:
+                kw = {}
+                if p.name == 'yolo_conf_thresh': kw['conf'] = p.value
+                elif p.name == 'yolo_iou_thresh': kw['iou'] = p.value
+                elif p.name == 'yolo_max_det':   kw['max_det'] = p.value
+                elif p.name == 'yolo_imgsz':     kw['imgsz'] = p.value
+                elif p.name == 'inference_max_hz': kw['hz'] = p.value
+                self.inference.set_yolo_knobs(**kw)
+                _stage('param', f'{p.name} -> {p.value}')
+            # Independent stop/start of the orbbec subscription.
+            if p.name == 'enable_camera_sub':
+                want = bool(p.value)
+                if want and self.image_sub is None:
+                    self.image_sub = self.create_subscription(
+                        Image, '/depth_cam/rgb/image_raw',
+                        self.image_callback, 1, callback_group=self.cam_group)
+                    _stage('param', 'enable_camera_sub -> True (subscription RECREATED)')
+                elif not want and self.image_sub is not None:
+                    try:
+                        self.destroy_subscription(self.image_sub)
+                    except Exception as e:
+                        _stage('param', 'failed to destroy image_sub', exc=e)
+                    self.image_sub = None
+                    _stage('param', 'enable_camera_sub -> False (subscription DROPPED)')
+            # Pause / resume the inference worker.
+            if p.name == 'enable_inference':
+                if hasattr(self, 'inference') and self.inference is not None:
+                    if bool(p.value):
+                        self.inference.resume()
+                        _stage('param', 'enable_inference -> True (worker RESUMED)')
+                    else:
+                        self.inference.pause()
+                        _stage('param', 'enable_inference -> False (worker PAUSED)')
         return SetParametersResult(successful=True)
 
     def p(self, name):
@@ -830,10 +927,21 @@ class ObjectSortingNodeV4(Node):
             result_subs = self.result_publisher.get_subscription_count()
         except Exception:
             result_subs = -1
+        # pub_fps: how often we're actually emitting annotated frames.
+        # Distinct from cam_fps (which counts incoming orbbec frames).
+        pub_count = getattr(self, '_pub_count', 0)
+        last_pub_count = getattr(self, '_last_hb_pub_count', 0)
+        pub_fps = max(0, (pub_count - last_pub_count)) / dt
+        self._last_hb_pub_count = pub_count
+        # Camera + AI on/off state for at-a-glance UI mirror.
+        cam_sub_state = 'LIVE' if self.image_sub is not None else 'PAUSED'
+        ai_state = 'PAUSED' if (hasattr(self, 'inference') and self.inference
+                                and self.inference._paused.is_set()) else 'LIVE'
         _stage('heartbeat',
                f'enter={self.enter} sorting={self.enable_sorting} '
-               f'cam_fps={fps:.1f} frames={self._frames_received} '
-               f'result_subs={result_subs} '
+               f'cam={cam_sub_state} ai={ai_state} '
+               f'cam_fps={fps:.1f} pub_fps={pub_fps:.1f} '
+               f'frames={self._frames_received} result_subs={result_subs} '
                f'roi={"ok" if len(self.roi) else "NONE"} '
                f'intrinsic={"ok" if self.intrinsic is not None else "NONE"} '
                f'inference_age_ms={last_inf_ms:.0f} '
@@ -1587,6 +1695,24 @@ class ObjectSortingNodeV4(Node):
 
     def _publish_image(self, bgr):
         try:
+            # Publish-rate throttle (0 = uncapped). Useful when the viewer
+            # paints slower than we can publish - dropping pub frames
+            # saves CPU on cv_bridge + DDS without hurting the viewer.
+            now = time.time()
+            pub_hz = float(self.p('publish_max_hz'))
+            if pub_hz > 0.0:
+                min_dt = 1.0 / pub_hz
+                if now - getattr(self, '_last_pub_t', 0.0) < min_dt:
+                    return
+            self._last_pub_t = now
+            # Optional downsample before publish. publish_scale=0.5 ->
+            # 320x240, ~4x less bytes to ship and paint. Uses INTER_AREA
+            # which is the right pick for downscale.
+            scale = float(self.p('publish_scale'))
+            if scale > 0.0 and scale < 1.0:
+                h, w = bgr.shape[:2]
+                bgr = cv2.resize(bgr, (max(1, int(w * scale)), max(1, int(h * scale))),
+                                 interpolation=cv2.INTER_AREA)
             # Some upstream paths can hand us a numpy view (sliced ROI,
             # transposed, etc.) which causes cv_bridge to emit a message
             # with a stride that doesn't match `step = width * channels`.
@@ -1598,6 +1724,8 @@ class ObjectSortingNodeV4(Node):
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = 'camera_color_optical_frame'
             self.result_publisher.publish(msg)
+            # Track pub rate for heartbeat.
+            self._pub_count = getattr(self, '_pub_count', 0) + 1
             if not getattr(self, '_first_publish_logged', False):
                 self._first_publish_logged = True
                 _stage('publish', f'first frame published: shape={bgr.shape} '
