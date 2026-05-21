@@ -761,11 +761,6 @@ class ObjectSortingNodeV4(Node):
         self.intrinsic = None
         self.distortion = None
         self._latest_raw_bgr = None
-        # Annotated frame buffer fed by sorting_loop. The publish timer
-        # picks it up at a steady rate, so the viewer doesn't slow to a
-        # crawl when each sorting iteration is slow (HED CPU, per-target IK).
-        self._latest_annotated_bgr = None
-        self._latest_annotated_ts = 0.0
         self.image_sub = self.create_subscription(
             Image, '/depth_cam/rgb/image_raw', self.image_callback,
             1, callback_group=self.cam_group)
@@ -1711,14 +1706,16 @@ class ObjectSortingNodeV4(Node):
                     self.target = None
             else:
                 display_image = bgr_image.copy()
-            # Hand the annotated frame off to the publish timer instead
-            # of publishing inline. This decouples the viewer's frame
-            # rate from the per-iteration cost of this loop (HED CPU,
-            # IK math). The _raw_republish_tick timer picks up the
-            # _latest_annotated_bgr at 30 Hz steady regardless of how
-            # slow we are here.
-            self._latest_annotated_bgr = display_image
-            self._latest_annotated_ts = time.time()
+            # Inline publish of the annotated frame. This is the round-8
+            # behavior (last known-good viewer state, commit 9638dde).
+            # Round 9 moved this to a timer-driven buffer in
+            # _raw_republish_tick - that broke the viewer in practice
+            # even with healthy pub_fps metrics, so we restored the
+            # inline call. Trade-off: when a target locks and the
+            # per-iteration IK + HED work is heavy, the publish rate
+            # drops to whatever the loop iterates at. Acceptable in
+            # exchange for the viewer actually showing frames.
+            self._publish_image(display_image)
             time.sleep(0.001)
 
     def _publish_image(self, bgr):
@@ -1796,24 +1793,18 @@ class ObjectSortingNodeV4(Node):
             self.inference.submit(bgr)
 
     def _raw_republish_tick(self):
-        """Steady-rate publish tick decoupled from sorting_loop's iteration
-        speed. When sorting is on AND we have a fresh annotated frame from
-        the sorting loop, publish that. Otherwise publish the latest raw
-        camera frame. This is the key to keeping pub_fps high even when
-        each sorting iteration is heavy (HED + IK math). Was: only published
-        raw frames when sorting was off; meant pub_fps tanked to 0.4 when
-        target locked because the sorting_loop publish was gated on the
-        whole iteration finishing.
+        """30 Hz raw-frame republisher. Only fires when sorting is off -
+        when sorting is on, sorting_loop publishes the annotated frame
+        inline (last known-good behavior from round 8, commit 9638dde).
+        Round 9 tried to make this ALSO publish the annotated buffer when
+        sorting=True; that broke the live viewer for the user even though
+        pub_fps and result_subs metrics looked healthy. We rolled the
+        annotated path back here but kept the 30 Hz timer rate (was 15 Hz)
+        because smoother raw publishing when sorting is off is harmless.
         """
-        # Prefer the annotated frame if we have a recent one.
-        annotated = getattr(self, '_latest_annotated_bgr', None)
-        annotated_ts = getattr(self, '_latest_annotated_ts', 0.0)
-        now = time.time()
-        if self.enable_sorting and annotated is not None \
-                and (now - annotated_ts) < 1.0:
-            bgr = annotated
-        else:
-            bgr = self._latest_raw_bgr
+        if self.enable_sorting:
+            return
+        bgr = self._latest_raw_bgr
         if bgr is None:
             return
         try:
