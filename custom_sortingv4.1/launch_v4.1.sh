@@ -109,14 +109,14 @@ stage launcher "    Camera    : $CAMERA_TOPIC"
 # -----------------------------------------------------------------------------
 MODAL_ARGS=()
 MODE=""
-# Pick mechanism: zenity GUI when available + we have a DISPLAY, otherwise
-# a text-mode prompt in the terminal. Either way, "debug" is the default
-# pick (just hit ENTER). Round 11 added the text fallback because the
-# Hiwonder image doesn't ship zenity and the modal was silently skipped
-# when launched from the desktop icon.
+# Profile picker. Three tiers, in order of preference:
+#   1. zenity GUI (needs DISPLAY + zenity installed)
+#   2. whiptail arrow-key TUI in the terminal (preinstalled on Ubuntu/Debian)
+#   3. plain numbered menu (works anywhere, even minimal busybox)
+# All three default to "debug" - press ENTER at the prompt to take it.
 if [ "${SKIP_MODAL:-0}" != "1" ] && [ $# -eq 0 ]; then
     if [ -n "${DISPLAY:-}" ] && command -v zenity >/dev/null 2>&1; then
-        stage launcher "showing launch profile picker (zenity)..."
+        stage launcher "showing launch profile picker (zenity GUI)..."
         MODE=$(zenity --list --radiolist \
             --title="JetArm Sort v4.1 - pick a profile" \
             --text="Select what to launch:" \
@@ -129,42 +129,64 @@ if [ "${SKIP_MODAL:-0}" != "1" ] && [ $# -eq 0 ]; then
             FALSE "ai-off"      "Boot with inference paused (raw camera view only)" \
             FALSE "no-ui"       "Skip the Tkinter tuner UI (background only)" \
             2>/dev/null) || MODE="__cancel__"
+    elif command -v whiptail >/dev/null 2>&1 && [ -t 0 ] && [ -t 1 ]; then
+        # Arrow-key TUI menu via whiptail. Pre-installed on Ubuntu/Debian
+        # (debconf dep). Renders inside the terminal - works whether or
+        # not we have a DISPLAY. --default-item pre-highlights "debug".
+        stage launcher "showing launch profile picker (whiptail TUI)..."
+        if [ -z "${DISPLAY:-}" ]; then
+            stage launcher "  (no DISPLAY - this is normal, picker still works)"
+        elif ! command -v zenity >/dev/null 2>&1; then
+            stage launcher "  (zenity not installed - using whiptail; install zenity for GUI)"
+        fi
+        # whiptail writes the chosen tag to stderr; capture via fd 3 trick
+        MODE=$(whiptail \
+            --title "JetArm Sort v4.1 - pick a profile" \
+            --menu "Use arrow keys to pick a profile, then Enter:" \
+            20 78 8 \
+            --default-item "debug" \
+            "default"    "Standard: sorting + tuner UI + rqt auto-popup" \
+            "debug"      "Default + verbose ROS log + extra stage prints" \
+            "headless"   "No rqt auto-popup (tuner UI buttons still work)" \
+            "camera-off" "Boot with camera subscription paused" \
+            "ai-off"     "Boot with inference paused (raw camera view only)" \
+            "no-ui"      "Skip the Tkinter tuner UI (background only)" \
+            3>&1 1>&2 2>&3) || MODE="__cancel__"
     else
-        # Text-mode fallback: works in any terminal, no zenity required.
-        # 10s read timeout falls back to "debug" if the user just walks away.
-        if [ -n "${DISPLAY:-}" ] && ! command -v zenity >/dev/null 2>&1; then
-            stage launcher "zenity not installed - using text-mode profile picker"
-            stage launcher "  (install with: sudo apt install -y zenity)"
+        # Plain numbered text menu. Final fallback for minimal containers.
+        if ! [ -t 0 ]; then
+            stage launcher "stdin is not a tty - defaulting to debug (no prompt)"
+            MODE="debug"
         else
-            stage launcher "no DISPLAY - using text-mode profile picker"
+            stage launcher "showing launch profile picker (numbered text menu)..."
+            printf '\n\033[1;36m========== JetArm Sort v4.1 - pick a profile ==========\033[0m\n'
+            printf '  1) default     Standard: sorting node + tuner UI + rqt auto-popup\n'
+            printf '  2) debug       Default + verbose ROS log + extra stage prints  \033[1m[DEFAULT]\033[0m\n'
+            printf '  3) headless    No rqt auto-popup (tuner UI buttons still work)\n'
+            printf '  4) camera-off  Boot with camera subscription paused\n'
+            printf '  5) ai-off      Boot with inference paused (raw camera only)\n'
+            printf '  6) no-ui       Skip the Tkinter tuner UI (background only)\n'
+            printf '  q) quit\n'
+            printf '\033[1;36m=======================================================\033[0m\n'
+            printf 'Enter choice [1-6/q, default=2 debug, 15s timeout]: '
+            REPLY=""
+            if ! read -r -t 15 REPLY; then
+                printf '\n'
+                stage launcher "no input within 15s - defaulting to debug"
+                REPLY=2
+            fi
+            case "${REPLY:-2}" in
+                1) MODE="default" ;;
+                2|"") MODE="debug" ;;
+                3) MODE="headless" ;;
+                4) MODE="camera-off" ;;
+                5) MODE="ai-off" ;;
+                6) MODE="no-ui" ;;
+                q|Q) MODE="__cancel__" ;;
+                *) stage launcher "unrecognised choice '$REPLY' - defaulting to debug"
+                   MODE="debug" ;;
+            esac
         fi
-        printf '\n\033[1;36m========== JetArm Sort v4.1 - pick a profile ==========\033[0m\n'
-        printf '  1) default     Standard: sorting node + tuner UI + rqt auto-popup\n'
-        printf '  2) debug       Default + verbose ROS log + extra stage prints  \033[1m[DEFAULT]\033[0m\n'
-        printf '  3) headless    No rqt auto-popup (tuner UI buttons still work)\n'
-        printf '  4) camera-off  Boot with camera subscription paused\n'
-        printf '  5) ai-off      Boot with inference paused (raw camera only)\n'
-        printf '  6) no-ui       Skip the Tkinter tuner UI (background only)\n'
-        printf '  q) quit\n'
-        printf '\033[1;36m=======================================================\033[0m\n'
-        printf 'Enter choice [1-6/q, default=2 debug, 10s timeout]: '
-        REPLY=""
-        if ! read -r -t 10 REPLY; then
-            printf '\n'
-            stage launcher "no input within 10s - defaulting to debug"
-            REPLY=2
-        fi
-        case "${REPLY:-2}" in
-            1) MODE="default" ;;
-            2|"") MODE="debug" ;;
-            3) MODE="headless" ;;
-            4) MODE="camera-off" ;;
-            5) MODE="ai-off" ;;
-            6) MODE="no-ui" ;;
-            q|Q) MODE="__cancel__" ;;
-            *) stage launcher "unrecognised choice '$REPLY' - defaulting to debug"
-               MODE="debug" ;;
-        esac
     fi
     case "$MODE" in
         __cancel__|"")

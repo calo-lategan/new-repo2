@@ -191,33 +191,42 @@ done
 
 # --- 6. Launcher ---------------------------------------------------------
 
-stage "installing launcher in $LAUNCHER_DIR"
+stage "installing launcher in $LAUNCHER_DIR (as symlinks - git pull auto-updates)"
 mkdir -p "$LAUNCHER_DIR"
-install -m 755 "$V4/launch_v4.1.sh"         "$LAUNCHER_DIR/launch_v4.1.sh"
-install -m 755 "$V4/image_view_chain.sh"    "$LAUNCHER_DIR/image_view_chain.sh"
-install -m 755 "$V4/re-enable-factory.sh"   "$LAUNCHER_DIR/re-enable-factory.sh"
-install -m 755 "$V4/match_launcher_env.sh"  "$LAUNCHER_DIR/match_launcher_env.sh"
+# Symlink (not copy) so `git -C $SRC_DIR pull` immediately updates the
+# launcher without re-running install.sh. Round 11 fix: previous installs
+# used `install -m 755` which COPIED the file - so when the user pulled
+# new launcher changes (e.g. the Zenity/text-mode profile modal), the
+# desktop icon kept running the stale copy from initial install. The -f
+# flag overwrites any existing copy or symlink.
+ln -sf "$V4/launch_v4.1.sh"         "$LAUNCHER_DIR/launch_v4.1.sh"
+ln -sf "$V4/image_view_chain.sh"    "$LAUNCHER_DIR/image_view_chain.sh"
+ln -sf "$V4/re-enable-factory.sh"   "$LAUNCHER_DIR/re-enable-factory.sh"
+ln -sf "$V4/match_launcher_env.sh"  "$LAUNCHER_DIR/match_launcher_env.sh"
 
 # --- 6b. Best-effort install of an image viewer --------------------------
 # image_view / rqt_image_view aren't always preinstalled on the Hiwonder
 # container image. Try to install rqt_image_view via apt (it pulls in
 # image_view as a dep). If apt isn't available or it fails we just
 # warn and let the chain script's browser fallback handle it.
-need_rqt=0; need_iv=0; need_wvs=0; need_zenity=0
+need_rqt=0; need_iv=0; need_wvs=0; need_zenity=0; need_whiptail=0
 command -v rqt_image_view >/dev/null 2>&1 || need_rqt=1
 # image_view is a ROS pkg, not a bin on PATH; check via ros2 pkg list
 ros2 pkg list 2>/dev/null | grep -q '^image_view$' || need_iv=1
 ros2 pkg list 2>/dev/null | grep -q '^web_video_server$' || need_wvs=1
-# zenity: launcher modal falls back to a text picker without it, but the
-# GUI is nicer when launching from the desktop icon.
+# zenity: launcher modal's GUI tier. Falls back to whiptail/text without it.
 command -v zenity >/dev/null 2>&1 || need_zenity=1
+# whiptail: launcher modal's arrow-key TUI tier. Preinstalled on most
+# Ubuntu/Debian but not guaranteed in minimal containers.
+command -v whiptail >/dev/null 2>&1 || need_whiptail=1
 
-if [ $((need_rqt + need_iv + need_wvs + need_zenity)) -gt 0 ]; then
+if [ $((need_rqt + need_iv + need_wvs + need_zenity + need_whiptail)) -gt 0 ]; then
     pkgs=()
-    [ $need_rqt    = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-rqt-image-view")
-    [ $need_iv     = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-image-view")
-    [ $need_wvs    = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-web-video-server")
-    [ $need_zenity = 1 ] && pkgs+=("zenity")
+    [ $need_rqt      = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-rqt-image-view")
+    [ $need_iv       = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-image-view")
+    [ $need_wvs      = 1 ] && pkgs+=("ros-${ROS_DISTRO:-humble}-web-video-server")
+    [ $need_zenity   = 1 ] && pkgs+=("zenity")
+    [ $need_whiptail = 1 ] && pkgs+=("whiptail")
     stage "missing viewer packages: ${pkgs[*]}"
     if command -v apt-get >/dev/null 2>&1; then
         stage "running interactive 'sudo apt-get install' (may prompt for password)"
