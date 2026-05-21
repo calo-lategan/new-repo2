@@ -63,12 +63,17 @@ def launch_setup(context):
     # are available.
     # Auto-open the image_view_chain (rqt -> image_view -> browser) at
     # launch. The tuner UI buttons swap/replace the viewer after launch.
-    # Pass `image_view:=false` if you don't want the auto-popup.
-    open_image_view = LaunchConfiguration('image_view', default='true')
+    # Default is read from JETARM_V4_1_IMAGE_VIEW env var (set in
+    # ~/.jetarm_v4_1.env for persistence). Pass `image_view:=false`
+    # on the command line to override for one run.
+    _env_iv = os.environ.get('JETARM_V4_1_IMAGE_VIEW', 'true').strip().lower()
+    _default_iv = 'false' if _env_iv in ('false', '0', 'no', 'off') else 'true'
+    open_image_view = LaunchConfiguration('image_view', default=_default_iv)
     open_image_view_arg = DeclareLaunchArgument(
         'image_view', default_value=open_image_view,
-        description='Auto-open the image_view_chain on launch '
-                    '(default true; pass image_view:=false to disable).')
+        description='Auto-open the image_view_chain on launch. Default '
+                    'from JETARM_V4_1_IMAGE_VIEW env (true). Pass '
+                    'image_view:=false to override.')
     image_view_topic = LaunchConfiguration(
         'image_view_topic', default='/custom_sortingv4_1/image_result')
     image_view_topic_arg = DeclareLaunchArgument(
@@ -155,6 +160,11 @@ def launch_setup(context):
             'port': 8080,
             'default_stream_type': 'mjpeg',
             'verbose': False,
+            # default_transport=raw: same reason as the rqt/image_view
+            # spawn. Don't let web_video_server negotiate the broken
+            # compressed/theora plugins against depth_cam's publisher.
+            # Harmless on web_video_server versions that ignore it.
+            'default_transport': 'raw',
         }],
     )
 

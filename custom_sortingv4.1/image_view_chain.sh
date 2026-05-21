@@ -105,8 +105,16 @@ run_rqt() {
     # rqt_image_view is a ROS 2 ament-python plugin, not a system binary.
     # Always invoke via `ros2 run` regardless of whether a bare command
     # exists somewhere on PATH.
-    log "launching ros2 run rqt_image_view rqt_image_view $TOPIC"
-    ros2 run rqt_image_view rqt_image_view "$TOPIC"
+    #
+    # image_transport:=raw disables the default compressed/theora/
+    # compressedDepth plugin negotiation. Without it, the orbbec
+    # depth_cam publisher tries to compress 16UC1 depth as JPEG/theora
+    # and compressedDepth-encode RGB - logs ~30 Hz of errors and
+    # eventually crashes onNewFrameSetCallback with a 227 TB OpenCV
+    # allocation. Always pass it.
+    log "launching ros2 run rqt_image_view rqt_image_view $TOPIC (raw transport only)"
+    ros2 run rqt_image_view rqt_image_view "$TOPIC" \
+        --ros-args -p image_transport:=raw
     local rc=$?
     log "rqt_image_view exited (rc=$rc) - opening browser fallback"
     probe_web_server
@@ -114,8 +122,9 @@ run_rqt() {
 }
 
 run_image_view() {
-    log "rqt_image_view not available - launching ros2 run image_view image_view"
-    ros2 run image_view image_view --ros-args -r "image:=$TOPIC"
+    log "rqt_image_view not available - launching ros2 run image_view image_view (raw transport)"
+    ros2 run image_view image_view \
+        --ros-args -r "image:=$TOPIC" -p image_transport:=raw
     local rc=$?
     log "image_view exited (rc=$rc) - opening browser fallback"
     probe_web_server

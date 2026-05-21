@@ -62,11 +62,19 @@ The publisher uses default RELIABLE QoS with depth=10 — that matches what `ima
 
 ### Disable auto-popup on launch
 
+One-shot (this run only):
+
 ```bash
 ~/jetarm_v4_1/launch_v4.1.sh image_view:=false
 ```
 
-(The buttons still work.)
+Persistent (every run; survives reboot):
+
+```bash
+echo 'JETARM_V4_1_IMAGE_VIEW=false' >> ~/.jetarm_v4_1.env
+```
+
+The launcher reads `~/.jetarm_v4_1.env` on every start (same file you use for `ROS_DOMAIN_ID`). The tuner UI buttons still work either way.
 
 ### Point the viewer at a different topic
 
@@ -111,10 +119,14 @@ ros2 topic hz /custom_sortingv4_1/image_result          # expect ~15-30 Hz
 ros2 topic echo --once /custom_sortingv4_1/image_result --no-arr | head -20
 #    encoding: bgr8 / height: 480 / width: 640 / step: 1920
 
-# 3. Direct rqt_image_view test with X11 env (use `ros2 run` - the
-#    apt-installed rqt_image_view is a Python plugin, not a system binary).
+# 3. Direct rqt_image_view test with X11 env + raw transport. Without
+#    image_transport:=raw, rqt negotiates compressed/theora/compressedDepth
+#    plugins. They fail to encode the orbbec depth (16UC1) and the RGB
+#    in mismatched directions, log ~30 Hz of errors, and eventually
+#    crash the depth_cam component_container with an OpenCV OOM.
 QT_X11_NO_MITSHM=1 QT_QPA_PLATFORM=xcb LIBGL_ALWAYS_SOFTWARE=1 \
-    ros2 run rqt_image_view rqt_image_view /custom_sortingv4_1/image_result
+    ros2 run rqt_image_view rqt_image_view /custom_sortingv4_1/image_result \
+        --ros-args -p image_transport:=raw
 
 # 4. web_video_server in browser
 firefox "http://$(hostname -I | awk '{print $1}'):8080/stream?topic=/custom_sortingv4_1/image_result&th=100"
@@ -133,7 +145,23 @@ ros2 topic info /custom_sortingv4_1/image_result --verbose
 
 # 8. If rqt window is blank/black, dump its log
 cat /tmp/jetarm_v4_1_rqt.log
+
+# 9. Confirm subscribers are connected. The heartbeat now reports result_subs=N.
+#    With one rqt open: result_subs=1. With rqt + browser: result_subs>=2.
+#    If result_subs=0 while a viewer is open, you're in a different ROS_DOMAIN
+#    or DDS discovery is broken - see "Debugging from a second terminal" above.
 ```
+
+### depth_cam crash recovery
+
+If you see `[component_container] terminate called` + `OpenCV ... Failed to allocate ... bytes` in the launcher, the orbbec driver crashed. v4.1's heartbeat will print `cam_fps=0.0` from then on. To recover without restarting everything:
+
+```bash
+pkill -f component_container
+~/jetarm_v4_1/launch_v4.1.sh
+```
+
+The most common trigger was the image_transport plugin storm; v4.1 round 6+ forces `image_transport:=raw` on every viewer so it shouldn't happen anymore. If it does, paste the lines leading up to the crash.
 
 On the node side, the first time `_publish_image` succeeds it prints:
 

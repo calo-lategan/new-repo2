@@ -636,23 +636,33 @@ class TunerUI:
     def _on_open_rqt(self):
         # rqt_image_view is a ROS 2 ament Python plugin - not a system
         # binary on PATH. Invoke via `ros2 run` so it actually launches.
+        # image_transport:=raw disables the default compressed/theora/
+        # compressedDepth plugin negotiation - if we leave the default,
+        # the orbbec depth_cam publisher tries to JPEG-encode 16UC1
+        # depth (and theora-encode it, and compressedDepth-encode RGB)
+        # which floods the log at ~30 Hz and eventually corrupts the
+        # orbbec onNewFrameSetCallback buffer (OpenCV "Failed to
+        # allocate 227 TB" -> container crash).
         # tee output to /tmp so the user can `cat` it if rqt errors.
         bash_cmd = (
             self._viewer_env_prefix()
             + "source /opt/ros/humble/setup.bash; "
             + "source ~/ros2_ws/install/setup.bash; "
-            + f"ros2 run rqt_image_view rqt_image_view {self._cam_topic()} 2>&1 "
-            + "| tee /tmp/jetarm_v4_1_rqt.log; exec bash"
+            + f"ros2 run rqt_image_view rqt_image_view {self._cam_topic()} "
+            + "--ros-args -p image_transport:=raw "
+            + "2>&1 | tee /tmp/jetarm_v4_1_rqt.log; exec bash"
         )
         self._spawn_viewer(['terminator', '-x', 'bash', '-c', bash_cmd], 'rqt_image_view')
 
     def _on_open_image_view(self):
-        # image_view is also a ROS 2 entry point - same `ros2 run` pattern.
+        # Same reason as _on_open_rqt: image_transport:=raw to skip the
+        # broken compressed/theora plugin pipeline.
         bash_cmd = (
             self._viewer_env_prefix()
             + "source /opt/ros/humble/setup.bash; "
             + "source ~/ros2_ws/install/setup.bash; "
             + f"ros2 run image_view image_view --ros-args -r image:={self._cam_topic()} "
+            + "-p image_transport:=raw "
             + "2>&1 | tee /tmp/jetarm_v4_1_image_view.log; exec bash"
         )
         self._spawn_viewer(['terminator', '-x', 'bash', '-c', bash_cmd], 'image_view')
