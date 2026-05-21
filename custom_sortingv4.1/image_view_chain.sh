@@ -16,19 +16,22 @@
 #   IMAGE_VIEW_THROTTLE_MS=100                    web_video_server &th= value
 
 set +u  # ROS setup files reference unset vars
-# Qt + GL env that makes rqt_image_view / image_view actually render
-# inside the Hiwonder Docker container's forwarded X11 socket. With
-# only QT_X11_NO_MITSHM the window chrome appears but the image area
-# stays black - the other two unblock the image canvas.
-export QT_X11_NO_MITSHM=1        # MIT-SHM unsupported on forwarded socket
-export QT_QPA_PLATFORM=xcb       # auto-detect picks wayland/eglfs sometimes
-export LIBGL_ALWAYS_SOFTWARE=1   # NVIDIA libGL in the container can't talk
-                                 # to the host X server's GLX; sw raster
-                                 # of a 640x480 image is cheap
+# Round 7: hardware GL by default. The software-render env vars below
+# get applied only when JETARM_V4_1_QT_SAFE=1 - they cap rqt's paint
+# at ~5-10 fps on the Orin Nano. The blank-window issue they were
+# fighting in round 2 turned out to be a `ros2 run` invocation bug
+# (fixed in round 5), not a Qt/GL problem.
+if [ "${JETARM_V4_1_QT_SAFE:-0}" = "1" ]; then
+    export QT_X11_NO_MITSHM=1
+    export QT_QPA_PLATFORM=xcb
+    export LIBGL_ALWAYS_SOFTWARE=1
+fi
 
 TOPIC="${1:-/custom_sortingv4_1/image_result}"
 WEB_PORT="${IMAGE_VIEW_WEB_SERVER_PORT:-8080}"
-THROTTLE_MS="${IMAGE_VIEW_THROTTLE_MS:-100}"
+# 0 = no throttle (browser shows the full pub rate). The 100 ms cap from
+# round 2 was a workaround for the blank-stream bug fixed in round 6.
+THROTTLE_MS="${IMAGE_VIEW_THROTTLE_MS:-0}"
 
 log() { printf "\033[1;36m[image-view]\033[0m %s\n" "$*"; }
 err() { printf "\033[1;31m[image-view]\033[0m %s\n" "$*" >&2; }
@@ -52,9 +55,13 @@ open_browser() {
     fi
     local ip url cmd
     ip=$(detect_ip)
-    # &th=<ms> throttles web_video_server's polling. Without it some
-    # browsers + web_video_server 3.x render a blank/stalled stream.
-    url="http://${ip}:${WEB_PORT}/stream?topic=${TOPIC}&th=${THROTTLE_MS}"
+    # &th=<ms> caps the browser's poll rate. Default 0 (uncapped); set
+    # IMAGE_VIEW_THROTTLE_MS to clamp if your network is slow.
+    if [ "${THROTTLE_MS:-0}" -gt 0 ]; then
+        url="http://${ip}:${WEB_PORT}/stream?topic=${TOPIC}&th=${THROTTLE_MS}"
+    else
+        url="http://${ip}:${WEB_PORT}/stream?topic=${TOPIC}"
+    fi
     log "browser fallback URL: $url"
     # Honor explicit override
     if [ -n "${IMAGE_VIEW_BROWSER:-}" ] && command -v "$IMAGE_VIEW_BROWSER" >/dev/null 2>&1; then
