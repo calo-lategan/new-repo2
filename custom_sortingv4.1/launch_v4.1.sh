@@ -99,6 +99,54 @@ stage launcher "    Profiles  : $PROFILES_DIR"
 stage launcher "    Camera    : $CAMERA_TOPIC"
 
 # -----------------------------------------------------------------------------
+# Mode-picker modal (Zenity). Only shown when:
+#  - SKIP_MODAL is not set to 1
+#  - we have a DISPLAY (i.e. running from the desktop, not ssh-no-X)
+#  - zenity is on PATH
+#  - no positional args were already passed (those override the modal)
+#
+# Sets MODAL_ARGS based on the user's pick; merged into LAUNCH_ARGS later.
+# -----------------------------------------------------------------------------
+MODAL_ARGS=()
+if [ "${SKIP_MODAL:-0}" != "1" ] \
+   && [ $# -eq 0 ] \
+   && [ -n "${DISPLAY:-}" ] \
+   && command -v zenity >/dev/null 2>&1; then
+    stage launcher "showing launch profile picker..."
+    MODE=$(zenity --list --radiolist \
+        --title="JetArm Sort v4.1 - pick a profile" \
+        --text="Select what to launch:" \
+        --width=560 --height=340 \
+        --column="Pick" --column="Profile" --column="What it does" \
+        TRUE  "default"     "Standard: sorting node + tuner UI + rqt auto-popup" \
+        FALSE "debug"       "Default + verbose ROS log + extra stage prints" \
+        FALSE "headless"    "No rqt auto-popup. Buttons in tuner UI still work." \
+        FALSE "camera-off"  "Boot with camera subscription paused (debug pub path)" \
+        FALSE "ai-off"      "Boot with inference paused (raw camera view only)" \
+        FALSE "no-ui"       "Skip the Tkinter tuner UI (background only)" \
+        2>/dev/null) || MODE="__cancel__"
+    case "$MODE" in
+        __cancel__|"")
+            stage launcher "modal cancelled - exiting without launch"
+            exit 0 ;;
+        debug)
+            export JETARM_V4_DEBUG=1
+            MODAL_ARGS+=("debug:=true") ;;
+        headless)
+            MODAL_ARGS+=("image_view:=false") ;;
+        camera-off)
+            MODAL_ARGS+=("enable_camera_sub:=false") ;;
+        ai-off)
+            MODAL_ARGS+=("enable_inference:=false") ;;
+        no-ui)
+            MODAL_ARGS+=("tune_ui:=false") ;;
+        default)
+            : ;;
+    esac
+    stage launcher "  selected profile: $MODE (args: ${MODAL_ARGS[*]:-none})"
+fi
+
+# -----------------------------------------------------------------------------
 # STEP 0 (always first): stop + disable the factory app.
 # -----------------------------------------------------------------------------
 # Same intent as `SKIP_SERVICE_RESTART=1` - we never want the factory
@@ -412,6 +460,10 @@ fi
 # STEP 8: actually launch v4.
 # -----------------------------------------------------------------------------
 LAUNCH_ARGS=("$@")
+# Append modal selections (no-op if modal was skipped or canceled to default).
+if [ "${#MODAL_ARGS[@]:-0}" -gt 0 ]; then
+    LAUNCH_ARGS+=("${MODAL_ARGS[@]}")
+fi
 if [ "${JETARM_V4_DEBUG:-0}" = "1" ]; then
     LAUNCH_ARGS+=("debug:=true")
     export JETARM_V4_DEBUG=1

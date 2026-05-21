@@ -367,34 +367,80 @@ class TunerUI:
     # ---- generic widgets ----
 
     def _add_float(self, parent, name, lo, hi, res, init):
-        frame = ttk.Frame(parent); frame.pack(fill='x', padx=6, pady=3)
-        ttk.Label(frame, text=name, width=28).pack(side='left')
-        val_label = ttk.Label(frame, text=f'{init:.3f}', width=8)
-        val_label.pack(side='right')
-        var = tk.DoubleVar(value=float(init))
-        def on_change(_=None):
-            v = float(var.get())
-            val_label.configure(text=f'{v:.3f}')
-            if not self._building:
-                self.client.set_value(name, v)
-        ttk.Scale(frame, from_=lo, to=hi, variable=var,
-                  orient='horizontal', command=on_change
-                  ).pack(side='left', fill='x', expand=True, padx=8)
+        self._add_numeric(parent, name, lo, hi, res, init, kind='float')
 
     def _add_int(self, parent, name, lo, hi, res, init):
+        self._add_numeric(parent, name, lo, hi, res, init, kind='int')
+
+    def _add_numeric(self, parent, name, lo, hi, res, init, kind):
+        """One slider row with:
+          - label (name)
+          - slider that updates the local display on drag, but only
+            pushes to ROS on mouse-release (sliderReleased() pattern).
+            Stops the executor saturation we saw in the v4.1 logs
+            (hundreds of /set_parameters calls per drag).
+          - numeric entry box for exact values (type then Enter or tab).
+            Both paths produce exactly one ROS call per finalized value.
+        """
         frame = ttk.Frame(parent); frame.pack(fill='x', padx=6, pady=3)
         ttk.Label(frame, text=name, width=28).pack(side='left')
-        var = tk.IntVar(value=int(init))
-        val_label = ttk.Label(frame, text=str(init), width=8)
-        val_label.pack(side='right')
-        def on_change(_=None):
-            v = int(round(float(var.get())))
-            val_label.configure(text=str(v))
-            if not self._building:
-                self.client.set_value(name, v)
-        ttk.Scale(frame, from_=lo, to=hi, variable=var,
-                  orient='horizontal', command=on_change
-                  ).pack(side='left', fill='x', expand=True, padx=8)
+
+        fmt = (lambda v: f'{float(v):.3f}') if kind == 'float' else (lambda v: f'{int(round(float(v)))}')
+        var = tk.DoubleVar(value=float(init)) if kind == 'float' else tk.IntVar(value=int(init))
+
+        # Right-hand numeric entry box
+        entry = ttk.Entry(frame, width=8, justify='right')
+        entry.insert(0, fmt(init))
+        entry.pack(side='right')
+
+        def push_to_ros(v):
+            """Send a single /set_parameters call. Always clamps + formats."""
+            if self._building:
+                return
+            try:
+                v = float(v) if kind == 'float' else int(round(float(v)))
+            except (TypeError, ValueError):
+                return
+            v = max(lo, min(hi, v))
+            var.set(v)
+            entry.delete(0, 'end'); entry.insert(0, fmt(v))
+            self.client.set_value(name, v)
+
+        def on_drag(value_str):
+            """Drag: update entry display LOCALLY only. No ROS traffic."""
+            try:
+                v = float(value_str)
+            except (TypeError, ValueError):
+                return
+            if kind == 'int':
+                v = int(round(v))
+            entry.delete(0, 'end'); entry.insert(0, fmt(v))
+
+        def on_release(_event):
+            push_to_ros(var.get())
+
+        def on_entry_commit(_event=None):
+            push_to_ros(entry.get())
+
+        scale = ttk.Scale(frame, from_=lo, to=hi, variable=var,
+                          orient='horizontal', command=on_drag)
+        scale.pack(side='left', fill='x', expand=True, padx=8)
+        # Only push on mouse-release - the key decoupling.
+        scale.bind('<ButtonRelease-1>', on_release)
+
+        # Numeric entry: Enter or focus-out commits.
+        entry.bind('<Return>', on_entry_commit)
+        entry.bind('<FocusOut>', on_entry_commit)
+        # Up/Down arrows nudge by `res`.
+        def _nudge(sign):
+            try:
+                v = float(entry.get())
+            except ValueError:
+                v = float(init)
+            v = v + sign * float(res or (1 if kind == 'int' else 0.01))
+            push_to_ros(v)
+        entry.bind('<Up>',   lambda e: _nudge(+1))
+        entry.bind('<Down>', lambda e: _nudge(-1))
 
     def _add_bool(self, parent, name, init):
         var = tk.BooleanVar(value=bool(init))
