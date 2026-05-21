@@ -822,9 +822,18 @@ class ObjectSortingNodeV4(Node):
                 last_inf_ms = 1000.0 * (time.time() - latest[2])
             except Exception:
                 pass
+        # Subscriber count on /custom_sortingv4_1/image_result. Confirms
+        # that viewers are actually connected. If result_subs=0 while a
+        # viewer window is open, the viewer is in a different ROS_DOMAIN
+        # or its subscription dropped.
+        try:
+            result_subs = self.result_publisher.get_subscription_count()
+        except Exception:
+            result_subs = -1
         _stage('heartbeat',
                f'enter={self.enter} sorting={self.enable_sorting} '
                f'cam_fps={fps:.1f} frames={self._frames_received} '
+               f'result_subs={result_subs} '
                f'roi={"ok" if len(self.roi) else "NONE"} '
                f'intrinsic={"ok" if self.intrinsic is not None else "NONE"} '
                f'inference_age_ms={last_inf_ms:.0f} '
