@@ -111,8 +111,10 @@ ros2 topic hz /custom_sortingv4_1/image_result          # expect ~15-30 Hz
 ros2 topic echo --once /custom_sortingv4_1/image_result --no-arr | head -20
 #    encoding: bgr8 / height: 480 / width: 640 / step: 1920
 
-# 3. Direct rqt_image_view test with X11 env + explicit QoS
-QT_X11_NO_MITSHM=1 rqt_image_view /custom_sortingv4_1/image_result
+# 3. Direct rqt_image_view test with X11 env (use `ros2 run` - the
+#    apt-installed rqt_image_view is a Python plugin, not a system binary).
+QT_X11_NO_MITSHM=1 QT_QPA_PLATFORM=xcb LIBGL_ALWAYS_SOFTWARE=1 \
+    ros2 run rqt_image_view rqt_image_view /custom_sortingv4_1/image_result
 
 # 4. web_video_server in browser
 firefox "http://$(hostname -I | awk '{print $1}'):8080/stream?topic=/custom_sortingv4_1/image_result&th=100"

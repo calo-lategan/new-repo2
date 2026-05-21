@@ -30,7 +30,19 @@ source /home/ubuntu/third_party_ros2/orbbec_ws/install/setup.bash 2>/dev/null
 echo "==> matched launcher env:"
 echo "    ROS_DOMAIN_ID=$ROS_DOMAIN_ID"
 echo "    RMW_IMPLEMENTATION=$RMW_IMPLEMENTATION"
-echo "    rqt_image_view on PATH: $(command -v rqt_image_view || echo NO)"
+# rqt_image_view is an ament-python plugin, NOT a system binary.
+# `command -v rqt_image_view` will say NO even when ros-humble-rqt-image-view
+# is installed - that's a misleading signal. Detect via `ros2 pkg` instead.
+if ros2 pkg executables rqt_image_view 2>/dev/null | grep -q '^rqt_image_view rqt_image_view$'; then
+    echo "    rqt_image_view: installed (run via 'ros2 run rqt_image_view rqt_image_view <topic>')"
+else
+    echo "    rqt_image_view: NOT installed - sudo apt install ros-${ROS_DISTRO:-humble}-rqt-image-view"
+fi
+if ros2 pkg executables image_view 2>/dev/null | grep -q '^image_view image_view$'; then
+    echo "    image_view:     installed (run via 'ros2 run image_view image_view --ros-args -r image:=<topic>')"
+else
+    echo "    image_view:     NOT installed - sudo apt install ros-${ROS_DISTRO:-humble}-image-view"
+fi
 echo ""
 echo "    ros2 node list:"
 ros2 node list 2>/dev/null | sed 's/^/      /' || echo "      (no daemon yet; try again in a second)"

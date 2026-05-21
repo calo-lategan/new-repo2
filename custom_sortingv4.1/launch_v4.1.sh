@@ -334,72 +334,73 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# STEP 6: wait for systemd to mark the service active.
+# STEP 6-7: pre-launch waits.
 # -----------------------------------------------------------------------------
-stage service "waiting up to ${SERVICE_READY_TIMEOUT}s for systemd active..."
-svc_ok=0
-for ((i=0; i<SERVICE_READY_TIMEOUT; i++)); do
-    if systemctl is-active --quiet "$SERVICE_NAME"; then
-        ok service "active (took ${i}s)"; svc_ok=1; break
-    fi
-    sleep 1
-done
-if [ "$svc_ok" -ne 1 ]; then
-    err service "$SERVICE_NAME never reported active"
-    err service "diagnose with: sudo journalctl -u $SERVICE_NAME -n 60 --no-pager"
-fi
-
-# Controller topics (servo / kinematics) come up first - confirm they
-# exist before we wait for the camera (which is gated by a TimerAction
-# inside Hiwonder's bringup.launch.py).
-stage controllers "waiting up to ${CONTROLLER_TOPIC_TIMEOUT}s for /ros_robot_controller*..."
-ctrl_ok=0
-for ((i=0; i<CONTROLLER_TOPIC_TIMEOUT; i++)); do
-    if ros2 topic list 2>/dev/null | grep -q "ros_robot_controller"; then
-        ok controllers "controller topics visible (took ${i}s)"
-        ctrl_ok=1; break
-    fi
-    sleep 1
-done
-if [ "$ctrl_ok" -ne 1 ]; then
-    err controllers "controller topics never appeared - kinematics will hang"
-    err controllers "check: ros2 topic list  /  sudo journalctl -u $SERVICE_NAME"
-fi
-
-# -----------------------------------------------------------------------------
-# STEP 7: wait for the camera topic specifically.
-# bringup.launch.py runs:    TimerAction(period=18.0, actions=[depth_camera_launch])
-# So the camera will appear no earlier than ~18s after the service starts.
-# We give it CAMERA_READY_TIMEOUT (45s by default) and we also poll for
-# actual messages on the topic, not just its presence, because the topic
-# can be advertised before the driver is publishing.
-# -----------------------------------------------------------------------------
-stage camera "waiting up to ${CAMERA_READY_TIMEOUT}s for $CAMERA_TOPIC to publish..."
-cam_ok=0
-cam_advertised=0
-for ((i=0; i<CAMERA_READY_TIMEOUT; i++)); do
-    if [ "$cam_advertised" -ne 1 ]; then
-        if ros2 topic list 2>/dev/null | grep -q "^${CAMERA_TOPIC}$"; then
-            cam_advertised=1
-            ok camera "topic advertised (took ${i}s) - now waiting for frames"
+# v4.1 disables the factory service and starts everything (sdk, depth_cam,
+# controllers, web_video_server, v4 node, tuner UI) from inside our own
+# `ros2 launch` below. So waiting BEFORE the launch for the factory's
+# service / controllers / camera topic always fails - they don't exist
+# until our launch creates them. The waits used to add 100+ s per launch
+# of pointless timeouts.
+#
+# Set WAIT_FOR_FACTORY_SERVICE=1 to restore the legacy pre-launch waits
+# (only useful if you've left the factory service enabled - i.e. didn't
+# use v4.1's STEP 0 disable).
+WAIT_FOR_FACTORY_SERVICE="${WAIT_FOR_FACTORY_SERVICE:-0}"
+if [ "$WAIT_FOR_FACTORY_SERVICE" = "1" ]; then
+    stage service "waiting up to ${SERVICE_READY_TIMEOUT}s for systemd active..."
+    svc_ok=0
+    for ((i=0; i<SERVICE_READY_TIMEOUT; i++)); do
+        if systemctl is-active --quiet "$SERVICE_NAME"; then
+            ok service "active (took ${i}s)"; svc_ok=1; break
         fi
-    else
-        # ros2 topic hz blocks; use a short timeout to probe.
-        if timeout 2 ros2 topic echo --once "$CAMERA_TOPIC" >/dev/null 2>&1; then
-            ok camera "camera publishing frames (took ${i}s total)"
-            cam_ok=1; break
-        fi
+        sleep 1
+    done
+    if [ "$svc_ok" -ne 1 ]; then
+        err service "$SERVICE_NAME never reported active"
+        err service "diagnose with: sudo journalctl -u $SERVICE_NAME -n 60 --no-pager"
     fi
-    sleep 1
-done
 
-if [ "$cam_ok" -ne 1 ]; then
-    err camera "camera did not start publishing within ${CAMERA_READY_TIMEOUT}s"
-    err camera "possible causes:"
-    err camera "  - depth_cam process crashed (check journalctl)"
-    err camera "  - USB unplugged / wrong CAMERA_TYPE env"
-    err camera "  - another node is holding the camera open"
-    err camera "we'll launch anyway - the v4 node will print [camera] errors if it can't see frames"
+    stage controllers "waiting up to ${CONTROLLER_TOPIC_TIMEOUT}s for /ros_robot_controller*..."
+    ctrl_ok=0
+    for ((i=0; i<CONTROLLER_TOPIC_TIMEOUT; i++)); do
+        if ros2 topic list 2>/dev/null | grep -q "ros_robot_controller"; then
+            ok controllers "controller topics visible (took ${i}s)"
+            ctrl_ok=1; break
+        fi
+        sleep 1
+    done
+    if [ "$ctrl_ok" -ne 1 ]; then
+        err controllers "controller topics never appeared - kinematics will hang"
+        err controllers "check: ros2 topic list  /  sudo journalctl -u $SERVICE_NAME"
+    fi
+
+    stage camera "waiting up to ${CAMERA_READY_TIMEOUT}s for $CAMERA_TOPIC to publish..."
+    cam_ok=0
+    cam_advertised=0
+    for ((i=0; i<CAMERA_READY_TIMEOUT; i++)); do
+        if [ "$cam_advertised" -ne 1 ]; then
+            if ros2 topic list 2>/dev/null | grep -q "^${CAMERA_TOPIC}$"; then
+                cam_advertised=1
+                ok camera "topic advertised (took ${i}s) - now waiting for frames"
+            fi
+        else
+            if timeout 2 ros2 topic echo --once "$CAMERA_TOPIC" >/dev/null 2>&1; then
+                ok camera "camera publishing frames (took ${i}s total)"
+                cam_ok=1; break
+            fi
+        fi
+        sleep 1
+    done
+
+    if [ "$cam_ok" -ne 1 ]; then
+        err camera "camera did not start publishing within ${CAMERA_READY_TIMEOUT}s"
+        err camera "we'll launch anyway - the v4 node will print [camera] errors if it can't see frames"
+    fi
+else
+    stage launcher "skipping pre-launch service/controllers/camera waits"
+    stage launcher "  (v4.1 brings everything up inside ros2 launch below;"
+    stage launcher "   set WAIT_FOR_FACTORY_SERVICE=1 to restore legacy waits)"
 fi
 
 if [ "$EXTRA_BOOT_GRACE" -gt 0 ]; then

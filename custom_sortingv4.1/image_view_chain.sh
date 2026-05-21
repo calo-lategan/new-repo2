@@ -102,8 +102,11 @@ probe_web_server() {
 }
 
 run_rqt() {
-    log "launching rqt_image_view $TOPIC"
-    rqt_image_view "$TOPIC"
+    # rqt_image_view is a ROS 2 ament-python plugin, not a system binary.
+    # Always invoke via `ros2 run` regardless of whether a bare command
+    # exists somewhere on PATH.
+    log "launching ros2 run rqt_image_view rqt_image_view $TOPIC"
+    ros2 run rqt_image_view rqt_image_view "$TOPIC"
     local rc=$?
     log "rqt_image_view exited (rc=$rc) - opening browser fallback"
     probe_web_server
@@ -126,9 +129,16 @@ run_no_viewer() {
     open_browser
 }
 
-if command -v rqt_image_view >/dev/null 2>&1; then
+# Detect viewers via `ros2 pkg executables` - that's the only reliable
+# way to know if the ament-python entry points are present. `command -v
+# rqt_image_view` always returns false even when ros-humble-rqt-image-view
+# is installed, because apt doesn't put a bin/ symlink for it.
+have_pkg() {
+    ros2 pkg executables "$1" 2>/dev/null | grep -q "^$1 $1$"
+}
+if have_pkg rqt_image_view; then
     run_rqt
-elif command -v ros2 >/dev/null 2>&1; then
+elif have_pkg image_view; then
     run_image_view
 else
     run_no_viewer
