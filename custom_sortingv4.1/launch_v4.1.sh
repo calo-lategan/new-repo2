@@ -118,8 +118,8 @@ if [ "${SKIP_MODAL:-0}" != "1" ] \
         --text="Select what to launch:" \
         --width=560 --height=340 \
         --column="Pick" --column="Profile" --column="What it does" \
-        TRUE  "default"     "Standard: sorting node + tuner UI + rqt auto-popup" \
-        FALSE "debug"       "Default + verbose ROS log + extra stage prints" \
+        FALSE "default"     "Standard: sorting node + tuner UI + rqt auto-popup" \
+        TRUE  "debug"       "Default + verbose ROS log + extra stage prints" \
         FALSE "headless"    "No rqt auto-popup. Buttons in tuner UI still work." \
         FALSE "camera-off"  "Boot with camera subscription paused (debug pub path)" \
         FALSE "ai-off"      "Boot with inference paused (raw camera view only)" \
