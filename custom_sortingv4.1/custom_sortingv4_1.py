@@ -164,15 +164,15 @@ class InferenceWorker(threading.Thread):
         self.yolo_conf = 0.25
         self.yolo_iou = 0.7
         self.yolo_max_det = 100
-        self.yolo_imgsz = 640
+        # NB: no yolo_imgsz - TensorRT engines have a fixed input shape
+        # baked in at compile time, so imgsz is not a runtime knob.
         self.inference_max_hz = 0.0   # 0 = uncapped
         self._last_run_t = 0.0
 
-    def set_yolo_knobs(self, conf=None, iou=None, max_det=None, imgsz=None, hz=None):
+    def set_yolo_knobs(self, conf=None, iou=None, max_det=None, hz=None):
         if conf is not None:    self.yolo_conf = float(conf)
         if iou is not None:     self.yolo_iou = float(iou)
         if max_det is not None: self.yolo_max_det = int(max_det)
-        if imgsz is not None:   self.yolo_imgsz = int(imgsz)
         if hz is not None:      self.inference_max_hz = float(hz)
 
     def pause(self):
@@ -298,10 +298,19 @@ class InferenceWorker(threading.Thread):
             t0 = time.time()
             self._last_run_t = t0
             try:
+                # NOTE: do NOT pass imgsz=... to the predict call. TensorRT
+                # engines have a fixed input shape baked in at compile time
+                # (best_scaff3.engine is built at 320x320). If we pass a
+                # different imgsz, Ultralytics tries to resize to that and
+                # the engine assertion fails:
+                #   input size (1,3,640,640) not equal to max model size (1,3,320,320)
+                # Letting Ultralytics omit imgsz means it uses the engine's
+                # native input shape - which is what the user trained for.
+                # conf/iou/max_det are post-process NMS knobs, safe to tune.
                 results = self.model(
                     frame, verbose=False,
                     conf=self.yolo_conf, iou=self.yolo_iou,
-                    max_det=self.yolo_max_det, imgsz=self.yolo_imgsz)
+                    max_det=self.yolo_max_det)
             except Exception as e:
                 _stage('inference', 'predict() raised - skipping frame', exc=e)
                 self._logger.warn(f'inference error: {e}')
@@ -516,7 +525,13 @@ class ObjectSortingNodeV4(Node):
         ('yolo_conf_thresh', 0.25, (0.05, 0.95)),
         ('yolo_iou_thresh',  0.7,  (0.10, 0.90)),
         ('yolo_max_det',     100,  (1, 300)),
-        ('yolo_imgsz',       640,  (160, 1280)),  # 320/416/512/640 are typical; smaller = faster
+        # yolo_imgsz REMOVED: it's a build-time property of the TensorRT
+        # engine, not a runtime knob. Changing it at runtime causes:
+        #   AssertionError: input size (1,3,640,640) not equal to max
+        #                   model size (1,3,320,320)
+        # To use a different imgsz, re-export the model from
+        # Ultralytics with the new `imgsz=...` flag and rebuild the
+        # .engine. Then load via the existing engine_path/load_engine.
         # Frame-rate throttles. 0 = uncapped.
         ('inference_max_hz', 0.0,  (0.0, 60.0)),  # cap inference work on GPU
         ('publish_max_hz',   0.0,  (0.0, 60.0)),  # cap how often we emit annotated frames
@@ -721,7 +736,6 @@ class ObjectSortingNodeV4(Node):
                 conf=self.p('yolo_conf_thresh'),
                 iou=self.p('yolo_iou_thresh'),
                 max_det=self.p('yolo_max_det'),
-                imgsz=self.p('yolo_imgsz'),
                 hz=self.p('inference_max_hz'))
             self.inference.start()
             # Honor enable_inference at startup (if user has it preset to false).
@@ -836,14 +850,15 @@ class ObjectSortingNodeV4(Node):
                 _set_debug(bool(p.value))
                 _stage('param', f'debug mode -> {bool(p.value)}')
             # Live-update YOLO knobs as the user moves the sliders.
+            # yolo_imgsz is intentionally excluded - it's a build-time
+            # property of the TRT engine, see TUNABLE_PARAMS comment.
             if p.name in ('yolo_conf_thresh', 'yolo_iou_thresh',
-                          'yolo_max_det', 'yolo_imgsz', 'inference_max_hz') \
+                          'yolo_max_det', 'inference_max_hz') \
                     and hasattr(self, 'inference') and self.inference is not None:
                 kw = {}
                 if p.name == 'yolo_conf_thresh': kw['conf'] = p.value
                 elif p.name == 'yolo_iou_thresh': kw['iou'] = p.value
                 elif p.name == 'yolo_max_det':   kw['max_det'] = p.value
-                elif p.name == 'yolo_imgsz':     kw['imgsz'] = p.value
                 elif p.name == 'inference_max_hz': kw['hz'] = p.value
                 self.inference.set_yolo_knobs(**kw)
                 _stage('param', f'{p.name} -> {p.value}')

@@ -64,8 +64,11 @@ INT_PARAMS = [
     ('gripper_step_pulse',       5, 100, 1),
     ('max_pick_retries',         0, 6, 1),
     # Round 7: YOLO knobs.
+    # NB: yolo_imgsz is intentionally NOT here. TensorRT engines have
+    # a fixed input shape baked in at compile time (best_scaff3.engine
+    # is 320x320). To change imgsz you must re-export from Ultralytics
+    # at the new size and rebuild the .engine.
     ('yolo_max_det',             1, 300, 1),
-    ('yolo_imgsz',               160, 1280, 32),   # multiples of 32 - 320/416/512/640
 ]
 
 BOOL_PARAMS = [
