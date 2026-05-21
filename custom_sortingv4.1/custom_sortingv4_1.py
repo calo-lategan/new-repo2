@@ -322,8 +322,14 @@ class InferenceWorker(threading.Thread):
                 _stage('inference', f'first inference complete '
                                     f'({1000*(time.time()-t0):.0f} ms)')
             elif _DEBUG and frames_done % 30 == 0:
+                # Include the YOLO knobs as actually USED on this call.
+                # If the user moves the conf slider and we see conf=NEW
+                # within ~30 frames, the param push path is confirmed.
                 _dbg('inference', f'frames={frames_done} '
-                                  f'last={1000*(time.time()-t0):.1f}ms')
+                                  f'last={1000*(time.time()-t0):.1f}ms '
+                                  f'conf={self.yolo_conf:.2f} '
+                                  f'iou={self.yolo_iou:.2f} '
+                                  f'max_det={self.yolo_max_det}')
         _stage('inference', 'worker thread stopped')
 
 
@@ -755,6 +761,11 @@ class ObjectSortingNodeV4(Node):
         self.intrinsic = None
         self.distortion = None
         self._latest_raw_bgr = None
+        # Annotated frame buffer fed by sorting_loop. The publish timer
+        # picks it up at a steady rate, so the viewer doesn't slow to a
+        # crawl when each sorting iteration is slow (HED CPU, per-target IK).
+        self._latest_annotated_bgr = None
+        self._latest_annotated_ts = 0.0
         self.image_sub = self.create_subscription(
             Image, '/depth_cam/rgb/image_raw', self.image_callback,
             1, callback_group=self.cam_group)
@@ -778,7 +789,11 @@ class ObjectSortingNodeV4(Node):
         # rqt_image_view / browser viewer always shows the camera) even when
         # sorting is off. When sorting IS on, sorting_loop publishes its own
         # annotated frame and this tick becomes a no-op.
-        self.create_timer(0.067, self._raw_republish_tick,
+        # 33 ms = 30 Hz publish tick (was 15 Hz). The viewer/web_video_server
+        # can paint at this rate; publishing faster than the viewer paints is
+        # wasted work, but 30 Hz gives a smooth view without overcommitting.
+        # publish_max_hz still throttles inside _publish_image.
+        self.create_timer(0.033, self._raw_republish_tick,
                           callback_group=self.svc_group)
 
     # ------------------------------------------------------------------ profile
@@ -1696,16 +1711,14 @@ class ObjectSortingNodeV4(Node):
                     self.target = None
             else:
                 display_image = bgr_image.copy()
-            # cv2.imshow was historically called here (and in upstream
-            # object_sorting.py) - but on the Jetson Orin's containerized
-            # desktop the HighGUI window goes "Not Responding" because the
-            # sorting-loop thread can't pump the Qt event loop fast enough,
-            # and you end up with a black hanging popup. Drop it entirely.
-            # The annotated image is published to ~/image_result which the
-            # Hiwonder web_video_server serves at
-            #   http://<jetson-ip>:8080/stream?topic=/custom_sortingv4_1/image_result
-            # `display:=true` is now a no-op (kept for launch-arg compat).
-            self._publish_image(display_image)
+            # Hand the annotated frame off to the publish timer instead
+            # of publishing inline. This decouples the viewer's frame
+            # rate from the per-iteration cost of this loop (HED CPU,
+            # IK math). The _raw_republish_tick timer picks up the
+            # _latest_annotated_bgr at 30 Hz steady regardless of how
+            # slow we are here.
+            self._latest_annotated_bgr = display_image
+            self._latest_annotated_ts = time.time()
             time.sleep(0.001)
 
     def _publish_image(self, bgr):
@@ -1783,9 +1796,24 @@ class ObjectSortingNodeV4(Node):
             self.inference.submit(bgr)
 
     def _raw_republish_tick(self):
-        if self.enable_sorting:
-            return
-        bgr = self._latest_raw_bgr
+        """Steady-rate publish tick decoupled from sorting_loop's iteration
+        speed. When sorting is on AND we have a fresh annotated frame from
+        the sorting loop, publish that. Otherwise publish the latest raw
+        camera frame. This is the key to keeping pub_fps high even when
+        each sorting iteration is heavy (HED + IK math). Was: only published
+        raw frames when sorting was off; meant pub_fps tanked to 0.4 when
+        target locked because the sorting_loop publish was gated on the
+        whole iteration finishing.
+        """
+        # Prefer the annotated frame if we have a recent one.
+        annotated = getattr(self, '_latest_annotated_bgr', None)
+        annotated_ts = getattr(self, '_latest_annotated_ts', 0.0)
+        now = time.time()
+        if self.enable_sorting and annotated is not None \
+                and (now - annotated_ts) < 1.0:
+            bgr = annotated
+        else:
+            bgr = self._latest_raw_bgr
         if bgr is None:
             return
         try:
