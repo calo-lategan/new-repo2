@@ -968,6 +968,7 @@ class ObjectSortingNodeV4(Node):
         cam_sub_state = 'LIVE' if self.image_sub is not None else 'PAUSED'
         ai_state = 'PAUSED' if (hasattr(self, 'inference') and self.inference
                                 and self.inference._paused.is_set()) else 'LIVE'
+        sorting_alive = not hasattr(self, '_sorting_thread') or self._sorting_thread.is_alive()
         _stage('heartbeat',
                f'enter={self.enter} sorting={self.enable_sorting} '
                f'cam={cam_sub_state} ai={ai_state} '
@@ -977,15 +978,20 @@ class ObjectSortingNodeV4(Node):
                f'intrinsic={"ok" if self.intrinsic is not None else "NONE"} '
                f'inference_age_ms={last_inf_ms:.0f} '
                f'target={self.target[0] if self.target else "none"} '
-               f'transport={self.start_transport}')
+               f'transport={self.start_transport} '
+               f'sorting_thread={"alive" if sorting_alive else "DEAD"}')
+        if not sorting_alive:
+            _stage('heartbeat', 'CRITICAL: sorting_loop thread is DEAD — see CRASHED log above')
 
     def _startup(self):
         if self._startup_done:
             return
         self._startup_done = True
         _stage('startup', 'spawning sorting + transport threads')
-        threading.Thread(target=self._sorting_loop_wrapped, daemon=True).start()
-        threading.Thread(target=self._transport_thread_wrapped, daemon=True).start()
+        self._sorting_thread = threading.Thread(
+            target=self._sorting_loop_wrapped, daemon=True, name='sorting-loop')
+        self._sorting_thread.start()
+        threading.Thread(target=self._transport_thread_wrapped, daemon=True, name='transport').start()
         if self.get_parameter('start').value:
             self.enter_srv_callback(Trigger.Request(), Trigger.Response())
             req = SetBool.Request(); req.data = True
@@ -1617,6 +1623,16 @@ class ObjectSortingNodeV4(Node):
             if ticks == 1:
                 _stage('sorting-loop', 'first inference result reached the loop')
             bgr_image, results, ts = latest
+            # PASSTHROUGH STASH: unconditionally refresh the viewer with the current
+            # frame before any detection work. If detection crashes or the get_roi
+            # gate is looping, the viewer still shows a live camera feed instead of
+            # a frozen stale frame. Detection code below overwrites this on success.
+            _passthrough = bgr_image.copy()
+            if self.start_get_roi or not (hasattr(self.roi, '__len__') and len(self.roi)):
+                cv2.putText(_passthrough, 'ROI: building...',
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
+            self._latest_annotated_bgr = _passthrough
+            self._latest_annotated_ts = time.time()
             if self.start_get_roi and self.intrinsic is not None and self.distortion is not None:
                 try:
                     self.get_roi()
@@ -1633,98 +1649,95 @@ class ObjectSortingNodeV4(Node):
                     time.sleep(0.5); continue
                 self.start_get_roi = False
                 _stage('sorting-loop', 'ROI built - detection branch is now live')
-            roi = self.roi.copy() if len(self.roi) else []
-            intrinsic = self.intrinsic
-            avg_frames = max(1, int(self.p('detection_avg_frames')))
-            still_thresh = int(self.p('count_still_threshold'))
-            move_thresh = int(self.p('count_move_threshold'))
-            lock_thresh = float(self.p('lock_distance_thresh'))
-            if len(roi) > 0 and self.enable_sorting and not self.start_transport and intrinsic is not None:
-                display_image, target_info = self._detections_from_results(bgr_image, roi, results)
-                if target_info and self.last_object_info_list:
-                    target_info = position_change_detect.position_reorder(
-                        target_info, self.last_object_info_list, 20)
-                self.last_object_info_list = copy.deepcopy(target_info)
-                for t in target_info:
-                    cv2.putText(display_image, t[0],
-                                (t[2][0] - 4 * len(t[0] + str(t[1])), t[2][1] + 5),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                if self.p('hot_log_inference_ms'):
-                    cv2.putText(display_image, f'inf {1000*(time.time()-ts):.0f}ms',
-                                (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
-                                (0, 200, 255), 2)
-                target_miss = True
-                for t in target_info:
-                    if not self.target_labels.get(t[0], False):
-                        continue
-                    if self.target is not None:
-                        if self.target[0] != t[0] or self.target[1] != t[1]:
+            try:
+                roi = self.roi.copy() if len(self.roi) else []
+                intrinsic = self.intrinsic
+                avg_frames = max(1, int(self.p('detection_avg_frames')))
+                still_thresh = int(self.p('count_still_threshold'))
+                move_thresh = int(self.p('count_move_threshold'))
+                lock_thresh = float(self.p('lock_distance_thresh'))
+                if len(roi) > 0 and self.enable_sorting and not self.start_transport and intrinsic is not None:
+                    display_image, target_info = self._detections_from_results(bgr_image, roi, results)
+                    if target_info and self.last_object_info_list:
+                        target_info = position_change_detect.position_reorder(
+                            target_info, self.last_object_info_list, 20)
+                    self.last_object_info_list = copy.deepcopy(target_info)
+                    for t in target_info:
+                        cv2.putText(display_image, t[0],
+                                    (t[2][0] - 4 * len(t[0] + str(t[1])), t[2][1] + 5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    if self.p('hot_log_inference_ms'):
+                        cv2.putText(display_image, f'inf {1000*(time.time()-ts):.0f}ms',
+                                    (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                                    (0, 200, 255), 2)
+                    target_miss = True
+                    for t in target_info:
+                        if not self.target_labels.get(t[0], False):
                             continue
-                        target_miss = False
-                        self.target = t
-                    if self.camera_type == 'USB_CAM':
-                        x, y = distortion_inverse_map.undistorted_to_distorted_pixel(
-                            t[2][0], t[2][1], self.intrinsic, self.distortion)
-                        t[2] = (x, y)
-                    position, projection_matrix = self.get_object_world_position(
-                        t[2], intrinsic, self.extristric, self.white_area_center)
-                    result = self.calculate_pick_grasp_yaw(position, t, target_info,
-                                                            intrinsic, projection_matrix)
-                    if result is not None and self.target is None:
-                        self.target = t
-                        break
-                    if (self.last_position is not None and self.target is not None
-                            and result is not None):
-                        e_distance = round(
-                            math.sqrt(pow(self.last_position[0] - position[0], 2))
-                            + math.sqrt(pow(self.last_position[1] - position[1], 2)), 5)
-                        if e_distance <= lock_thresh:
-                            cv2.line(display_image, result[1][0], result[1][1],
-                                     (255, 255, 0), 2, cv2.LINE_AA)
-                            self.count_move = 0
-                            self.count_still += 1
-                        else:
-                            self.count_move += 1
-                            self.count_still = 0
-                        if self.count_move > move_thresh:
-                            self.target = None
-                        if self.count_still > still_thresh:
-                            self.count_still = 0
-                            self.count_move = 0
-                            self.detection_history.setdefault(t[0], []).append(position)
-                            hist = self.detection_history[t[0]][-avg_frames:]
-                            avg_pos = [sum(p[i] for p in hist) / len(hist) for i in range(3)]
-                            self.detection_history[t[0]] = hist
-                            yaw_pulse = 500 + int(result[0] / 240 * 1000)
-                            _stage('sorting-loop',
-                                   f'LOCK -> {t[0]} at '
-                                   f'({avg_pos[0]:.3f},{avg_pos[1]:.3f},{avg_pos[2]:.3f}) '
-                                   f'yaw_pulse={yaw_pulse} '
-                                   f'(avg over {len(hist)} frame{"" if len(hist)==1 else "s"})')
-                            self.transport_info = [avg_pos, yaw_pulse, t]
+                        if self.target is not None:
+                            if self.target[0] != t[0] or self.target[1] != t[1]:
+                                continue
+                            target_miss = False
                             self.target = t
-                            self.start_transport = True
-                    self.last_position = position
-                if target_miss:
-                    self.target_miss_count += 1
-                if self.target_miss_count > 10:
-                    self.target_miss_count = 0
-                    self.target = None
-            else:
-                display_image = bgr_image.copy()
-            # Inline publish: fires at the loop's iteration rate.
-            # When a target is locked and IK/HED work is heavy, the loop
-            # may only iterate at ~0.4fps. The stashed copy below lets
-            # _raw_republish_tick fill the viewer at 30Hz between iterations.
-            self._publish_image(display_image)
-            _dbg('cam-pub', f'annotated published shape={display_image.shape} '
-                            f'loop_lag_ms={1000*(time.time()-ts):.0f}')
-            # Stash a .copy() so the 30Hz timer can republish between slow
-            # iterations. Must be .copy(): the next iteration mutates
-            # display_image in-place via cv2.putText/line/_detections_from_results.
-            self._latest_annotated_bgr = display_image.copy()
-            self._latest_annotated_ts = time.time()
-            time.sleep(0.001)
+                        if self.camera_type == 'USB_CAM':
+                            x, y = distortion_inverse_map.undistorted_to_distorted_pixel(
+                                t[2][0], t[2][1], self.intrinsic, self.distortion)
+                            t[2] = (x, y)
+                        position, projection_matrix = self.get_object_world_position(
+                            t[2], intrinsic, self.extristric, self.white_area_center)
+                        result = self.calculate_pick_grasp_yaw(position, t, target_info,
+                                                                intrinsic, projection_matrix)
+                        if result is not None and self.target is None:
+                            self.target = t
+                            break
+                        if (self.last_position is not None and self.target is not None
+                                and result is not None):
+                            e_distance = round(
+                                math.sqrt(pow(self.last_position[0] - position[0], 2))
+                                + math.sqrt(pow(self.last_position[1] - position[1], 2)), 5)
+                            if e_distance <= lock_thresh:
+                                cv2.line(display_image, result[1][0], result[1][1],
+                                         (255, 255, 0), 2, cv2.LINE_AA)
+                                self.count_move = 0
+                                self.count_still += 1
+                            else:
+                                self.count_move += 1
+                                self.count_still = 0
+                            if self.count_move > move_thresh:
+                                self.target = None
+                            if self.count_still > still_thresh:
+                                self.count_still = 0
+                                self.count_move = 0
+                                self.detection_history.setdefault(t[0], []).append(position)
+                                hist = self.detection_history[t[0]][-avg_frames:]
+                                avg_pos = [sum(p[i] for p in hist) / len(hist) for i in range(3)]
+                                self.detection_history[t[0]] = hist
+                                yaw_pulse = 500 + int(result[0] / 240 * 1000)
+                                _stage('sorting-loop',
+                                       f'LOCK -> {t[0]} at '
+                                       f'({avg_pos[0]:.3f},{avg_pos[1]:.3f},{avg_pos[2]:.3f}) '
+                                       f'yaw_pulse={yaw_pulse} '
+                                       f'(avg over {len(hist)} frame{"" if len(hist)==1 else "s"})')
+                                self.transport_info = [avg_pos, yaw_pulse, t]
+                                self.target = t
+                                self.start_transport = True
+                        self.last_position = position
+                    if target_miss:
+                        self.target_miss_count += 1
+                    if self.target_miss_count > 10:
+                        self.target_miss_count = 0
+                        self.target = None
+                else:
+                    display_image = bgr_image.copy()
+                self._publish_image(display_image)
+                _dbg('cam-pub', f'annotated published shape={display_image.shape} '
+                                f'loop_lag_ms={1000*(time.time()-ts):.0f}')
+                self._latest_annotated_bgr = display_image.copy()
+                self._latest_annotated_ts = time.time()
+                time.sleep(0.001)
+            except Exception as e:
+                _stage('sorting-loop', 'UNHANDLED exception — loop continuing', exc=e)
+                time.sleep(0.1)
 
     def _publish_image(self, bgr):
         try:
@@ -1749,10 +1762,8 @@ class ObjectSortingNodeV4(Node):
             # Some upstream paths can hand us a numpy view (sliced ROI,
             # transposed, etc.) which causes cv_bridge to emit a message
             # with a stride that doesn't match `step = width * channels`.
-            # rqt_image_view, image_view, and web_video_server then render
-            # blank windows. Force a contiguous copy here once - cheap
-            # (~0.5ms on a 640x480 bgr8 frame on the Orin Nano).
-            bgr = np.ascontiguousarray(bgr)
+            if not bgr.flags['C_CONTIGUOUS']:
+                bgr = np.ascontiguousarray(bgr)
             msg = self.bridge.cv2_to_imgmsg(bgr, 'bgr8')
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = 'camera_color_optical_frame'
@@ -1773,8 +1784,8 @@ class ObjectSortingNodeV4(Node):
 
     def camera_info_callback(self, msg):
         try:
-            self.intrinsic = __import__('numpy').matrix(msg.k).reshape(1, -1, 3)
-            self.distortion = __import__('numpy').array(msg.d)
+            self.intrinsic = np.array(msg.k, dtype=np.float64).reshape(3, 3)
+            self.distortion = np.array(msg.d)
             if not self._first_camera_info_logged:
                 self._first_camera_info_logged = True
                 _stage('camera', f'first camera_info received: '
@@ -1795,12 +1806,14 @@ class ObjectSortingNodeV4(Node):
             self._first_frame_logged = True
             _stage('camera', f'FIRST FRAME received: {bgr.shape} '
                              f'enc={ros_rgb_image.encoding}')
-        _dbg('cam-recv', f'frame #{self._frames_received} shape={bgr.shape} '
-                         f'enc={ros_rgb_image.encoding}')
+        if _DEBUG and self._frames_received % 30 == 0:
+            _dbg('cam-recv', f'frame #{self._frames_received} shape={bgr.shape} '
+                             f'enc={ros_rgb_image.encoding}')
         self._latest_raw_bgr = bgr
         if self.enable_sorting:
             self.inference.submit(bgr)
-            _dbg('cam-infer', f'frame #{self._frames_received} submitted to InferenceWorker')
+            if _DEBUG and self._frames_received % 30 == 0:
+                _dbg('cam-infer', f'frame #{self._frames_received} submitted to InferenceWorker')
 
     def _raw_republish_tick(self):
         """30 Hz republisher that keeps the viewer connected at all times.
@@ -1818,12 +1831,14 @@ class ObjectSortingNodeV4(Node):
             if bgr is None:
                 return
             age = time.time() - self._latest_annotated_ts
-            if age > 2.0 and not getattr(self, '_stale_ann_warned', False):
-                _stage('publish', f'WARNING: annotated frame is {age:.1f}s stale '
-                                  f'- sorting_loop may be stuck or very slow')
-                self._stale_ann_warned = True
+            if age > 2.0:
+                last_warn = getattr(self, '_last_stale_warn_age', -999)
+                if age - last_warn >= 30.0:
+                    _stage('publish', f'WARNING: annotated frame is {age:.1f}s stale '
+                                      f'- sorting_loop may be stuck or dead')
+                    self._last_stale_warn_age = age
             elif age < 2.0:
-                self._stale_ann_warned = False
+                self._last_stale_warn_age = -999
             _dbg('cam-pub', f'timer annotated republish age={age:.3f}s')
             try:
                 self._publish_image(bgr)

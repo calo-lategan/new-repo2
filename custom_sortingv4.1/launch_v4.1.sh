@@ -524,13 +524,26 @@ fi
 # -----------------------------------------------------------------------------
 LAUNCH_ARGS=("$@")
 # Append modal selections (no-op if modal was skipped or canceled to default).
-if [ "${#MODAL_ARGS[@]:-0}" -gt 0 ]; then
+if [ "${#MODAL_ARGS[@]}" -gt 0 ]; then
     LAUNCH_ARGS+=("${MODAL_ARGS[@]}")
 fi
 if [ "${JETARM_V4_DEBUG:-0}" = "1" ]; then
     LAUNCH_ARGS+=("debug:=true")
     export JETARM_V4_DEBUG=1
 fi
+
+# Pin Jetson to max clocks for deterministic throughput.
+# Without jetson_clocks, CPU stays at 729MHz and GPU at 305MHz until the
+# governor boosts them - causing 2-3x inference jitter (27ms vs 61ms).
+# Sudoers tip: <user> ALL=(ALL) NOPASSWD: /usr/sbin/nvpmodel, /usr/bin/jetson_clocks
+stage perf "pinning Jetson to MAXN + max clocks..."
+sudo -n nvpmodel -m 0 2>/dev/null \
+    || sudo nvpmodel -m 0 2>/dev/null \
+    || err perf "nvpmodel -m 0 failed (add sudoers rule or run manually)"
+sudo -n jetson_clocks 2>/dev/null \
+    || sudo jetson_clocks 2>/dev/null \
+    || err perf "jetson_clocks failed (add sudoers rule or run manually)"
+ok perf "clocks pinned (or skipped if sudoers not set - add rule to avoid prompt)"
 
 stage launcher "ros2 launch app custom_sorting_nodev4.1.launch.py ${LAUNCH_ARGS[*]}"
 ros2 launch app custom_sorting_nodev4.1.launch.py "${LAUNCH_ARGS[@]}"
