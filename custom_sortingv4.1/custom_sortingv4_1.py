@@ -1616,6 +1616,8 @@ class ObjectSortingNodeV4(Node):
         while self.running:
             if not self.enter:
                 time.sleep(0.05); continue
+            if not self.enable_sorting:
+                time.sleep(0.05); continue
             latest = self.inference.latest()
             if latest is None:
                 time.sleep(0.005); continue
@@ -1784,7 +1786,7 @@ class ObjectSortingNodeV4(Node):
 
     def camera_info_callback(self, msg):
         try:
-            self.intrinsic = np.array(msg.k, dtype=np.float64).reshape(3, 3)
+            self.intrinsic = np.asmatrix(np.array(msg.k, dtype=np.float64).reshape(3, 3))
             self.distortion = np.array(msg.d)
             if not self._first_camera_info_logged:
                 self._first_camera_info_logged = True
