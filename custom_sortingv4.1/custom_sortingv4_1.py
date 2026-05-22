@@ -524,6 +524,14 @@ class ObjectSortingNodeV4(Node):
         ('inference_warmup', True, None),
         ('hot_log_inference_ms', False, None),
         ('debug', False, None),
+        # HED surface-mask preprocessing for color blob detection.
+        # When True, runs image_process.get_top_surface() (HED forward-pass)
+        # on every ROI to mask out non-surface pixels before color thresholding.
+        # On Orin Nano CPU (no CUDA fallback) this costs 500-2000ms per frame
+        # and caps the detection loop at ~0.4fps. With well-calibrated
+        # workspace lighting + ROI, the unmasked LAB colour thresholds work
+        # fine — leave OFF unless color accuracy regresses.
+        ('enable_hed_surface_mask', False, None),
         # Free-form per-target overrides as JSON-ish string, parsed lazily.
         # Example: '{"scaff": {"motion_speed": 0.9}, "blue": {"motion_speed": 1.8}}'
         ('target_overrides', '{}', None),
@@ -761,8 +769,13 @@ class ObjectSortingNodeV4(Node):
         self.intrinsic = None
         self.distortion = None
         self._latest_raw_bgr = None
-        self._latest_annotated_bgr = None
-        self._latest_annotated_ts = 0.0
+        # Round 14: overlay-data architecture. sorting_loop stores DRAWING
+        # PRIMITIVES (bboxes, contours, labels, lock-line) into _latest_overlay
+        # instead of a full annotated image. The 30Hz republisher reads the
+        # latest raw frame from _latest_raw_bgr and composites the overlay on
+        # top before publishing. Live background stays at camera rate even
+        # when detection lags.
+        self._latest_overlay = None
         self.image_sub = self.create_subscription(
             Image, '/depth_cam/rgb/image_raw', self.image_callback,
             1, callback_group=self.cam_group)
@@ -1306,8 +1319,18 @@ class ObjectSortingNodeV4(Node):
     # ------------------------------------------------------------------ vision
 
     def _detections_from_results(self, bgr_image, roi, yolo_results):
+        """Run detection (YOLO + LAB color blobs) on the current frame and
+        return target_info plus a primitives dict for the overlay renderer.
+
+        Returns (target_info, primitives) where primitives is:
+            {'yolo_ops': [(kind, *args), ...],  # 'rect' or 'circle'
+             'color_corners': [np.intp array of 4 (x,y), ...]}
+        No cv2 drawing happens in this method — the republisher applies the
+        primitives to a fresh raw frame at 30Hz (see _draw_overlay).
+        """
         target_info = []
-        draw_image = bgr_image.copy()
+        yolo_ops = []
+        color_corners = []
         roi_img = bgr_image[roi[0]:roi[1], roi[2]:roi[3]]
         # 1) YOLO scaff detections (already inferred by InferenceWorker)
         for result in yolo_results:
@@ -1318,7 +1341,7 @@ class ObjectSortingNodeV4(Node):
                     angle = int(math.degrees(r))
                     target_info.append(['scaff', 1, (int(cx), int(cy)),
                                         (int(w), int(h)), angle])
-                    cv2.circle(draw_image, (int(cx), int(cy)), 8, (0, 0, 255), -1)
+                    yolo_ops.append(('circle', (int(cx), int(cy))))
             else:
                 for box in result.boxes:
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
@@ -1327,15 +1350,16 @@ class ObjectSortingNodeV4(Node):
                     w, h = x2 - x1, y2 - y1
                     target_info.append(['scaff', 1, (int(cx), int(cy)),
                                         (int(w), int(h)), 0])
-                    cv2.rectangle(draw_image,
-                                  (int(x1 + roi[2]), int(y1 + roi[0])),
-                                  (int(x2 + roi[2]), int(y2 + roi[0])),
-                                  (0, 0, 255), 2)
-        # 2) Color blob detection (red/green/blue)
-        # HED top-surface preprocessing is optional - if Hiwonder's cv2.dnn
-        # CUDA backend is unhappy on this OpenCV build, we already replaced
-        # self.image_process with None at startup. Fall through to raw frame.
-        if self.image_process is not None:
+                    yolo_ops.append(('rect',
+                                     (int(x1 + roi[2]), int(y1 + roi[0])),
+                                     (int(x2 + roi[2]), int(y2 + roi[0]))))
+        # 2) Color blob detection (red/green/blue).
+        # HED surface-mask preprocessing is gated by enable_hed_surface_mask
+        # (default False). On Orin Nano CPU HED is 500-2000ms/frame and the
+        # only thing dragging the detection loop to 0.4fps. Without it, LAB
+        # color thresholding on the raw ROI works fine if the workspace is
+        # calibrated and lit evenly.
+        if (self.p('enable_hed_surface_mask') and self.image_process is not None):
             try:
                 roi_img_surface = self.image_process.get_top_surface(roi_img)
             except cv2.error as e:
@@ -1369,13 +1393,13 @@ class ObjectSortingNodeV4(Node):
                 cx, cy = roi[2] + cx, roi[0] + cy
                 corners = list(map(lambda p: (roi[2] + p[0], roi[0] + p[1]),
                                    cv2.boxPoints(rect)))
-                cv2.drawContours(draw_image, [np.intp(corners)], -1,
-                                 (0, 255, 255), 2, cv2.LINE_AA)
+                color_corners.append(np.intp(corners))
                 index += 1
                 angle = int(round(rect[2]))
                 target_info.append([color, index, (int(cx), int(cy)),
                                     (int(rect[1][0]), int(rect[1][1])), angle])
-        return draw_image, target_info
+        primitives = {'yolo_ops': yolo_ops, 'color_corners': color_corners}
+        return target_info, primitives
 
     def get_object_world_position(self, position, intrinsic, extristric,
                                   white_area_center, height=0.03):
@@ -1625,16 +1649,9 @@ class ObjectSortingNodeV4(Node):
             if ticks == 1:
                 _stage('sorting-loop', 'first inference result reached the loop')
             bgr_image, results, ts = latest
-            # PASSTHROUGH STASH: unconditionally refresh the viewer with the current
-            # frame before any detection work. If detection crashes or the get_roi
-            # gate is looping, the viewer still shows a live camera feed instead of
-            # a frozen stale frame. Detection code below overwrites this on success.
-            _passthrough = bgr_image.copy()
-            if self.start_get_roi or not (hasattr(self.roi, '__len__') and len(self.roi)):
-                cv2.putText(_passthrough, 'ROI: building...',
-                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
-            self._latest_annotated_bgr = _passthrough
-            self._latest_annotated_ts = time.time()
+            # Round 14: viewer is fed by _raw_republish_tick which always
+            # grabs the latest raw frame and composites the overlay below.
+            # No passthrough stash needed here.
             if self.start_get_roi and self.intrinsic is not None and self.distortion is not None:
                 try:
                     self.get_roi()
@@ -1658,20 +1675,14 @@ class ObjectSortingNodeV4(Node):
                 still_thresh = int(self.p('count_still_threshold'))
                 move_thresh = int(self.p('count_move_threshold'))
                 lock_thresh = float(self.p('lock_distance_thresh'))
+                lock_line = None
+                primitives = {'yolo_ops': [], 'color_corners': []}
                 if len(roi) > 0 and self.enable_sorting and not self.start_transport and intrinsic is not None:
-                    display_image, target_info = self._detections_from_results(bgr_image, roi, results)
+                    target_info, primitives = self._detections_from_results(bgr_image, roi, results)
                     if target_info and self.last_object_info_list:
                         target_info = position_change_detect.position_reorder(
                             target_info, self.last_object_info_list, 20)
                     self.last_object_info_list = copy.deepcopy(target_info)
-                    for t in target_info:
-                        cv2.putText(display_image, t[0],
-                                    (t[2][0] - 4 * len(t[0] + str(t[1])), t[2][1] + 5),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                    if self.p('hot_log_inference_ms'):
-                        cv2.putText(display_image, f'inf {1000*(time.time()-ts):.0f}ms',
-                                    (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
-                                    (0, 200, 255), 2)
                     target_miss = True
                     for t in target_info:
                         if not self.target_labels.get(t[0], False):
@@ -1698,8 +1709,7 @@ class ObjectSortingNodeV4(Node):
                                 math.sqrt(pow(self.last_position[0] - position[0], 2))
                                 + math.sqrt(pow(self.last_position[1] - position[1], 2)), 5)
                             if e_distance <= lock_thresh:
-                                cv2.line(display_image, result[1][0], result[1][1],
-                                         (255, 255, 0), 2, cv2.LINE_AA)
+                                lock_line = (result[1][0], result[1][1])
                                 self.count_move = 0
                                 self.count_still += 1
                             else:
@@ -1730,12 +1740,20 @@ class ObjectSortingNodeV4(Node):
                         self.target_miss_count = 0
                         self.target = None
                 else:
-                    display_image = bgr_image.copy()
-                self._publish_image(display_image)
-                _dbg('cam-pub', f'annotated published shape={display_image.shape} '
-                                f'loop_lag_ms={1000*(time.time()-ts):.0f}')
-                self._latest_annotated_bgr = display_image.copy()
-                self._latest_annotated_ts = time.time()
+                    target_info = []
+                # Stash the overlay dict for _raw_republish_tick to composite
+                # onto the latest raw frame at 30Hz. The viewer is updated by
+                # the timer, not from here.
+                self._latest_overlay = {
+                    'ts': time.time(),
+                    'targets': copy.deepcopy(target_info),
+                    'yolo_ops': primitives['yolo_ops'],
+                    'color_corners': primitives['color_corners'],
+                    'lock_line': lock_line,
+                    'inf_ms': 1000.0 * (time.time() - ts) if self.p('hot_log_inference_ms') else None,
+                }
+                _dbg('sorting-loop', f'iteration done loop_lag_ms={1000*(time.time()-ts):.0f} '
+                                     f'targets={len(target_info)}')
                 time.sleep(0.001)
             except Exception as e:
                 _stage('sorting-loop', 'UNHANDLED exception — loop continuing', exc=e)
@@ -1817,47 +1835,75 @@ class ObjectSortingNodeV4(Node):
             if _DEBUG and self._frames_received % 30 == 0:
                 _dbg('cam-infer', f'frame #{self._frames_received} submitted to InferenceWorker')
 
+    def _draw_overlay(self, bgr, overlay):
+        """Apply detection overlay primitives in-place onto a fresh raw frame.
+        Called from the 30Hz republisher. The overlay dict is produced once
+        per sorting_loop iteration (~0.4-30 fps depending on HED) but the
+        composited frame is published at full 30Hz, so the live camera
+        background updates fluidly even when detection lags."""
+        if overlay is None:
+            return
+        for op in overlay.get('yolo_ops', ()):
+            kind = op[0]
+            if kind == 'rect':
+                cv2.rectangle(bgr, op[1], op[2], (0, 0, 255), 2)
+            elif kind == 'circle':
+                cv2.circle(bgr, op[1], 8, (0, 0, 255), -1)
+        for corners in overlay.get('color_corners', ()):
+            cv2.drawContours(bgr, [corners], -1, (0, 255, 255), 2, cv2.LINE_AA)
+        for t in overlay.get('targets', ()):
+            label = t[0]
+            cx, cy = t[2]
+            cv2.putText(bgr, label,
+                        (cx - 4 * len(label + str(t[1])), cy + 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        lock_line = overlay.get('lock_line')
+        if lock_line is not None:
+            cv2.line(bgr, lock_line[0], lock_line[1],
+                     (255, 255, 0), 2, cv2.LINE_AA)
+        inf_ms = overlay.get('inf_ms')
+        if inf_ms is not None:
+            cv2.putText(bgr, f'inf {inf_ms:.0f}ms', (8, 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 200, 255), 2)
+
     def _raw_republish_tick(self):
-        """30 Hz republisher that keeps the viewer connected at all times.
-
-        When sorting=True: republishes the last annotated frame stashed by
-        sorting_loop. This fills the viewer between slow loop iterations
-        (e.g. 0.4fps when IK/HED work is heavy). The stash uses .copy() so
-        this timer never sees a partially-mutated numpy array (that was the
-        Round 9 bug that caused blank viewers despite pub_fps=30).
-
-        When sorting=False: republishes the latest raw camera frame.
+        """30 Hz publisher: always grabs the latest raw camera frame and
+        composites the latest detection overlay onto it. The live background
+        updates at camera rate even when the detection loop is slow (HED
+        per-frame can drop it to ~0.4 fps); overlays may lag by 0.5-2s but
+        the user can see the robot moving in real time.
         """
-        if self.enable_sorting:
-            bgr = self._latest_annotated_bgr
-            if bgr is None:
-                return
-            age = time.time() - self._latest_annotated_ts
+        bgr_src = self._latest_raw_bgr
+        if bgr_src is None:
+            return
+        bgr = bgr_src.copy()
+        # ROI-not-yet-ready hint
+        if self.enable_sorting and not (hasattr(self.roi, '__len__') and len(self.roi)):
+            cv2.putText(bgr, 'ROI: building...', (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
+        # Composite overlay when sorting is on
+        if self.enable_sorting and self._latest_overlay is not None:
+            age = time.time() - self._latest_overlay['ts']
             if age > 2.0:
                 last_warn = getattr(self, '_last_stale_warn_age', -999)
                 if age - last_warn >= 30.0:
-                    _stage('publish', f'WARNING: annotated frame is {age:.1f}s stale '
-                                      f'- sorting_loop may be stuck or dead')
+                    _stage('publish', f'WARNING: overlay is {age:.1f}s stale '
+                                      f'- detection loop may be stuck or slow')
                     self._last_stale_warn_age = age
             elif age < 2.0:
                 self._last_stale_warn_age = -999
-            _dbg('cam-pub', f'timer annotated republish age={age:.3f}s')
             try:
-                self._publish_image(bgr)
+                self._draw_overlay(bgr, self._latest_overlay)
             except Exception as e:
-                if not getattr(self, '_ann_pub_warned', False):
-                    _stage('camera', 'annotated republish failed (one-time warn)', exc=e)
-                    self._ann_pub_warned = True
-            return
-        bgr = self._latest_raw_bgr
-        if bgr is None:
-            return
+                if not getattr(self, '_overlay_err_warned', False):
+                    _stage('camera', 'overlay draw failed (one-time warn)', exc=e)
+                    self._overlay_err_warned = True
         try:
             self._publish_image(bgr)
         except Exception as e:
-            if not getattr(self, '_raw_pub_warned', False):
-                _stage('camera', 'raw republish failed (one-time warn)', exc=e)
-                self._raw_pub_warned = True
+            if not getattr(self, '_pub_warned', False):
+                _stage('camera', 'republish failed (one-time warn)', exc=e)
+                self._pub_warned = True
 
 def main():
     _stage('main', 'starting custom_sortingv4_1')
