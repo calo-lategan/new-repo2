@@ -59,10 +59,9 @@ INT_PARAMS = [
     ('detection_avg_frames',     1, 10, 1),
     ('gripper_open_pulse',       50, 500, 5),
     ('gripper_close_pulse',      300, 700, 5),
-    ('gripper_full_closed_pulse', 500, 900, 5),
-    ('gripper_slack',            5, 80, 1),
-    ('gripper_step_pulse',       5, 100, 1),
-    ('max_pick_retries',         0, 6, 1),
+    # Round 15: gripper_full_closed_pulse, gripper_slack, gripper_step_pulse,
+    # max_pick_retries are no longer used — pick is one-shot. Params remain
+    # declared on the node for backward profile compat but are hidden here.
     # Round 7: YOLO knobs.
     # NB: yolo_imgsz is intentionally NOT here. TensorRT engines have
     # a fixed input shape baked in at compile time (best_scaff3.engine
@@ -73,8 +72,9 @@ INT_PARAMS = [
 
 BOOL_PARAMS = [
     'parallel_base_motion',
-    'vision_confirm_pick',
-    'servo_feedback_enabled',
+    # Round 15: vision_confirm_pick + servo_feedback_enabled hidden — pick
+    # is one-shot, both are dead. Declared on the node for backward profile
+    # compat.
     'startup_self_calibrate',
     'place_bin_color_check',
     'inference_warmup',

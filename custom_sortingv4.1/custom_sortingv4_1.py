@@ -865,6 +865,23 @@ class ObjectSortingNodeV4(Node):
                 f'loaded default profile from {DEFAULT_PROFILE_PATH} '
                 f'({len(self._seeded_from_default)} params)')
 
+    def _apply_yolo_knob(self, name, value):
+        kw = {}
+        if name == 'yolo_conf_thresh': kw['conf'] = value
+        elif name == 'yolo_iou_thresh': kw['iou'] = value
+        elif name == 'yolo_max_det':   kw['max_det'] = value
+        elif name == 'inference_max_hz': kw['hz'] = value
+        if kw:
+            self.inference.set_yolo_knobs(**kw)
+
+    def _flush_pending_yolo_knobs(self):
+        if not self._pending_yolo_knobs:
+            return
+        for name, value in self._pending_yolo_knobs.items():
+            self._apply_yolo_knob(name, value)
+            _stage('param', f'{name} -> {value} APPLIED (flushed from queue)')
+        self._pending_yolo_knobs.clear()
+
     def _on_param_change(self, params):
         for p in params:
             # If the engine path was changed via param, queue a hot-swap.
@@ -874,19 +891,23 @@ class ObjectSortingNodeV4(Node):
             if p.name == 'debug':
                 _set_debug(bool(p.value))
                 _stage('param', f'debug mode -> {bool(p.value)}')
-            # Live-update YOLO knobs as the user moves the sliders.
+            # Live-update YOLO knobs as the user moves the sliders, but only
+            # while sorting is OFF — changing confidence mid-pick would change
+            # what the lock loop sees and could destabilise an in-flight grab.
+            # When sorting is ON we queue the value and flush it the moment
+            # the user toggles sorting off.
             # yolo_imgsz is intentionally excluded - it's a build-time
             # property of the TRT engine, see TUNABLE_PARAMS comment.
             if p.name in ('yolo_conf_thresh', 'yolo_iou_thresh',
                           'yolo_max_det', 'inference_max_hz') \
                     and hasattr(self, 'inference') and self.inference is not None:
-                kw = {}
-                if p.name == 'yolo_conf_thresh': kw['conf'] = p.value
-                elif p.name == 'yolo_iou_thresh': kw['iou'] = p.value
-                elif p.name == 'yolo_max_det':   kw['max_det'] = p.value
-                elif p.name == 'inference_max_hz': kw['hz'] = p.value
-                self.inference.set_yolo_knobs(**kw)
-                _stage('param', f'{p.name} -> {p.value}')
+                if self.enable_sorting:
+                    self._pending_yolo_knobs[p.name] = p.value
+                    _stage('param', f'{p.name} -> {p.value} QUEUED '
+                                    f'(sorting on, applies when off)')
+                else:
+                    self._apply_yolo_knob(p.name, p.value)
+                    _stage('param', f'{p.name} -> {p.value} APPLIED')
             # Independent stop/start of the orbbec subscription.
             if p.name == 'enable_camera_sub':
                 want = bool(p.value)
@@ -933,6 +954,9 @@ class ObjectSortingNodeV4(Node):
         self.transport_info = None
         self.start_transport = False
         self.enable_sorting = False
+        # YOLO knob changes received while sorting is ON are stashed here
+        # and flushed when sorting toggles back OFF.
+        self._pending_yolo_knobs = {}
         self.white_area_center = None
         self.enter = False
         self.roi = []
@@ -1156,6 +1180,10 @@ class ObjectSortingNodeV4(Node):
         _stage('svc', f'enable_sorting -> {bool(request.data)}')
         self.motion.abort(not request.data)
         self.enable_sorting = bool(request.data)
+        # When sorting toggles OFF, apply any YOLO knob changes that were
+        # queued while sorting was ON so the user's pending tweaks land.
+        if not self.enable_sorting:
+            self._flush_pending_yolo_knobs()
         response.success = True
         return response
 
@@ -1448,22 +1476,6 @@ class ObjectSortingNodeV4(Node):
         scale = tuple(config_data['kinematics']['scale'])
         return [position[i] * scale[i] + offset[i] for i in range(3)]
 
-    def _vision_target_present_at(self, label, world_xy, tol=0.025):
-        if not self.p('vision_confirm_pick'):
-            return False
-        latest = self.inference.latest()
-        if latest is None:
-            return False
-        bgr, results, _ = latest
-        _, info = self._detections_from_results(bgr, self.roi.copy(), results)
-        for t in info:
-            if t[0] != label:
-                continue
-            world, _ = self._pixel_to_world(t[2])
-            if abs(world[0] - world_xy[0]) < tol and abs(world[1] - world_xy[1]) < tol:
-                return True
-        return False
-
     def _per_target_overrides(self, label):
         try:
             import json
@@ -1474,6 +1486,13 @@ class ObjectSortingNodeV4(Node):
             return {}
 
     def _do_pick(self, position, pitch, yaw, label):
+        # One-shot pick mirroring example/app/object_sorting.py:355
+        # (pick_and_place.pick). No retry loop, no servo-feedback branching,
+        # no vision recheck — the gripper feedback was unreliable on scaff
+        # and the vision recheck kept firing because the just-lifted target
+        # is still in frame. If grip misses, the transport thread sees
+        # picked=False, opens the gripper, goes home, and the next sorting
+        # iteration re-locks naturally.
         ov = self._per_target_overrides(label)
         speed_p = float(ov.get('motion_speed', self.p('motion_speed')))
         speed = max(0.1, 1.0 / speed_p)
@@ -1482,69 +1501,37 @@ class ObjectSortingNodeV4(Node):
         approach_dwell = float(self.p('approach_dwell'))
         open_pulse = int(self.p('gripper_open_pulse'))
         close_pulse = int(ov.get('gripper_close_pulse', self.p('gripper_close_pulse')))
-        full_closed = int(self.p('gripper_full_closed_pulse'))
-        slack = int(self.p('gripper_slack'))
         close_dur = float(self.p('gripper_close_duration')) * speed
-        step = int(self.p('gripper_step_pulse'))
-        retries = int(ov.get('max_pick_retries', self.p('max_pick_retries')))
-        use_servo_fb = (bool(self.p('servo_feedback_enabled'))
-                        and self.bus_servo_state_client is not None)
         parallel_base = bool(self.p('parallel_base_motion'))
 
-        attempt = 0
-        attempted_close = close_pulse
-        z_nudge = 0.0
-        while attempt <= retries and not self.motion.aborted:
-            _dbg('pick', f'attempt {attempt+1}/{retries+1} close_pulse={attempted_close} '
-                         f'z_nudge={z_nudge:+.3f}')
-            hover = [position[0], position[1], position[2] + hover_h]
-            if self.motion.goto_pose(hover, pitch,
-                                     duration=max(0.5, 1.1 * speed / aggression),
-                                     parallel_base=parallel_base) is None:
-                _stage('pick', f'hover IK failed at attempt {attempt+1}')
-                return False
-            self.motion.set_wrist(yaw, 0.25 * speed)
+        if self.motion.aborted:
+            return False
+        _dbg('pick', f'one-shot pick {label} close_pulse={close_pulse}')
+        hover = [position[0], position[1], position[2] + hover_h]
+        if self.motion.goto_pose(hover, pitch,
+                                 duration=max(0.5, 1.1 * speed / aggression),
+                                 parallel_base=parallel_base) is None:
+            _stage('pick', 'hover IK failed')
             self.motion.set_gripper(open_pulse, 0.2 * speed)
-            self.motion._sleep(approach_dwell)
-            descend = [position[0], position[1], position[2] + z_nudge]
-            if self.motion.goto_pose(descend, pitch,
-                                     duration=max(0.35, 0.7 * speed / aggression),
-                                     parallel_base=False) is None:
-                _stage('pick', f'descend IK failed at attempt {attempt+1}')
-                return False
-            if use_servo_fb:
-                outcome = self.motion.grip_with_feedback(
-                    attempted_close, open_pulse, full_closed, slack, close_dur)
-            else:
-                self.motion.set_gripper(attempted_close, close_dur)
-                outcome = 'grabbed'
-            _stage('pick', f'attempt {attempt+1} servo outcome: {outcome}')
-            if self.motion.goto_pose(hover, pitch,
-                                     duration=max(0.35, 0.7 * speed / aggression),
-                                     parallel_base=False) is None:
-                _stage('pick', f'lift IK failed at attempt {attempt+1}')
-                return False
-            if outcome == 'stalled':
-                attempted_close = max(open_pulse + 40, attempted_close - step)
-                z_nudge += 0.003
-            elif outcome == 'missed':
-                if not self._vision_target_present_at(label, position):
-                    _stage('pick', 'missed and target no longer visible - giving up')
-                    return False
-                attempted_close = min(full_closed - 5, attempted_close + step)
-                z_nudge -= 0.002
-            else:
-                if self.p('vision_confirm_pick'):
-                    if self._vision_target_present_at(label, position):
-                        _stage('pick', 'servo said grabbed but vision still sees it - retry')
-                        attempted_close = min(full_closed - 5, attempted_close + step)
-                        attempt += 1
-                        continue
-                _stage('pick', f'SUCCESS on attempt {attempt+1}')
-                return True
-            attempt += 1
-        _stage('pick', f'exhausted {retries+1} attempts - giving up')
-        return False
+            return False
+        self.motion.set_wrist(yaw, 0.25 * speed)
+        self.motion.set_gripper(open_pulse, 0.2 * speed)
+        self.motion._sleep(approach_dwell)
+        descend = [position[0], position[1], position[2]]
+        if self.motion.goto_pose(descend, pitch,
+                                 duration=max(0.35, 0.7 * speed / aggression),
+                                 parallel_base=False) is None:
+            _stage('pick', 'descend IK failed')
+            self.motion.set_gripper(open_pulse, 0.2 * speed)
+            return False
+        self.motion.set_gripper(close_pulse, close_dur)
+        if self.motion.goto_pose(hover, pitch,
+                                 duration=max(0.35, 0.7 * speed / aggression),
+                                 parallel_base=False) is None:
+            _stage('pick', 'lift IK failed')
+            return False
+        _stage('pick', f'one-shot {label} complete')
+        return True
 
     def _do_place(self, label):
         speed = max(0.1, 1.0 / float(self.p('motion_speed')))
@@ -1640,8 +1627,10 @@ class ObjectSortingNodeV4(Node):
         while self.running:
             if not self.enter:
                 time.sleep(0.05); continue
-            if not self.enable_sorting:
-                time.sleep(0.05); continue
+            # Detection runs whenever frames are arriving so YOLO knob
+            # changes are visible in the viewer with sorting OFF. The pick
+            # trigger (start_transport) is gated on self.enable_sorting
+            # further down.
             latest = self.inference.latest()
             if latest is None:
                 time.sleep(0.005); continue
@@ -1677,68 +1666,72 @@ class ObjectSortingNodeV4(Node):
                 lock_thresh = float(self.p('lock_distance_thresh'))
                 lock_line = None
                 primitives = {'yolo_ops': [], 'color_corners': []}
-                if len(roi) > 0 and self.enable_sorting and not self.start_transport and intrinsic is not None:
+                if len(roi) > 0 and not self.start_transport and intrinsic is not None:
                     target_info, primitives = self._detections_from_results(bgr_image, roi, results)
                     if target_info and self.last_object_info_list:
                         target_info = position_change_detect.position_reorder(
                             target_info, self.last_object_info_list, 20)
                     self.last_object_info_list = copy.deepcopy(target_info)
-                    target_miss = True
-                    for t in target_info:
-                        if not self.target_labels.get(t[0], False):
-                            continue
-                        if self.target is not None:
-                            if self.target[0] != t[0] or self.target[1] != t[1]:
+                    # Lock + transport trigger only when sorting is enabled.
+                    # When OFF the detection above still fires (so overlays
+                    # appear in the viewer for YOLO tuning) but no pick runs.
+                    if self.enable_sorting:
+                        target_miss = True
+                        for t in target_info:
+                            if not self.target_labels.get(t[0], False):
                                 continue
-                            target_miss = False
-                            self.target = t
-                        if self.camera_type == 'USB_CAM':
-                            x, y = distortion_inverse_map.undistorted_to_distorted_pixel(
-                                t[2][0], t[2][1], self.intrinsic, self.distortion)
-                            t[2] = (x, y)
-                        position, projection_matrix = self.get_object_world_position(
-                            t[2], intrinsic, self.extristric, self.white_area_center)
-                        result = self.calculate_pick_grasp_yaw(position, t, target_info,
-                                                                intrinsic, projection_matrix)
-                        if result is not None and self.target is None:
-                            self.target = t
-                            break
-                        if (self.last_position is not None and self.target is not None
-                                and result is not None):
-                            e_distance = round(
-                                math.sqrt(pow(self.last_position[0] - position[0], 2))
-                                + math.sqrt(pow(self.last_position[1] - position[1], 2)), 5)
-                            if e_distance <= lock_thresh:
-                                lock_line = (result[1][0], result[1][1])
-                                self.count_move = 0
-                                self.count_still += 1
-                            else:
-                                self.count_move += 1
-                                self.count_still = 0
-                            if self.count_move > move_thresh:
-                                self.target = None
-                            if self.count_still > still_thresh:
-                                self.count_still = 0
-                                self.count_move = 0
-                                self.detection_history.setdefault(t[0], []).append(position)
-                                hist = self.detection_history[t[0]][-avg_frames:]
-                                avg_pos = [sum(p[i] for p in hist) / len(hist) for i in range(3)]
-                                self.detection_history[t[0]] = hist
-                                yaw_pulse = 500 + int(result[0] / 240 * 1000)
-                                _stage('sorting-loop',
-                                       f'LOCK -> {t[0]} at '
-                                       f'({avg_pos[0]:.3f},{avg_pos[1]:.3f},{avg_pos[2]:.3f}) '
-                                       f'yaw_pulse={yaw_pulse} '
-                                       f'(avg over {len(hist)} frame{"" if len(hist)==1 else "s"})')
-                                self.transport_info = [avg_pos, yaw_pulse, t]
+                            if self.target is not None:
+                                if self.target[0] != t[0] or self.target[1] != t[1]:
+                                    continue
+                                target_miss = False
                                 self.target = t
-                                self.start_transport = True
-                        self.last_position = position
-                    if target_miss:
-                        self.target_miss_count += 1
-                    if self.target_miss_count > 10:
-                        self.target_miss_count = 0
-                        self.target = None
+                            if self.camera_type == 'USB_CAM':
+                                x, y = distortion_inverse_map.undistorted_to_distorted_pixel(
+                                    t[2][0], t[2][1], self.intrinsic, self.distortion)
+                                t[2] = (x, y)
+                            position, projection_matrix = self.get_object_world_position(
+                                t[2], intrinsic, self.extristric, self.white_area_center)
+                            result = self.calculate_pick_grasp_yaw(position, t, target_info,
+                                                                    intrinsic, projection_matrix)
+                            if result is not None and self.target is None:
+                                self.target = t
+                                break
+                            if (self.last_position is not None and self.target is not None
+                                    and result is not None):
+                                e_distance = round(
+                                    math.sqrt(pow(self.last_position[0] - position[0], 2))
+                                    + math.sqrt(pow(self.last_position[1] - position[1], 2)), 5)
+                                if e_distance <= lock_thresh:
+                                    lock_line = (result[1][0], result[1][1])
+                                    self.count_move = 0
+                                    self.count_still += 1
+                                else:
+                                    self.count_move += 1
+                                    self.count_still = 0
+                                if self.count_move > move_thresh:
+                                    self.target = None
+                                if self.count_still > still_thresh:
+                                    self.count_still = 0
+                                    self.count_move = 0
+                                    self.detection_history.setdefault(t[0], []).append(position)
+                                    hist = self.detection_history[t[0]][-avg_frames:]
+                                    avg_pos = [sum(p[i] for p in hist) / len(hist) for i in range(3)]
+                                    self.detection_history[t[0]] = hist
+                                    yaw_pulse = 500 + int(result[0] / 240 * 1000)
+                                    _stage('sorting-loop',
+                                           f'LOCK -> {t[0]} at '
+                                           f'({avg_pos[0]:.3f},{avg_pos[1]:.3f},{avg_pos[2]:.3f}) '
+                                           f'yaw_pulse={yaw_pulse} '
+                                           f'(avg over {len(hist)} frame{"" if len(hist)==1 else "s"})')
+                                    self.transport_info = [avg_pos, yaw_pulse, t]
+                                    self.target = t
+                                    self.start_transport = True
+                            self.last_position = position
+                        if target_miss:
+                            self.target_miss_count += 1
+                        if self.target_miss_count > 10:
+                            self.target_miss_count = 0
+                            self.target = None
                 else:
                     target_info = []
                 # Stash the overlay dict for _raw_republish_tick to composite
@@ -1830,10 +1823,13 @@ class ObjectSortingNodeV4(Node):
             _dbg('cam-recv', f'frame #{self._frames_received} shape={bgr.shape} '
                              f'enc={ros_rgb_image.encoding}')
         self._latest_raw_bgr = bgr
-        if self.enable_sorting:
-            self.inference.submit(bgr)
-            if _DEBUG and self._frames_received % 30 == 0:
-                _dbg('cam-infer', f'frame #{self._frames_received} submitted to InferenceWorker')
+        # Inference runs whenever the worker is not paused (enable_inference
+        # param / Pause AI button). This lets the user tune YOLO sliders with
+        # sorting OFF and see detections live in the viewer — the pick
+        # trigger is gated separately in sorting_loop.
+        self.inference.submit(bgr)
+        if _DEBUG and self._frames_received % 30 == 0:
+            _dbg('cam-infer', f'frame #{self._frames_received} submitted to InferenceWorker')
 
     def _draw_overlay(self, bgr, overlay):
         """Apply detection overlay primitives in-place onto a fresh raw frame.
@@ -1881,8 +1877,10 @@ class ObjectSortingNodeV4(Node):
         if self.enable_sorting and not (hasattr(self.roi, '__len__') and len(self.roi)):
             cv2.putText(bgr, 'ROI: building...', (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
-        # Composite overlay when sorting is on
-        if self.enable_sorting and self._latest_overlay is not None:
+        # Composite overlay whenever detection has run. Detection runs
+        # regardless of enable_sorting (see sorting_loop) so the user can
+        # tune YOLO knobs with sorting OFF and watch the bboxes update live.
+        if self._latest_overlay is not None:
             age = time.time() - self._latest_overlay['ts']
             if age > 2.0:
                 last_warn = getattr(self, '_last_stale_warn_age', -999)
