@@ -205,12 +205,32 @@ echo 'JETARM_V4_1_QT_SAFE=1' >> ~/.jetarm_v4_1.env
 | `yolo_conf_thresh` | 0.25 | Confidence threshold. 0.5 = stricter (fewer false positives); 0.1 = looser. |
 | `yolo_iou_thresh` | 0.7 | NMS IoU. Lower = more overlapping boxes get suppressed. |
 | `yolo_max_det` | 100 | Max detections per frame. |
-| `yolo_imgsz` | 640 | YOLO input size. Drop to 320 for ~3× inference speedup. Multiples of 32. |
 | `inference_max_hz` | 0 | Cap inference rate (0 = uncapped). Lower if GPU thermals get hot. |
 | `publish_max_hz` | 0 | Cap result-publisher rate. Match your viewer's actual paint rate to save bandwidth. |
 | `publish_scale` | 1.0 | Downsample annotated frame before publish (0.5 → 320×240, ~4× less bytes). |
 
-All take effect live — no restart needed.
+YOLO knobs (`yolo_conf_thresh` / `yolo_iou_thresh` / `yolo_max_det` /
+`inference_max_hz`) apply **instantly while STOPPED** — detection runs
+even when sorting is off, so you see the boxes change in the live viewer
+as you drag. While RUNNING they queue and land when you press STOP, so a
+slider can't change detection mid-pick.
+
+Note: `yolo_imgsz` is **not** tunable — TensorRT engines bake the input
+size in at export time. To change it, re-export from Ultralytics with the
+new `imgsz` and load the new `.engine` from the Models tab.
+
+### Grip tab (round 15: one-shot pick)
+
+The retry-era knobs (`max_pick_retries`, `vision_confirm_pick`,
+`servo_feedback_enabled`, `gripper_full_closed_pulse`, `gripper_slack`,
+`gripper_step_pulse`) are gone — the pick is a single
+hover → align → descend → close → settle → lift, like the stock
+object_sorting app. The grip-reliability knobs are now:
+
+| Slider | Default | Effect |
+|---|---|---|
+| `gripper_settle` | 0.5 | Dwell after the close command before the lift starts (and after release on place). Raise if objects slip out during lift. Not scaled by `motion_speed`. |
+| `grab_depth` | 0.02 | How far below the detected object-z the descend goes, so the jaws wrap the body instead of pinching the top. |
 
 ### New top-bar buttons
 

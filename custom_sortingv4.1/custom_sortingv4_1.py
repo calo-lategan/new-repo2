@@ -395,14 +395,18 @@ class MotionController:
             out['voltage'] = int(s.voltage[0])
         return out
 
-    def goto_pose(self, position, pitch, duration, parallel_base=True):
+    def goto_pose(self, position, pitch, duration, parallel_base=True,
+                  pitch_range=(-180.0, 180.0)):
+        # pitch_range: reference pick_and_place.py constrains approach/grab
+        # IK to [-90, 90] so the solver picks the same elbow/wrist family
+        # the vendor tuned for, and only opens to [-180, 180] for retreats.
         if self._abort:
             return None
         if self.kinematics_client is None:
             # Init couldn't find the IK service; can't move. Returning None
             # makes the pick loop treat it as a failed step and bail.
             return None
-        msg = set_pose_target(position, pitch, [-180.0, 180.0], 1.0, duration=duration)
+        msg = set_pose_target(position, pitch, list(pitch_range), 1.0, duration=duration)
         future = self.kinematics_client.call_async(msg)
         res = self._await_future(future, timeout=2.0)
         if res is None or not res.pulse:
@@ -431,24 +435,6 @@ class MotionController:
     def set_wrist(self, pulse, duration):
         set_servo_position(self.joints_pub, float(duration), ((5, int(pulse)),))
         self._sleep(duration)
-
-    def grip_with_feedback(self, close_pulse, open_pulse,
-                           full_closed_pulse, slack, duration,
-                           confirm_delay=0.2):
-        self.set_gripper(close_pulse, duration)
-        self._sleep(confirm_delay)
-        st = self.get_servo_state(GRIPPER_ID, fields=('position', 'temperature'))
-        pos = st.get('position', None)
-        temp = st.get('temperature', None)
-        if temp is not None and temp > 65:
-            return 'stalled'
-        if pos is None:
-            return 'grabbed'
-        if pos >= (full_closed_pulse - slack):
-            return 'missed'
-        if abs(pos - close_pulse) > 60 and pos < close_pulse - 60:
-            return 'stalled'
-        return 'grabbed'
 
 
 # ---------------------------------------------------------------------------
@@ -515,6 +501,17 @@ class ObjectSortingNodeV4(Node):
         ('gripper_full_closed_pulse', 700, (500, 900)),
         ('gripper_slack', 25, (5, 80)),
         ('gripper_close_duration', 0.35, (0.1, 2.0)),
+        # Settle dwell AFTER the gripper close command (pick) / open command
+        # (place) before the lift starts. The reference pick_and_place.py
+        # gives the jaws 0.5s travel + 0.5s sleep before lifting; without
+        # this the lift can begin before the jaws have clamped and the
+        # object drops. Deliberately NOT scaled by motion_speed - clamping
+        # is physics, not choreography.
+        ('gripper_settle', 0.5, (0.0, 1.5)),
+        # How far BELOW the detected object z the descend goes, so the jaws
+        # close around the object body instead of its top edge. Mirrors the
+        # reference pick_and_place.pick(gripper_depth=0.02).
+        ('grab_depth', 0.02, (0.0, 0.05)),
         ('gripper_step_pulse', 30, (5, 100)),
         ('max_pick_retries', 3, (0, 6)),
         ('vision_confirm_pick', True, None),
@@ -763,9 +760,10 @@ class ObjectSortingNodeV4(Node):
         # ---- Camera subscriptions: BEST_EFFORT, depth=1 --------------------
         # ALWAYS-ON from process startup so the operator can see the camera
         # feed the moment v4 boots - the camera should be "ready to run even
-        # when the robot is stopped". image_callback gates inference behind
-        # self.enable_sorting so YOLO doesn't burn GPU when stopped, but the
-        # raw frame still feeds the live viewer (see _raw_republish_tick).
+        # when the robot is stopped". Round 15: image_callback also submits
+        # every frame to the InferenceWorker regardless of enable_sorting so
+        # YOLO knob tuning is visible live while stopped. The explicit
+        # enable_inference param / Pause AI button is the GPU kill switch.
         self.intrinsic = None
         self.distortion = None
         self._latest_raw_bgr = None
@@ -851,19 +849,19 @@ class ObjectSortingNodeV4(Node):
             except Exception:
                 pass
         # Re-apply the default profile values now that all params are declared,
-        # so the seed actually wins over hardcoded defaults.
+        # so the seed actually wins over hardcoded defaults. One at a time:
+        # a single type-mismatched value must not abort the whole seed.
         if self._seeded_from_default:
-            ros_params = []
+            applied = 0
             for k, v in self._seeded_from_default.items():
                 try:
-                    ros_params.append(rclpy.parameter.Parameter(k, value=v))
-                except Exception:
-                    pass
-            if ros_params:
-                self.set_parameters(ros_params)
+                    self.set_parameters([rclpy.parameter.Parameter(k, value=v)])
+                    applied += 1
+                except Exception as e:
+                    _stage('init', f'default profile param {k}={v!r} rejected', exc=e)
             self.get_logger().info(
                 f'loaded default profile from {DEFAULT_PROFILE_PATH} '
-                f'({len(self._seeded_from_default)} params)')
+                f'({applied}/{len(self._seeded_from_default)} params)')
 
     def _apply_yolo_knob(self, name, value):
         kw = {}
@@ -875,12 +873,23 @@ class ObjectSortingNodeV4(Node):
             self.inference.set_yolo_knobs(**kw)
 
     def _flush_pending_yolo_knobs(self):
-        if not self._pending_yolo_knobs:
+        if not (hasattr(self, 'inference') and self.inference is not None):
             return
-        for name, value in self._pending_yolo_knobs.items():
-            self._apply_yolo_knob(name, value)
-            _stage('param', f'{name} -> {value} APPLIED (flushed from queue)')
-        self._pending_yolo_knobs.clear()
+        # The ROS params were already updated when the user moved the slider
+        # - only the application to the InferenceWorker was deferred. Re-sync
+        # ALL knobs from the current param values instead of replaying the
+        # queue: the queue can be dropped (enter's _init_state recreates it)
+        # while the params always hold the latest values, so an unconditional
+        # sync on every sorting-off transition is self-healing.
+        if self._pending_yolo_knobs:
+            queued = ', '.join(f'{k}={v}' for k, v in self._pending_yolo_knobs.items())
+            _stage('param', f'flushing queued YOLO knobs: {queued}')
+            self._pending_yolo_knobs.clear()
+        self.inference.set_yolo_knobs(
+            conf=self.p('yolo_conf_thresh'),
+            iou=self.p('yolo_iou_thresh'),
+            max_det=self.p('yolo_max_det'),
+            hz=self.p('inference_max_hz'))
 
     def _on_param_change(self, params):
         for p in params:
@@ -1029,6 +1038,11 @@ class ObjectSortingNodeV4(Node):
             target=self._sorting_loop_wrapped, daemon=True, name='sorting-loop')
         self._sorting_thread.start()
         threading.Thread(target=self._transport_thread_wrapped, daemon=True, name='transport').start()
+        # Build the ROI at boot (not just on enter) so detection overlays
+        # appear in the viewer immediately - the launch default is
+        # start:=false, and before this the user saw no bounding boxes
+        # until the first START press, defeating tune-while-stopped.
+        self.start_get_roi = True
         if self.get_parameter('start').value:
             self.enter_srv_callback(Trigger.Request(), Trigger.Response())
             req = SetBool.Request(); req.data = True
@@ -1173,6 +1187,11 @@ class ObjectSortingNodeV4(Node):
             self.enter = False
             self.start_transport = False
             self.motion.abort(True)
+        # exit is a stop path too (heartbeat watchdog calls it): clear the
+        # sorting flag so the lock branch can't re-trigger transport, and
+        # land any YOLO knob changes that were queued while sorting was on.
+        self.enable_sorting = False
+        self._flush_pending_yolo_knobs()
         response.success = True
         return response
 
@@ -1180,9 +1199,19 @@ class ObjectSortingNodeV4(Node):
         _stage('svc', f'enable_sorting -> {bool(request.data)}')
         self.motion.abort(not request.data)
         self.enable_sorting = bool(request.data)
-        # When sorting toggles OFF, apply any YOLO knob changes that were
-        # queued while sorting was ON so the user's pending tweaks land.
-        if not self.enable_sorting:
+        if self.enable_sorting:
+            # Fresh start: drop any stale lock so a target seen before the
+            # stop can't fire start_transport on the very next frame with
+            # pre-stop count_still already over the threshold.
+            self.target = None
+            self.count_still = 0
+            self.count_move = 0
+            self.last_position = None
+            self.target_miss_count = 0
+            self.detection_history = {}
+        else:
+            # When sorting toggles OFF, apply any YOLO knob changes that
+            # were queued while sorting was ON so the user's tweaks land.
             self._flush_pending_yolo_knobs()
         response.success = True
         return response
@@ -1243,16 +1272,18 @@ class ObjectSortingNodeV4(Node):
                 _stage('svc', f'  no params parsed from {path} (file missing or empty?)')
                 response.success = False
                 return response
-            ros_params = []
+            # Apply one at a time: a single type mismatch (YAML int where a
+            # double param is declared) raises in set_parameters and would
+            # abort the whole batch, silently dropping every later param.
+            applied = 0
             for k, v in params.items():
                 try:
-                    ros_params.append(rclpy.parameter.Parameter(k, value=v))
+                    self.set_parameters([rclpy.parameter.Parameter(k, value=v)])
+                    applied += 1
                 except Exception as e:
                     _stage('svc', f'  skipping param {k}={v!r}', exc=e)
-            if ros_params:
-                self.set_parameters(ros_params)
-            _stage('svc', f'  applied {len(ros_params)} params from {path}')
-            self.get_logger().info(f'profile loaded <- {path} ({len(ros_params)} params)')
+            _stage('svc', f'  applied {applied}/{len(params)} params from {path}')
+            self.get_logger().info(f'profile loaded <- {path} ({applied} params)')
             response.success = True
         except Exception as e:
             _stage('svc', 'load_profile FAILED', exc=e)
@@ -1502,29 +1533,44 @@ class ObjectSortingNodeV4(Node):
         open_pulse = int(self.p('gripper_open_pulse'))
         close_pulse = int(ov.get('gripper_close_pulse', self.p('gripper_close_pulse')))
         close_dur = float(self.p('gripper_close_duration')) * speed
+        settle = float(ov.get('gripper_settle', self.p('gripper_settle')))
+        grab_depth = float(ov.get('grab_depth', self.p('grab_depth')))
         parallel_base = bool(self.p('parallel_base_motion'))
 
         if self.motion.aborted:
             return False
-        _dbg('pick', f'one-shot pick {label} close_pulse={close_pulse}')
+        _dbg('pick', f'one-shot pick {label} close_pulse={close_pulse} '
+                     f'grab_depth={grab_depth:.3f} settle={settle:.2f}')
         hover = [position[0], position[1], position[2] + hover_h]
         if self.motion.goto_pose(hover, pitch,
                                  duration=max(0.5, 1.1 * speed / aggression),
-                                 parallel_base=parallel_base) is None:
+                                 parallel_base=parallel_base,
+                                 pitch_range=(-90.0, 90.0)) is None:
             _stage('pick', 'hover IK failed')
             self.motion.set_gripper(open_pulse, 0.2 * speed)
             return False
-        self.motion.set_wrist(yaw, 0.25 * speed)
+        # Reference gives the wrist 0.5s to rotate + 0.5s settle before the
+        # descend so the jaws are aligned with the grasp angle. The wrist
+        # move blocks for its duration; approach_dwell is the extra settle.
+        self.motion.set_wrist(yaw, 0.5 * speed)
         self.motion.set_gripper(open_pulse, 0.2 * speed)
         self.motion._sleep(approach_dwell)
-        descend = [position[0], position[1], position[2]]
+        # Descend BELOW the detected z by grab_depth so the jaws close
+        # around the object body (reference pick_and_place gripper_depth).
+        descend = [position[0], position[1], position[2] - grab_depth]
         if self.motion.goto_pose(descend, pitch,
                                  duration=max(0.35, 0.7 * speed / aggression),
-                                 parallel_base=False) is None:
+                                 parallel_base=False,
+                                 pitch_range=(-90.0, 90.0)) is None:
             _stage('pick', 'descend IK failed')
             self.motion.set_gripper(open_pulse, 0.2 * speed)
             return False
         self.motion.set_gripper(close_pulse, close_dur)
+        # Let the jaws finish clamping before the lift starts streaming
+        # servo steps - without this the close command's travel time was
+        # the ENTIRE settle budget (~0.23s at default speed) and scaffs
+        # dropped on lift.
+        self.motion._sleep(settle)
         if self.motion.goto_pose(hover, pitch,
                                  duration=max(0.35, 0.7 * speed / aggression),
                                  parallel_base=False) is None:
@@ -1563,6 +1609,9 @@ class ObjectSortingNodeV4(Node):
                                  parallel_base=False) is None:
             return False
         self.motion.set_gripper(int(self.p('gripper_open_pulse')), 0.25 * speed)
+        # Let the jaws fully open before retreating so the object isn't
+        # dragged (reference sleeps 0.5s after release).
+        self.motion._sleep(float(self.p('gripper_settle')))
         if self.motion.goto_pose(hover, 80,
                                  duration=max(0.35, 0.6 * speed / aggression),
                                  parallel_base=False) is None:
@@ -1625,12 +1674,12 @@ class ObjectSortingNodeV4(Node):
         avg_frames = 1
         ticks = 0
         while self.running:
-            if not self.enter:
-                time.sleep(0.05); continue
-            # Detection runs whenever frames are arriving so YOLO knob
-            # changes are visible in the viewer with sorting OFF. The pick
-            # trigger (start_transport) is gated on self.enable_sorting
-            # further down.
+            # Detection runs whenever frames are arriving - no enter gate -
+            # so YOLO knob changes are visible in the viewer with sorting
+            # OFF, including on a fresh boot before the first START. The
+            # pick trigger (start_transport) is gated on self.enable_sorting
+            # further down, and exit/STOP clears enable_sorting, so no
+            # motion can start from this loop while stopped.
             latest = self.inference.latest()
             if latest is None:
                 time.sleep(0.005); continue
@@ -1873,15 +1922,17 @@ class ObjectSortingNodeV4(Node):
         if bgr_src is None:
             return
         bgr = bgr_src.copy()
-        # ROI-not-yet-ready hint
-        if self.enable_sorting and not (hasattr(self.roi, '__len__') and len(self.roi)):
+        # ROI-not-yet-ready hint. ROI now builds at boot (see _startup), so
+        # this shows whenever the build hasn't completed, not just mid-sort.
+        if not (hasattr(self.roi, '__len__') and len(self.roi)):
             cv2.putText(bgr, 'ROI: building...', (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
         # Composite overlay whenever detection has run. Detection runs
         # regardless of enable_sorting (see sorting_loop) so the user can
         # tune YOLO knobs with sorting OFF and watch the bboxes update live.
-        if self._latest_overlay is not None:
-            age = time.time() - self._latest_overlay['ts']
+        overlay = self._latest_overlay
+        if overlay is not None:
+            age = time.time() - overlay['ts']
             if age > 2.0:
                 last_warn = getattr(self, '_last_stale_warn_age', -999)
                 if age - last_warn >= 30.0:
@@ -1890,12 +1941,17 @@ class ObjectSortingNodeV4(Node):
                     self._last_stale_warn_age = age
             elif age < 2.0:
                 self._last_stale_warn_age = -999
-            try:
-                self._draw_overlay(bgr, self._latest_overlay)
-            except Exception as e:
-                if not getattr(self, '_overlay_err_warned', False):
-                    _stage('camera', 'overlay draw failed (one-time warn)', exc=e)
-                    self._overlay_err_warned = True
+            # Don't paint ghost boxes over a live background: when the AI is
+            # paused (or the detection loop wedges) the overlay stops
+            # refreshing while the camera keeps moving. 5s tolerates the
+            # worst-case HED-on iteration (~2.5s) without flicker.
+            if age <= 5.0:
+                try:
+                    self._draw_overlay(bgr, overlay)
+                except Exception as e:
+                    if not getattr(self, '_overlay_err_warned', False):
+                        _stage('camera', 'overlay draw failed (one-time warn)', exc=e)
+                        self._overlay_err_warned = True
         try:
             self._publish_image(bgr)
         except Exception as e:

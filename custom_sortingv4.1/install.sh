@@ -183,6 +183,9 @@ for p in default.yaml fast.yaml precision.yaml; do
     dst="$PROFILES_DIR/$p"
     if [ -f "$dst" ]; then
         stage "  keeping existing $dst"
+    elif [ ! -f "$src" ]; then
+        # Don't let a missing seed abort the whole install under set -e.
+        stage "  WARNING: $src missing - skipped (node falls back to built-in defaults)"
     else
         install -m 644 "$src" "$dst"
         stage "  installed $dst"

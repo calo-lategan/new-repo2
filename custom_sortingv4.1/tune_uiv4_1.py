@@ -15,6 +15,7 @@
 
 import os
 import sys
+import time
 import argparse
 import subprocess
 import threading
@@ -43,6 +44,11 @@ FLOAT_PARAMS = [
     ('approach_dwell',        0.0, 1.0, 0.05),
     ('lock_distance_thresh',  0.001, 0.05, 0.001),
     ('gripper_close_duration', 0.1, 2.0, 0.05),
+    # Round 15b: jaw-clamp settle before lift (pick) / retreat (place), and
+    # how far below the detected z the descend goes. Both mirror the
+    # reference pick_and_place timings/geometry.
+    ('gripper_settle',        0.0, 1.5, 0.05),
+    ('grab_depth',            0.0, 0.05, 0.001),
     # Round 7: YOLO knobs + throttles.
     ('yolo_conf_thresh',      0.05, 0.95, 0.01),
     ('yolo_iou_thresh',       0.10, 0.90, 0.01),
@@ -105,10 +111,27 @@ class TunerClient(Node):
         return (self.set_cli.wait_for_service(timeout_sec=timeout)
                 and self.get_cli.wait_for_service(timeout_sec=timeout))
 
+    def _wait_future(self, future, timeout):
+        """Poll until the background rclpy.spin thread completes the future.
+
+        Previously every call site used rclpy.spin_until_future_complete,
+        which spins the node's executor from whatever thread called it -
+        the Tk main thread (slider release), worker `go()` threads, AND the
+        background rclpy.spin thread all at once. Concurrent spins on one
+        node race: the background spinner consumes the response the
+        foreground spinner is waiting on, and calls stall to their timeout
+        ("NODE NOT REACHABLE" with a healthy node). Polling future.done()
+        leaves all executor work to the single background spin thread.
+        """
+        deadline = time.time() + timeout
+        while not future.done() and time.time() < deadline:
+            time.sleep(0.02)
+        return future.done()
+
     def get_values(self, names):
         req = GetParameters.Request(); req.names = list(names)
         future = self.get_cli.call_async(req)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
+        self._wait_future(future, 2.0)
         if not future.done() or future.result() is None:
             return {}
         out = {}
@@ -137,26 +160,26 @@ class TunerClient(Node):
         p.value = pv
         req = SetParameters.Request(); req.parameters = [p]
         future = self.set_cli.call_async(req)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
+        self._wait_future(future, 2.0)
 
     def _trigger(self, client):
         if not client.wait_for_service(timeout_sec=1.0): return False
         future = client.call_async(Trigger.Request())
-        rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
+        self._wait_future(future, 2.0)
         return future.done() and future.result() is not None and future.result().success
 
     def _set_string_bool(self, client, s, b=True):
         if not client.wait_for_service(timeout_sec=1.0): return False
         req = SetStringBool.Request(); req.data_str = s; req.data_bool = b
         future = client.call_async(req)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=4.0)
+        self._wait_future(future, 4.0)
         return future.done() and future.result() is not None and future.result().success
 
     def call_enable_sorting(self, enable):
         if not self.enable_cli.wait_for_service(timeout_sec=1.0): return False
         req = SetBool.Request(); req.data = bool(enable)
         future = self.enable_cli.call_async(req)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
+        self._wait_future(future, 2.0)
         return future.done() and future.result() is not None
 
     def call_recalibrate(self): return self._trigger(self.recalibrate_cli)
@@ -180,6 +203,9 @@ class TunerUI:
         self.root = tk.Tk()
         self.root.title('JetArm v4.1 - live tuner')
         self.root.geometry('760x1100')
+        # name -> callable(value) that updates that param's widget locally
+        # (no ROS traffic). Used by presets to keep the UI in sync.
+        self._param_setters = {}
         self._building = True
         self._build()
         self._building = False
@@ -297,7 +323,7 @@ class TunerUI:
         notebook.pack(fill='both', expand=True, padx=8, pady=8)
 
         speed_tab = ttk.Frame(notebook); notebook.add(speed_tab, text='Speed / motion')
-        grip_tab = ttk.Frame(notebook); notebook.add(grip_tab, text='Grip / retries')
+        grip_tab = ttk.Frame(notebook); notebook.add(grip_tab, text='Grip')
         vision_tab = ttk.Frame(notebook); notebook.add(vision_tab, text='Vision')
         toggles_tab = ttk.Frame(notebook); notebook.add(toggles_tab, text='Toggles')
         models_tab = ttk.Frame(notebook); notebook.add(models_tab, text='Models')
@@ -310,13 +336,24 @@ class TunerUI:
 
         speed_names = {'motion_speed', 'aggression', 'hover_height',
                        'approach_dwell', 'gripper_close_duration'}
+        # Only the grip params that still exist post-round-15 (one-shot pick:
+        # full_closed/slack/step/retries are gone from the UI).
         grip_names = {'gripper_open_pulse', 'gripper_close_pulse',
-                      'gripper_full_closed_pulse', 'gripper_slack',
-                      'gripper_step_pulse', 'max_pick_retries',
-                      'gripper_close_duration'}
+                      'gripper_settle', 'grab_depth'}
         vision_names = {'min_object_area', 'max_object_area',
                         'count_still_threshold', 'count_move_threshold',
                         'detection_avg_frames', 'lock_distance_thresh'}
+
+        # Packed first so it renders at the top of the Vision tab.
+        ttk.Label(vision_tab, foreground='#774400', wraplength=700,
+                  justify='left',
+                  text='YOLO knobs (yolo_conf_thresh / yolo_iou_thresh / '
+                       'yolo_max_det / inference_max_hz) apply INSTANTLY '
+                       'while STOPPED - watch the boxes change in the live '
+                       'viewer. While RUNNING they are queued and land when '
+                       'you press STOP, so a slider can\'t change detection '
+                       'mid-pick.'
+                  ).pack(anchor='w', padx=8, pady=(8, 6))
 
         for name, lo, hi, res in FLOAT_PARAMS:
             parent = (speed_tab if name in speed_names else
@@ -337,19 +374,19 @@ class TunerUI:
         ttk.Button(preset, text='Slow & safe',
                    command=lambda: self._apply_preset({'motion_speed': 0.7,
                                                         'aggression': 0.7,
-                                                        'max_pick_retries': 4,
+                                                        'gripper_settle': 0.8,
                                                         'gripper_close_duration': 0.6})
                    ).pack(side='left', padx=4, pady=4)
         ttk.Button(preset, text='Default',
                    command=lambda: self._apply_preset({'motion_speed': 1.5,
                                                         'aggression': 1.3,
-                                                        'max_pick_retries': 3,
+                                                        'gripper_settle': 0.5,
                                                         'gripper_close_duration': 0.35})
                    ).pack(side='left', padx=4, pady=4)
         ttk.Button(preset, text='Fast & aggressive',
                    command=lambda: self._apply_preset({'motion_speed': 2.1,
                                                         'aggression': 1.7,
-                                                        'max_pick_retries': 2,
+                                                        'gripper_settle': 0.3,
                                                         'gripper_close_duration': 0.25})
                    ).pack(side='left', padx=4, pady=4)
         ttk.Button(preset, text='Precision',
@@ -357,7 +394,7 @@ class TunerUI:
                                                         'aggression': 0.8,
                                                         'count_still_threshold': 8,
                                                         'detection_avg_frames': 6,
-                                                        'max_pick_retries': 4})
+                                                        'gripper_settle': 0.8})
                    ).pack(side='left', padx=4, pady=4)
 
     def _short_engine(self, path):
@@ -442,6 +479,17 @@ class TunerUI:
         entry.bind('<Up>',   lambda e: _nudge(+1))
         entry.bind('<Down>', lambda e: _nudge(-1))
 
+        def set_local(v):
+            """Update slider + entry display without ROS traffic."""
+            try:
+                v = float(v) if kind == 'float' else int(round(float(v)))
+            except (TypeError, ValueError):
+                return
+            v = max(lo, min(hi, v))
+            var.set(v)
+            entry.delete(0, 'end'); entry.insert(0, fmt(v))
+        self._param_setters[name] = set_local
+
     def _add_bool(self, parent, name, init):
         var = tk.BooleanVar(value=bool(init))
         def on_change():
@@ -449,10 +497,15 @@ class TunerUI:
                 self.client.set_value(name, bool(var.get()))
         ttk.Checkbutton(parent, text=name, variable=var, command=on_change
                         ).pack(anchor='w', padx=12, pady=4)
+        self._param_setters[name] = lambda v: var.set(bool(v))
 
     # ---- Models tab ----
 
     def _build_models_tab(self, parent, current_path):
+        # Track the live engine path so Refresh marks the CURRENT engine
+        # [active] - a lambda closing over current_path froze the marker at
+        # the boot engine after hot-swaps.
+        self._active_engine = current_path
         ttk.Label(parent,
                   text=f'Discovered .engine files in {DEFAULT_ENGINES_DIR}:',
                   foreground='#444').pack(anchor='w', padx=8, pady=(8, 4))
@@ -468,7 +521,7 @@ class TunerUI:
 
         btn_row = ttk.Frame(parent); btn_row.pack(fill='x', padx=8, pady=6)
         ttk.Button(btn_row, text='Refresh',
-                   command=lambda: self._refresh_engine_list(current_path)
+                   command=lambda: self._refresh_engine_list(self._active_engine)
                    ).pack(side='left', padx=4)
         ttk.Button(btn_row, text='Load selected',
                    command=self._on_load_selected_engine).pack(side='left', padx=4)
@@ -518,6 +571,7 @@ class TunerUI:
         def go():
             ok = self.client.call_load_engine(path)
             if ok:
+                self._active_engine = path
                 self.engine_var.set(self._short_engine(path))
                 self._refresh_engine_list(path)
                 self._set_status('ENGINE SWAPPED', '#3366aa')
@@ -670,7 +724,13 @@ class TunerUI:
         threading.Thread(target=go, daemon=True).start()
 
     def _apply_preset(self, mapping):
+        # Update the on-screen widget first so the UI reflects the preset
+        # (previously presets pushed to ROS but the sliders kept showing
+        # their old values), then push to the node.
         for k, v in mapping.items():
+            setter = self._param_setters.get(k)
+            if setter is not None:
+                setter(v)
             self.client.set_value(k, v)
 
     # ---- Camera viewer process management -----------------------------
