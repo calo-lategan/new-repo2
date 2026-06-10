@@ -128,8 +128,10 @@ QT_X11_NO_MITSHM=1 QT_QPA_PLATFORM=xcb LIBGL_ALWAYS_SOFTWARE=1 \
     ros2 run rqt_image_view rqt_image_view /custom_sortingv4_1/image_result \
         --ros-args -p image_transport:=raw
 
-# 4. web_video_server in browser
-firefox "http://$(hostname -I | awk '{print $1}'):8080/stream?topic=/custom_sortingv4_1/image_result&th=100"
+# 4. web_video_server in browser (ros_compressed = streams the node's
+#    pre-encoded JPEG sibling topic, ~10x less bandwidth than raw; tune
+#    quality with the publish_jpeg_quality slider in the Vision tab)
+firefox "http://$(hostname -I | awk '{print $1}'):8080/stream?topic=/custom_sortingv4_1/image_result&type=ros_compressed"
 
 # 5. Confirm factory service is stopped + disabled
 systemctl is-active   start_app_node.service           # expect "inactive"
@@ -208,6 +210,7 @@ echo 'JETARM_V4_1_QT_SAFE=1' >> ~/.jetarm_v4_1.env
 | `inference_max_hz` | 0 | Cap inference rate (0 = uncapped). Lower if GPU thermals get hot. |
 | `publish_max_hz` | 0 | Cap result-publisher rate. Match your viewer's actual paint rate to save bandwidth. |
 | `publish_scale` | 1.0 | Downsample annotated frame before publish (0.5 → 320×240, ~4× less bytes). |
+| `publish_jpeg_quality` | 80 | JPEG quality of `image_result/compressed` (browser/remote viewing). Only encoded while subscribed. |
 
 YOLO knobs (`yolo_conf_thresh` / `yolo_iou_thresh` / `yolo_max_det` /
 `inference_max_hz`) apply **instantly while STOPPED** — detection runs
@@ -231,6 +234,23 @@ object_sorting app. The grip-reliability knobs are now:
 |---|---|---|
 | `gripper_settle` | 0.5 | Dwell after the close command before the lift starts (and after release on place). Raise if objects slip out during lift. Not scaled by `motion_speed`. |
 | `grab_depth` | 0.02 | How far below the detected object-z the descend goes, so the jaws wrap the body instead of pinching the top. |
+
+Both support **per-target overrides** for mixed object heights via the
+`target_overrides` JSON param, e.g.:
+
+```
+target_overrides: '{"scaff": {"grab_depth": 0.025, "gripper_settle": 0.8}, "blue": {"grab_depth": 0.01, "motion_speed": 1.8}}'
+```
+
+### Heartbeat mirror
+
+The node publishes its 5 s heartbeat as JSON on
+`/custom_sortingv4_1/status`. The tuner UI subscribes and polls it once a
+second: the **perf label** shows live `cam/pub fps`, AI state and
+inference age; the **Engine label** tracks hot-swaps; and the
+**RUNNING/STOPPED** status corrects itself if the node state changes
+behind the UI's back (e.g. the heartbeat watchdog called `exit`). If the
+node stops publishing for >12 s the perf label shows `NO HEARTBEAT`.
 
 ### New top-bar buttons
 

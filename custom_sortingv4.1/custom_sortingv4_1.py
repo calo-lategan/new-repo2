@@ -52,6 +52,7 @@
 import os
 import cv2
 import sys
+import json
 import yaml
 import time
 import math
@@ -97,7 +98,8 @@ from rcl_interfaces.msg import SetParametersResult, ParameterDescriptor, Floatin
 from rcl_interfaces.srv import GetParameters, ListParameters, SetParameters
 from rcl_interfaces.msg import Parameter as ParameterMsg, ParameterValue, ParameterType
 from std_srvs.srv import Trigger, SetBool
-from sensor_msgs.msg import Image, CameraInfo
+from std_msgs.msg import String
+from sensor_msgs.msg import Image, CameraInfo, CompressedImage
 from rclpy.executors import MultiThreadedExecutor
 from cv_bridge import CvBridge
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
@@ -522,12 +524,11 @@ class ObjectSortingNodeV4(Node):
         ('hot_log_inference_ms', False, None),
         ('debug', False, None),
         # HED surface-mask preprocessing for color blob detection.
-        # When True, runs image_process.get_top_surface() (HED forward-pass)
-        # on every ROI to mask out non-surface pixels before color thresholding.
-        # On Orin Nano CPU (no CUDA fallback) this costs 500-2000ms per frame
-        # and caps the detection loop at ~0.4fps. With well-calibrated
-        # workspace lighting + ROI, the unmasked LAB colour thresholds work
-        # fine — leave OFF unless color accuracy regresses.
+        # Round 15c: the HED forward pass runs ONCE per ROI build and the
+        # mask is cached - per-frame cost is a single bitwise_and, so this
+        # is now safe to enable at full detection rate. Toggle off/on to
+        # force a mask recompute (e.g. after lighting changes). Still
+        # default OFF: well-calibrated LAB thresholds don't need it.
         ('enable_hed_surface_mask', False, None),
         # Free-form per-target overrides as JSON-ish string, parsed lazily.
         # Example: '{"scaff": {"motion_speed": 0.9}, "blue": {"motion_speed": 1.8}}'
@@ -547,6 +548,9 @@ class ObjectSortingNodeV4(Node):
         ('inference_max_hz', 0.0,  (0.0, 60.0)),  # cap inference work on GPU
         ('publish_max_hz',   0.0,  (0.0, 60.0)),  # cap how often we emit annotated frames
         ('publish_scale',    1.0,  (0.25, 1.0)),  # downsample before publish (1.0 = native)
+        # JPEG quality for the image_result/compressed sibling topic
+        # (browser / remote viewing). Only encoded while subscribed.
+        ('publish_jpeg_quality', 80, (30, 95)),
         # Independent stop/start (UI buttons map to these).
         ('enable_camera_sub', True, None),        # drop our /depth_cam/rgb/image_raw subscription
         ('enable_inference',  True, None),        # pause the InferenceWorker
@@ -669,6 +673,17 @@ class ObjectSortingNodeV4(Node):
         # without the pub queue overwriting at high fps.
         self.result_publisher = self.create_publisher(
             Image, '/custom_sortingv4_1/image_result', 10)
+        # JPEG sibling for remote/browser viewing. The <base>/compressed
+        # naming follows the image_transport convention so rqt_image_view
+        # lists it as a transport and web_video_server's type=ros_compressed
+        # streams the pre-encoded frames without re-encoding server-side
+        # (raw Image here is ~23 MB/s; JPEG q80 is ~1-2 MB/s). Frames are
+        # only encoded when someone is subscribed (see _publish_image).
+        self.compressed_publisher = self.create_publisher(
+            CompressedImage, '/custom_sortingv4_1/image_result/compressed', 10)
+        # Machine-readable heartbeat mirror for the tuner UI: same data as
+        # the 5s log heartbeat, as a JSON String the UI subscribes to.
+        self.status_publisher = self.create_publisher(String, '~/status', 1)
 
         # ---- Services (lifecycle + control) ----
         self.create_service(Trigger, '~/enter', self.enter_srv_callback,
@@ -900,6 +915,12 @@ class ObjectSortingNodeV4(Node):
             if p.name == 'debug':
                 _set_debug(bool(p.value))
                 _stage('param', f'debug mode -> {bool(p.value)}')
+            # Toggling the HED mask off/on is the manual "recompute the
+            # cached surface mask" path (e.g. after lighting changed).
+            if p.name == 'enable_hed_surface_mask':
+                self._hed_mask_cache = None
+                _stage('param', f'enable_hed_surface_mask -> {bool(p.value)} '
+                                f'(cached mask cleared)')
             # Live-update YOLO knobs as the user moves the sliders, but only
             # while sorting is OFF — changing confidence mid-pick would change
             # what the lock loop sees and could destabilise an in-flight grab.
@@ -976,6 +997,9 @@ class ObjectSortingNodeV4(Node):
         self.last_position = None
         self.last_object_info_list = None
         self.detection_history = {}
+        # One-time HED surface mask, computed lazily on the first detection
+        # after each ROI build (see _detections_from_results).
+        self._hed_mask_cache = None
 
     def _heartbeat(self):
         """Periodic stage summary - prints once every ~5s. Tells you at a
@@ -1028,6 +1052,32 @@ class ObjectSortingNodeV4(Node):
                f'sorting_thread={"alive" if sorting_alive else "DEAD"}')
         if not sorting_alive:
             _stage('heartbeat', 'CRITICAL: sorting_loop thread is DEAD — see CRASHED log above')
+        # Publish the same data as JSON for the tuner UI's live mirror.
+        try:
+            engine = ''
+            if hasattr(self, 'inference') and self.inference is not None:
+                engine = os.path.basename(self.inference._engine_path or '')
+            self.status_publisher.publish(String(data=json.dumps({
+                'ts': now,
+                'enter': bool(self.enter),
+                'sorting': bool(self.enable_sorting),
+                'cam': cam_sub_state,
+                'ai': ai_state,
+                'cam_fps': round(fps, 1),
+                'pub_fps': round(pub_fps, 1),
+                'frames': int(self._frames_received),
+                'result_subs': int(result_subs),
+                'roi': bool(len(self.roi)),
+                'inference_age_ms': round(last_inf_ms, 0),
+                'target': self.target[0] if self.target else '',
+                'transport': bool(self.start_transport),
+                'sorting_thread_alive': bool(sorting_alive),
+                'engine': engine,
+            })))
+        except Exception as e:
+            if not getattr(self, '_status_pub_warned', False):
+                _stage('heartbeat', 'status publish failed (one-time warn)', exc=e)
+                self._status_pub_warned = True
 
     def _startup(self):
         if self._startup_done:
@@ -1146,6 +1196,8 @@ class ObjectSortingNodeV4(Node):
         y_min = min(imgpts, key=lambda p: p[1])[1]
         y_max = max(imgpts, key=lambda p: p[1])[1]
         self.roi = np.maximum(np.array([y_min, y_max, x_min, x_max]), 0)
+        # New ROI -> any cached HED surface mask is for the old crop.
+        self._hed_mask_cache = None
         _stage('roi', f'  computed roi (y={self.roi[0]}..{self.roi[1]} '
                       f'x={self.roi[2]}..{self.roi[3]}) on intrinsic '
                       f'shape={getattr(self.intrinsic, "shape", "?")}')
@@ -1414,16 +1466,27 @@ class ObjectSortingNodeV4(Node):
                                      (int(x2 + roi[2]), int(y2 + roi[0]))))
         # 2) Color blob detection (red/green/blue).
         # HED surface-mask preprocessing is gated by enable_hed_surface_mask
-        # (default False). On Orin Nano CPU HED is 500-2000ms/frame and the
-        # only thing dragging the detection loop to 0.4fps. Without it, LAB
-        # color thresholding on the raw ROI works fine if the workspace is
-        # calibrated and lit evenly.
+        # (default False). Round 15c: the HED forward pass (500-2000ms on
+        # Orin Nano CPU - the thing that dragged the loop to 0.4fps) now
+        # runs ONCE per ROI build and the resulting binary mask is cached;
+        # the per-frame cost is a single bitwise_and. The workspace surface
+        # is static post-calibration so a cached mask is exactly as valid
+        # as a recomputed one. Cache invalidates on ROI rebuild (get_roi)
+        # and on enable_hed_surface_mask toggle (see _on_param_change).
         if (self.p('enable_hed_surface_mask') and self.image_process is not None):
             try:
-                roi_img_surface = self.image_process.get_top_surface(roi_img)
+                hed_mask = getattr(self, '_hed_mask_cache', None)
+                if hed_mask is None or hed_mask.shape[:2] != roi_img.shape[:2]:
+                    t0 = time.time()
+                    hed_mask = self.image_process.edge_detect(roi_img)
+                    self._hed_mask_cache = hed_mask
+                    _stage('detect', f'HED surface mask computed in '
+                                     f'{time.time()-t0:.2f}s and CACHED - '
+                                     f'per-frame cost is now one bitwise_and')
+                roi_img_surface = cv2.bitwise_and(roi_img, roi_img, mask=hed_mask)
             except cv2.error as e:
                 if not getattr(self, '_hed_runtime_disabled', False):
-                    _stage('detect', 'get_top_surface() raised cv2.error '
+                    _stage('detect', 'HED edge_detect raised cv2.error '
                                      'at runtime - disabling HED for the '
                                      f'rest of the session. (msg: {str(e).splitlines()[0]})')
                     self._hed_runtime_disabled = True
@@ -1830,6 +1893,24 @@ class ObjectSortingNodeV4(Node):
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = 'camera_color_optical_frame'
             self.result_publisher.publish(msg)
+            # JPEG sibling for remote viewers (~23 MB/s raw vs ~1-2 MB/s
+            # JPEG q80). Encode ONLY while someone is subscribed -
+            # imencode costs ~2-4ms/frame on the Orin CPU.
+            try:
+                if self.compressed_publisher.get_subscription_count() > 0:
+                    quality = int(self.p('publish_jpeg_quality'))
+                    ok, enc = cv2.imencode(
+                        '.jpg', bgr, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+                    if ok:
+                        cmsg = CompressedImage()
+                        cmsg.header = msg.header
+                        cmsg.format = 'jpeg'
+                        cmsg.data = enc.tobytes()
+                        self.compressed_publisher.publish(cmsg)
+            except Exception as e:
+                if not getattr(self, '_compressed_warned', False):
+                    _stage('publish', 'compressed publish failed (one-time warn)', exc=e)
+                    self._compressed_warned = True
             # Track pub rate for heartbeat.
             self._pub_count = getattr(self, '_pub_count', 0) + 1
             if not getattr(self, '_first_publish_logged', False):

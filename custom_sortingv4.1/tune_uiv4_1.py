@@ -15,6 +15,7 @@
 
 import os
 import sys
+import json
 import time
 import argparse
 import subprocess
@@ -28,6 +29,7 @@ from rclpy.node import Node
 from rcl_interfaces.srv import SetParameters, GetParameters, ListParameters
 from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
 from std_srvs.srv import Trigger, SetBool
+from std_msgs.msg import String
 from interfaces.srv import SetStringBool
 
 
@@ -74,6 +76,8 @@ INT_PARAMS = [
     # is 320x320). To change imgsz you must re-export from Ultralytics
     # at the new size and rebuild the .engine.
     ('yolo_max_det',             1, 300, 1),
+    # JPEG quality for image_result/compressed (browser / remote viewing).
+    ('publish_jpeg_quality',     30, 95, 5),
 ]
 
 BOOL_PARAMS = [
@@ -106,6 +110,22 @@ class TunerClient(Node):
         self.save_profile_cli = self.create_client(SetStringBool, f'/{target_node}/save_profile')
         self.load_profile_cli = self.create_client(SetStringBool, f'/{target_node}/load_profile')
         self.save_default_cli = self.create_client(Trigger, f'/{target_node}/save_as_default')
+        # Live heartbeat mirror: the node publishes its 5s heartbeat as
+        # JSON on ~/status. The background rclpy.spin thread services this
+        # subscription; the UI polls latest_status via root.after().
+        self.latest_status = None
+        self.status_rx_t = 0.0
+        self.status_sub = self.create_subscription(
+            String, f'/{target_node}/status', self._on_status, 1)
+
+    def _on_status(self, msg):
+        # Runs on the background spin thread: only write plain attributes
+        # here (thread-safe); all Tk updates happen in the UI's after() poll.
+        try:
+            self.latest_status = json.loads(msg.data)
+            self.status_rx_t = time.time()
+        except Exception:
+            pass
 
     def wait_ready(self, timeout=10.0):
         return (self.set_cli.wait_for_service(timeout_sec=timeout)
@@ -209,6 +229,42 @@ class TunerUI:
         self._building = True
         self._build()
         self._building = False
+        # Heartbeat mirror: poll the node's ~/status JSON once a second so
+        # the perf label, engine label and RUNNING/STOPPED state reflect
+        # reality (e.g. watchdog-stopped node while UI still said RUNNING).
+        self.root.after(1000, self._poll_node_status)
+
+    def _poll_node_status(self):
+        try:
+            st = self.client.latest_status
+            age = time.time() - self.client.status_rx_t
+            if st is None:
+                pass  # node hasn't published yet - keep the placeholder
+            elif age > 12.0:
+                self.perf_var.set(f'perf: NO HEARTBEAT for {age:.0f}s - node down?')
+            else:
+                self.perf_var.set(
+                    f"perf: cam={st.get('cam_fps', '-')}fps "
+                    f"pub={st.get('pub_fps', '-')}fps "
+                    f"ai={st.get('ai', '?')} "
+                    f"inf_age={st.get('inference_age_ms', '-')}ms")
+                engine = st.get('engine') or ''
+                if engine:
+                    self.engine_var.set(engine)
+                # Node state is authoritative for the steady RUNNING/STOPPED
+                # display. Don't stomp the long-running CALIBRATING...
+                # transient; short transients (PROFILE SAVED etc.) get
+                # corrected on the next poll, which is the point.
+                node_running = bool(st.get('enter')) and bool(st.get('sorting'))
+                cur = self.status_var.get()
+                if cur != 'CALIBRATING...':
+                    if node_running and not cur.startswith('RUNNING'):
+                        self._set_status('RUNNING (node)', '#2e8b57')
+                    elif not node_running and cur.startswith('RUNNING'):
+                        self._set_status('STOPPED (node)', '#aa3333')
+        except Exception:
+            pass  # never let the poll loop die
+        self.root.after(1000, self._poll_node_status)
 
     def _build(self):
         # ---- Top control bar ----
@@ -855,7 +911,12 @@ class TunerUI:
             self._set_cam_status('opening browser...', '#3366aa')
             try:
                 ip = self._detect_ip()
-                url = f'http://{ip}:8080/stream_viewer?topic={self._cam_topic()}'
+                # type=ros_compressed streams the node's pre-encoded JPEG
+                # sibling (<topic>/compressed): no server-side re-encode in
+                # web_video_server and ~10x less node->server bandwidth than
+                # the raw Image topic. Quality knob: publish_jpeg_quality.
+                url = (f'http://{ip}:8080/stream_viewer?topic={self._cam_topic()}'
+                       f'&type=ros_compressed')
                 opener = self._pick_browser()
                 if opener is None:
                     messagebox.showinfo(

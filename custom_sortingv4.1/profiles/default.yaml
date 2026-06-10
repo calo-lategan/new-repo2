@@ -49,6 +49,8 @@
     inference_warmup: true
     hot_log_inference_ms: false
 
-    # Per-target overrides as JSON. Empty by default. Example:
-    # target_overrides: '{"scaff": {"motion_speed": 0.9, "gripper_settle": 0.8}}'
+    # Per-target overrides as JSON. Empty by default. Supported keys per
+    # target: motion_speed, aggression, gripper_close_pulse,
+    # gripper_settle, grab_depth. Example for mixed object heights:
+    # target_overrides: '{"scaff": {"grab_depth": 0.025, "gripper_settle": 0.8}, "blue": {"grab_depth": 0.01}}'
     target_overrides: '{}'
