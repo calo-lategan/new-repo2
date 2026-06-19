@@ -103,6 +103,144 @@ if [ ! -d "$V4" ]; then
 fi
 ok "source ready"
 
+# --- 1b. Device cleanup: uninstall every non-v5 version ------------------
+#
+# v5 is the single, current version. If v2 / v4 / v4.1 ever got installed
+# on this Jetson, their symlinks + entry_points + launcher dirs + desktop
+# shortcuts + sudoers are still there and will fight v5 (or break colcon
+# build when we go to compile, since their entry_points reference module
+# files we never link in). Remove them now, before we touch anything v5.
+#
+# Order matters: remove the setup.py entry_points BEFORE deleting the
+# source symlinks. Otherwise colcon build later fails because setup.py
+# still references modules whose symlinks were just deleted.
+#
+# Idempotent: every step is "if it exists, remove it". Re-running prints
+# "nothing to remove".
+
+remove_entry_from_setup() {
+    # $1 = setup.py path, $2 = entry-point string to remove
+    local setup_path="$1" entry="$2"
+    [ -f "$setup_path" ] || return 0
+    if ! grep -qF "$entry" "$setup_path"; then
+        return 0
+    fi
+    python3 - "$setup_path" "$entry" <<'PY'
+import re, sys
+path, entry = sys.argv[1], sys.argv[2]
+text = open(path).read()
+m = re.search(r"(\s*'console_scripts'\s*:\s*\[)(.*?)(\n\s*\])", text, re.S)
+if not m:
+    sys.stderr.write("could not find console_scripts list - leaving alone\n")
+    sys.exit(0)
+inner = m.group(2)
+kept = []
+for line in inner.split('\n'):
+    if entry in line:
+        continue
+    kept.append(line)
+new_inner = '\n'.join(kept)
+out = text[:m.start()] + m.group(1) + new_inner + m.group(3) + text[m.end():]
+open(path, 'w').write(out)
+PY
+    stage "    removed setup.py entry: $entry"
+}
+
+cleanup_old_version() {
+    # $1 = label (v2/v4/v4.1)
+    # $2 = node module basename (e.g. custom_sortingv4_1)
+    # $3 = ui module basename (e.g. tune_uiv4_1)
+    # $4 = launch file basename (e.g. custom_sorting_nodev4.1.launch.py)
+    # $5 = launcher dir name (e.g. jetarm_v4_1)
+    # $6 = desktop file stem (e.g. jetarm-sort-v4.1)
+    # $7 = sudoers file name (e.g. jetarm-v4.1)
+    # $8 = env file name in $HOME (e.g. .jetarm_v4_1.env)
+    # $9 = src dir name (e.g. jetarm_v4_1_src) - NOT auto-deleted, only flagged
+    local label="$1" node_mod="$2" ui_mod="$3" launch_file="$4"
+    local launcher="$5" desktop_stem="$6" sudoers="$7" envfile="$8" srcdir="$9"
+    local touched=0
+
+    # 1) setup.py entry_points (must precede symlink removal)
+    remove_entry_from_setup "$APP_PKG/setup.py" \
+        "$node_mod = app.$node_mod:main" && touched=1
+    remove_entry_from_setup "$APP_PKG/setup.py" \
+        "$ui_mod = app.$ui_mod:main" && touched=1
+
+    # 2) Source symlinks. Only delete if it IS a symlink (don't trash a
+    #    user's actual file that happens to share a name).
+    for f in "$APP_PKG/app/$node_mod.py" "$APP_PKG/app/$ui_mod.py" \
+             "$APP_PKG/launch/$launch_file"; do
+        if [ -L "$f" ]; then
+            rm -f "$f"; stage "    removed symlink: $f"; touched=1
+        fi
+    done
+
+    # 3) Launcher dir
+    if [ -d "$HOME/$launcher" ]; then
+        rm -rf "$HOME/$launcher"
+        stage "    removed launcher dir: $HOME/$launcher"; touched=1
+    fi
+
+    # 4) Desktop shortcuts (both locations)
+    for f in "$HOME/Desktop/$desktop_stem.desktop" \
+             "$HOME/.local/share/applications/$desktop_stem.desktop"; do
+        if [ -f "$f" ]; then
+            rm -f "$f"; stage "    removed desktop: $f"; touched=1
+        fi
+    done
+
+    # 5) Sudoers - needs sudo. Skip silently if not allowed.
+    if [ -f "/etc/sudoers.d/$sudoers" ]; then
+        if sudo -n true 2>/dev/null; then
+            sudo rm -f "/etc/sudoers.d/$sudoers"
+            stage "    removed sudoers: /etc/sudoers.d/$sudoers"
+            touched=1
+        else
+            stage "    [skip] /etc/sudoers.d/$sudoers (need sudo - run with --sudoers)"
+        fi
+    fi
+
+    # 6) Env file
+    if [ -f "$HOME/$envfile" ]; then
+        rm -f "$HOME/$envfile"
+        stage "    removed env file: $HOME/$envfile"; touched=1
+    fi
+
+    # 7) Old source tree - FLAG ONLY (may contain user edits / profiles)
+    if [ -d "$HOME/$srcdir" ]; then
+        local sz; sz=$(du -sh "$HOME/$srcdir" 2>/dev/null | awk '{print $1}')
+        stage "    [kept] $HOME/$srcdir ($sz) - delete manually if you don't need it: rm -rf $HOME/$srcdir"
+    fi
+
+    if [ "$touched" = "0" ]; then
+        stage "  $label: nothing to remove"
+    fi
+}
+
+stage "device cleanup: removing any non-v5 installs (v2 / v4 / v4.1) ..."
+stage "  v4.1 ..."
+cleanup_old_version "v4.1" \
+    "custom_sortingv4_1" "tune_uiv4_1" "custom_sorting_nodev4.1.launch.py" \
+    "jetarm_v4_1" "jetarm-sort-v4.1" "jetarm-v4.1" \
+    ".jetarm_v4_1.env" "jetarm_v4_1_src"
+stage "  v4 ..."
+cleanup_old_version "v4" \
+    "custom_sortingv4" "tune_uiv4" "custom_sorting_nodev4.launch.py" \
+    "jetarm_v4" "jetarm-sort-v4" "jetarm-v4" \
+    ".jetarm_v4.env" "jetarm_v4_src"
+stage "  v2 ..."
+cleanup_old_version "v2" \
+    "custom_sortingv2" "tune_ui" "custom_sorting_nodev2.launch.py" \
+    "jetarm" "jetarm-sort-v2" "jetarm-v2" \
+    ".jetarm_v2.env" "jetarm_v2_src"
+
+# Shared resources: do NOT delete (v4 + v4.1 both used this dir).
+if [ -d "$HOME/jetarm_v4_profiles" ]; then
+    stage "  [kept] $HOME/jetarm_v4_profiles (shared by v4 + v4.1; may hold your tuned YAMLs)"
+fi
+
+ok "device cleanup done"
+
 # --- 2. Copy node + UI ---------------------------------------------------
 
 # We *symlink* the python sources from the git checkout into the ROS2 app
