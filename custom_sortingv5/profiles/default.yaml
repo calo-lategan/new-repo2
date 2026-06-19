@@ -51,6 +51,9 @@
     grasp_stall_pulse: 8
     grasp_timeout: 2.0
     grasp_max_temp: 65
+    # Test-grip dwell (sec): how long the arm holds the OPEN test pose
+    # before closing, so the operator can place an object between the jaws.
+    test_grip_dwell: 3.0
 
     # ---- Inference ----
     inference_warmup: true

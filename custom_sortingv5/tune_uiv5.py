@@ -125,6 +125,9 @@ class TunerClient(Node):
         self.load_profile_cli = self.create_client(SetStringBool, f'/{target_node}/load_profile')
         self.save_default_cli = self.create_client(Trigger, f'/{target_node}/save_as_default')
         # v5: model-config buffered save.
+        # v5 BETA: per-class grip-test orchestrator.
+        self.test_grip_cli = self.create_client(
+            SetStringBool, f'/{target_node}/test_grip')
         self.save_yolo_cli = self.create_client(SetStringBool,
                                                 f'/{target_node}/save_yolo_config')
         # Live heartbeat mirror: the node publishes its 5s heartbeat as
@@ -221,6 +224,8 @@ class TunerClient(Node):
 
     def call_recalibrate(self): return self._trigger(self.recalibrate_cli)
     def call_run_calibration(self): return self._trigger(self.run_calibration_cli)
+    def call_test_grip(self, class_name):
+        return self._set_string_bool(self.test_grip_cli, str(class_name), True)
     def call_enter(self):       return self._trigger(self.enter_cli)
     def call_exit(self):        return self._trigger(self.exit_cli)
     def call_save_default(self): return self._trigger(self.save_default_cli)
@@ -284,6 +289,25 @@ class TunerUI:
                 try:
                     self._refresh_class_filter(cnames)
                     self._refresh_places(cnames)
+                except Exception:
+                    pass
+                # Live grip telemetry on the Grip tab.
+                try:
+                    lg = st.get('last_grip')
+                    running = bool(st.get('test_grip_running'))
+                    if running:
+                        self.grip_status_var.set('test grip running ...')
+                    elif lg:
+                        bits = [f"last grip [{lg.get('source','?')}]:",
+                                str(lg.get('label', '?')),
+                                str(lg.get('outcome', '?'))]
+                        if lg.get('final_pulse') is not None:
+                            bits.append(f"{lg['final_pulse']}p")
+                        if lg.get('peak_temp') is not None:
+                            bits.append(f"{lg['peak_temp']}C")
+                        if lg.get('duration_ms') is not None:
+                            bits.append(f"{lg['duration_ms']}ms")
+                        self.grip_status_var.set(' '.join(bits))
                 except Exception:
                     pass
                 # Node state is authoritative for the steady RUNNING/STOPPED
@@ -420,6 +444,20 @@ class TunerUI:
         self._notebook = notebook
         speed_tab = ttk.Frame(notebook); notebook.add(speed_tab, text='Speed / motion')
         grip_tab = ttk.Frame(notebook); notebook.add(grip_tab, text='Grip')
+        # Live grip telemetry (updated by _poll_node_status from ~/status).
+        self.grip_status_var = tk.StringVar(value='last grip: --')
+        ttk.Label(grip_tab, textvariable=self.grip_status_var,
+                  foreground='#226666',
+                  font=('TkDefaultFont', 9, 'bold')
+                  ).pack(anchor='w', padx=8, pady=(8, 0))
+        ttk.Label(grip_tab, foreground='#666', wraplength=720,
+                  justify='left',
+                  text='BETA force-limited grasp (enable on Toggles tab): closes '
+                       'until jaws contact the item. Per-class max strength '
+                       'caps the squeeze (set in Places). Servo temp cutoff at '
+                       'grasp_max_temp. Use the "Test grip" buttons in Places '
+                       'to tune each class’ strength without firing a full pick.'
+                  ).pack(anchor='w', padx=8, pady=(0, 6))
         detect_tab = ttk.Frame(notebook); notebook.add(detect_tab, text='Detection')
         model_tab = ttk.Frame(notebook); notebook.add(model_tab, text='Model')
         self._model_tab = model_tab
@@ -979,12 +1017,44 @@ class TunerUI:
             ttk.Button(row, text='Save',
                        command=lambda nm=name, ents=entries:
                            self._on_save_place(nm, ents)).pack(side='left', padx=6)
+            ttk.Button(row, text='Test grip',
+                       command=lambda nm=name, ents=entries:
+                           self._on_test_grip(nm, ents)).pack(side='left', padx=2)
             self._places_rows[name] = entries
 
     def _parse_place_row(self, name, entries):
         x = float(entries['x'].get()); y = float(entries['y'].get())
         z = float(entries['z'].get()); s = int(float(entries['strength'].get()))
         return [x, y, z], s
+
+    def _on_test_grip(self, name, entries):
+        # Save this row's strength FIRST so the test uses the latest value
+        # (the operator typically tweaks the number then clicks Test grip).
+        try:
+            _, strength = self._parse_place_row(name, entries)
+            self._grasp_strength[name] = strength
+        except ValueError:
+            messagebox.showerror('Bad value', f'{name}: grip must be a number.')
+            return
+        if not messagebox.askyesno(
+                'Test grip',
+                f'Test grip for "{name}" (max strength {strength} pulses)?\n\n'
+                f'The arm will move to a safe test pose, open the gripper, '
+                f'and dwell so you can place the object between the jaws. '
+                f'It then closes until contact (or the strength cap), holds '
+                f'briefly, and releases.\n\nMake sure sorting is STOPPED.'):
+            return
+        def go():
+            # Persist the strength so the test uses the saved value.
+            self.client.set_value('grasp_strength', json.dumps(self._grasp_strength))
+            ok = self.client.call_test_grip(name)
+            if not ok:
+                messagebox.showerror(
+                    'Test grip refused',
+                    f'Node rejected the test_grip call for "{name}". '
+                    f'Make sure sorting is STOPPED, calibration is not '
+                    f'running, and kinematics is up.')
+        threading.Thread(target=go, daemon=True).start()
 
     def _on_save_place(self, name, entries):
         try:

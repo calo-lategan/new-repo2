@@ -668,6 +668,9 @@ class ObjectSortingNodeV5(Node):
         ('grasp_stall_pulse', 8, (1, 40)),    # advance under this per step = stalled (contact)
         ('grasp_timeout', 2.0, (0.3, 5.0)),   # overall budget; failsafe
         ('grasp_max_temp', 65, (40, 80)),     # servo over-temp cutoff (protect the gripper servo)
+        # Seconds the test-grip pose holds open BEFORE closing, so the
+        # operator can place an object between the jaws.
+        ('test_grip_dwell', 3.0, (0.5, 10.0)),
         # ---- Misc ----
         ('startup_self_calibrate', False, None),  # v5 has no color self-cal
         ('inference_warmup', True, None),
@@ -815,6 +818,14 @@ class ObjectSortingNodeV5(Node):
         # yolo.yaml in the profiles dir" (false = apply but don't write).
         self.create_service(SetStringBool, '~/save_yolo_config',
                             self.save_yolo_config_srv_callback,
+                            callback_group=self.svc_group)
+        # v5 BETA: per-class grip-test orchestrator. UI Places tab calls
+        # this. Drives the arm to a safe test pose, dwells so the operator
+        # can place an object between the jaws, then runs compliance_grasp
+        # with the per-class strength cap so the user can tune it
+        # interactively without firing a full pick cycle.
+        self.create_service(SetStringBool, '~/test_grip',
+                            self.test_grip_srv_callback,
                             callback_group=self.svc_group)
         # v5: CALIBRATE orchestrator. The UI button calls this; the node
         # drives the vendor AprilTag calibration node (enter/start/finish/
@@ -1107,6 +1118,11 @@ class ObjectSortingNodeV5(Node):
         self._pending_yolo_knobs = {}
         # Last calibrate result for the heartbeat mirror.
         self._last_calibrate = None
+        # Last grip outcome (heartbeat mirror -> Grip-tab live label).
+        # Keys: ts, label, outcome, final_pulse, peak_temp, duration_ms, source.
+        self._last_grip = None
+        # Test-grip in-progress guard so ~/test_grip won't reenter.
+        self._test_grip_running = False
         # YOLO classes with no place target (set in _on_engine_loaded).
         self._unmapped_classes = []
         # Calibration in-progress guard.
@@ -1201,6 +1217,8 @@ class ObjectSortingNodeV5(Node):
                 # this changes.
                 'class_names': {str(k): v for k, v in class_names.items()},
                 'last_calibrate': self._last_calibrate,
+                'last_grip': self._last_grip,
+                'test_grip_running': bool(getattr(self, '_test_grip_running', False)),
                 # Classes the loaded model can detect but that have no
                 # place target configured (UI badges these).
                 'unmapped_classes': list(getattr(self, '_unmapped_classes', [])),
@@ -1538,6 +1556,115 @@ class ObjectSortingNodeV5(Node):
         except Exception as e:
             _stage('engine-load', 'class-name mirror failed', exc=e)
 
+    def test_grip_srv_callback(self, request, response):
+        """BETA: interactive per-class grip test. data_str = YOLO class
+        name (used to look up the per-class max-strength cap and as the
+        label on the telemetry record). data_bool is unused.
+
+        Spawns a worker and returns immediately so the service reply
+        isn't held while the operator places the object."""
+        label = (request.data_str or '').strip() or 'unknown'
+        if self.enable_sorting:
+            _stage('svc', 'test_grip refused - stop sorting first')
+            response.success = False
+            return response
+        if getattr(self, '_calibrating', False):
+            _stage('svc', 'test_grip refused - calibration in progress')
+            response.success = False
+            return response
+        if getattr(self, '_test_grip_running', False):
+            _stage('svc', 'test_grip refused - already running')
+            response.success = False
+            return response
+        if self.kinematics_client is None:
+            _stage('svc', 'test_grip refused - kinematics not available')
+            response.success = False
+            return response
+        self._test_grip_running = True
+        threading.Thread(target=self._run_test_grip, args=(label,),
+                         daemon=True).start()
+        response.success = True
+        return response
+
+    def _run_test_grip(self, label):
+        """Worker thread: drive arm to a safe test pose, open jaws, dwell
+        so the operator places the object, run compliance_grasp with this
+        class's strength cap, hold briefly, release. Telemetry lands on
+        self._last_grip which the heartbeat publishes."""
+        try:
+            speed = max(0.1, 1.0 / float(self.p('motion_speed')))
+            aggression = float(self.p('aggression'))
+            open_pulse = int(self.p('gripper_open_pulse'))
+            close_pulse = int(self.p('gripper_close_pulse'))
+            max_strength = int(self._grasp_strength_for(label, close_pulse))
+            grasp_step = int(self.p('grasp_step_pulse'))
+            grasp_dwell = float(self.p('grasp_step_dwell'))
+            grasp_stall = int(self.p('grasp_stall_pulse'))
+            grasp_timeout = float(self.p('grasp_timeout'))
+            grasp_max_temp = int(self.p('grasp_max_temp'))
+            test_dwell = float(self.p('test_grip_dwell'))
+
+            _stage('test-grip', f'class={label!r} max_strength={max_strength} '
+                                f'dwell={test_dwell:.1f}s starting')
+            # 1. Park home + open gripper so the jaws are clear.
+            self.go_home(False)
+            self.motion.set_gripper(open_pulse, 0.3 * speed)
+            # 2. Move to a fixed test pose: above the workspace, jaws down.
+            #    Reachable for the JetArm; doesn't depend on calibration.
+            test_pose = [0.0, 0.20, 0.10]
+            if self.motion.goto_pose(test_pose, 80,
+                                     duration=max(0.6, 1.0 * speed / aggression),
+                                     parallel_base=True,
+                                     pitch_range=(-90.0, 90.0)) is None:
+                _stage('test-grip', 'test-pose IK failed')
+                self._last_grip = {'ts': time.time(), 'label': label,
+                                   'outcome': 'ik_failed', 'source': 'test'}
+                return
+            # 3. Dwell so the operator places the object.
+            _stage('test-grip', f'place an object between the jaws ({test_dwell:.1f}s) ...')
+            self.motion._sleep(test_dwell)
+            # 4. Compliance grasp with this class's cap.
+            t0 = time.time()
+            outcome = self.motion.compliance_grasp(
+                target_pulse=max_strength, open_pulse=open_pulse,
+                step=grasp_step, dwell=grasp_dwell,
+                stall_thresh=grasp_stall, timeout=grasp_timeout,
+                max_temp=grasp_max_temp)
+            grip_ms = int(1000 * (time.time() - t0))
+            # 5. Hold briefly so the user can eyeball the grip.
+            self.motion._sleep(1.5)
+            # 6. Telemetry snapshot.
+            final_pulse = None; peak_temp = None
+            try:
+                st = self.motion.get_servo_state(
+                    GRIPPER_ID, fields=('position', 'temperature'))
+                if st.get('position') is not None: final_pulse = int(st['position'])
+                if st.get('temperature') is not None: peak_temp = int(st['temperature'])
+            except Exception:
+                pass
+            self._last_grip = {
+                'ts': time.time(), 'label': label, 'outcome': outcome,
+                'final_pulse': final_pulse, 'peak_temp': peak_temp,
+                'duration_ms': grip_ms, 'source': 'test',
+            }
+            _stage('test-grip', f'{label} -> {outcome} pulse={final_pulse} '
+                                f'temp={peak_temp} {grip_ms}ms')
+            # 7. Release and home.
+            self.motion.set_gripper(open_pulse, 0.3 * speed)
+            self.motion._sleep(0.3)
+            self.go_home(False)
+        except Exception as e:
+            _stage('test-grip', 'crashed - opening gripper + going home', exc=e)
+            try:
+                self.motion.set_gripper(int(self.p('gripper_open_pulse')), 0.3)
+                self.go_home(True)
+            except Exception:
+                pass
+            self._last_grip = {'ts': time.time(), 'label': label,
+                               'outcome': 'crashed', 'source': 'test'}
+        finally:
+            self._test_grip_running = False
+
     def save_yolo_config_srv_callback(self, request, response):
         """Apply (and optionally persist) a buffered YOLO config from the
         tuner UI's Model tab. The UI buffers slider edits locally and only
@@ -1862,6 +1989,8 @@ class ObjectSortingNodeV5(Node):
             return False
         # Close: STANDARD fixed-pulse grasp by default; opt-in BETA
         # compliance "close until contact" with a per-class strength cap.
+        outcome = 'standard'
+        grip_t0 = time.time()
         if use_compliance:
             outcome = self.motion.compliance_grasp(
                 target_pulse=max_strength, open_pulse=open_pulse,
@@ -1871,6 +2000,39 @@ class ObjectSortingNodeV5(Node):
             _stage('pick', f'compliance_grasp -> {outcome}')
         else:
             self.motion.set_gripper(close_pulse, close_dur)
+        # Telemetry for the heartbeat mirror. Read final state once; cheap.
+        final_pulse = None
+        peak_temp = None
+        try:
+            st = self.motion.get_servo_state(GRIPPER_ID,
+                                             fields=('position', 'temperature'))
+            if st.get('position') is not None:
+                final_pulse = int(st['position'])
+            if st.get('temperature') is not None:
+                peak_temp = int(st['temperature'])
+        except Exception:
+            pass
+        self._last_grip = {
+            'ts': time.time(),
+            'label': label,
+            'outcome': outcome,
+            'final_pulse': final_pulse,
+            'peak_temp': peak_temp,
+            'duration_ms': int(1000 * (time.time() - grip_t0)),
+            'source': 'pick',
+        }
+        # CLOSED-LOOP: if the compliance grip detected no contact (jaws
+        # closed all the way without stalling) the object isn't between
+        # the jaws - DON'T lift+place an empty hand. Bail so transport
+        # opens the gripper, goes home, and the next sorting iteration
+        # re-locks naturally. 'overheat' / 'aborted' also bail. The
+        # 'no_feedback' path keeps the optimistic lift (we genuinely
+        # can't tell). The 'standard' path (compliance disabled) trusts
+        # the fixed-pulse close.
+        if outcome in ('closed', 'overheat', 'aborted'):
+            _stage('pick', f'{outcome} - no object in jaws, bailing pick')
+            self.motion.set_gripper(open_pulse, 0.2 * speed)
+            return False
         # Settle so the servo holding torque has time to bite before lift.
         self.motion._sleep(settle)
         if self.motion.goto_pose(hover, pitch,

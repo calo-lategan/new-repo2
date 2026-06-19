@@ -246,6 +246,35 @@ A temperature cutoff (`grasp_max_temp`) protects the gripper servo.
 Per-class overrides also work via `target_overrides` JSON, e.g.
 `'{"scaff": {"grab_depth": 0.025}, "cube_red": {"motion_speed": 1.8}}'`.
 
+### Closed-loop pick
+
+With the BETA grasp enabled, an **empty close** (`closed` outcome — jaws
+reached the cap without contacting anything) **fails the pick**, so the
+transport opens the gripper, returns home, and the next detection cycle
+re-locks the target naturally. No retry loop, no spam — paced by detection.
+`overheat` and `aborted` bail the same way. The Grip tab shows the live
+outcome and the perf line badges `unmapped=N` for classes with no place
+target.
+
+### Tuning per-class strength (the Test grip button)
+
+Each row in the **Places** tab has a **Test grip** button next to Save:
+
+1. Stop sorting first.
+2. Pick a row (e.g. `cube_red`) and click **Test grip**. The arm moves to
+   a safe test pose, opens the jaws, and dwells `test_grip_dwell` seconds
+   (default 3).
+3. **Place the object between the jaws** during the dwell.
+4. The gripper closes until contact (or the per-class cap), holds briefly
+   so you can eyeball it, then releases.
+5. The Grip tab updates with `last grip [test]: cube_red gripped <pulse>p
+   <temp>C <ms>ms`. If it's mushy: raise the strength entry, Test again.
+   If the servo whines / temp climbs fast: lower it. **Save** the row when
+   it's right.
+
+This lets you tune the per-item cap interactively without firing a full
+pick cycle and without ever dragging the YOLO model into it.
+
 ## Calibrate (AprilTag — same as the factory app)
 
 The **CALIBRATE** button runs the **vendor AprilTag calibration node** (it's
