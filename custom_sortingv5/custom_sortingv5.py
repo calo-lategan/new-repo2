@@ -468,80 +468,100 @@ class MotionController:
         self._sleep(duration)
 
     def compliance_grasp(self, target_pulse, open_pulse,
-                         step=25, dwell=0.08, stall_thresh=8, timeout=2.0):
-        """Close the gripper in increments toward target_pulse, stopping
-        early if the actual servo position stops advancing - i.e. the jaws
-        have stalled on an object. The available proxy for force.
+                         step=15, dwell=0.10, stall_thresh=8, timeout=2.0,
+                         max_temp=65):
+        """Close the gripper in small increments toward target_pulse,
+        stopping the moment the jaws stall on the object (contact-stop).
+        BETA / opt-in: only called when compliance_grasp_enabled is True.
 
-        Why not load/current? The hardware can report both, but
-        ros_robot_controller_msgs/BusServoState exposes only position,
-        temperature, voltage - no load/current field. Wiring those through
-        means patching the driver + msg + sdk. Position-stall is the
-        proxy that requires zero driver changes: when the commanded pulse
-        moves but the actual position doesn't, something is in the way.
+        FORCE MODEL: the driver exposes no servo load/current (only
+        position / voltage / temperature), so this is NOT a force sensor.
+        The force limit is the SLOW APPROACH itself - each step advances
+        the command by `step` pulses over `dwell` seconds, so the jaws
+        inch into the object and cannot slam. Contact is detected as a
+        position stall (we commanded forward, the servo didn't follow),
+        and `target_pulse` (the per-class max-hold-strength cap) bounds
+        how hard it can ever squeeze.
 
         Parameters
         ----------
-        target_pulse : int   Hard-close target (reached if jaws don't stall).
-        open_pulse   : int   Where the gripper currently is (used if the
-                             servo readback fails).
-        step         : int   Pulse increment per loop iteration.
-        dwell        : float Wait per step for servo motion + readback.
-        stall_thresh : int   Pulses-of-motion threshold. Under this per
-                             step = stalled = object gripped.
-        timeout      : float Overall budget; failsafe so we don't lean on
-                             a hot servo forever.
+        target_pulse : int   MAX hold strength for this item - never
+                             squeeze past it (per-class cap).
+        open_pulse   : int   Where the gripper currently is (fallback if
+                             the first readback fails).
+        step         : int   Pulse increment per step (smaller = gentler).
+        dwell        : float Wait per step for servo motion + readback;
+                             >= one 50Hz driver cycle so readback is fresh.
+        stall_thresh : int   Advance under this per step = contact.
+        timeout      : float Overall budget; failsafe.
+        max_temp     : int   Gripper-servo over-temp cutoff (servo safety).
 
-        Returns 'gripped' (stalled on object - normal success),
-                'closed'  (reached target without stalling - empty jaws),
-                'no_feedback' (servo readback failed; commanded full close).
+        Returns 'gripped'   (debounced stall on object - normal success),
+                'closed'    (reached cap without contact - empty/thin jaws),
+                'overheat'  (servo at/over max_temp - stopped to protect it),
+                'no_feedback' (readback failed; commanded a single close),
+                'aborted'.
 
-        Mitigations against serial-bus latency (see INSTALL.md):
-        - dwell defaults to 80ms = 1 driver pub cycle (50Hz) + slack so
-          the servo has actually moved before we read it back.
-        - step defaults to 25 pulses (~3% of full range) so even one
-          missed readback can't overshoot far.
-        - Each step issues a NEW set_servo_position with a SHORT duration
-          (dwell), so a stale stop command is naturally followed within
-          one dwell by a fresh re-command at the same value, capping
-          overshoot at one step.
+        Robustness vs serial-bus latency / readback jitter:
+        - The stall is judged on COMMANDED-vs-ACTUAL progress within the
+          step (commanded_delta vs moved), not on the post-move position,
+          so an undershooting earlier step can't suppress the check.
+        - A 2-step debounce (`stall_streak`) rejects single-step false
+          positives from position jitter / following-error.
         """
         if self._abort:
             return 'aborted'
         cur = open_pulse
-        st = self.get_servo_state(GRIPPER_ID, fields=('position',))
+        st = self.get_servo_state(GRIPPER_ID, fields=('position', 'temperature'))
         if st.get('position') is not None:
             cur = int(st['position'])
         target = int(target_pulse)
         deadline = time.time() + float(timeout)
         no_fb = 0
+        stall_streak = 0
         while cur < target and time.time() < deadline:
             if self._abort:
                 return 'aborted'
-            cmd = min(target, cur + int(step))
+            prev = cur
+            cmd = min(target, prev + int(step))
+            commanded_delta = cmd - prev
             set_servo_position(self.joints_pub, float(dwell),
                                ((GRIPPER_ID, cmd),))
             self._sleep(dwell)
-            st = self.get_servo_state(GRIPPER_ID, fields=('position',))
+            st = self.get_servo_state(GRIPPER_ID, fields=('position', 'temperature'))
+            # Servo protection: stop leaning on the gripper if it's hot.
+            temp = st.get('temperature')
+            if temp is not None and int(temp) >= int(max_temp):
+                set_servo_position(self.joints_pub, float(dwell),
+                                   ((GRIPPER_ID, prev),))
+                _stage('grip', f'over-temp {int(temp)}C >= {int(max_temp)}C - stopping')
+                return 'overheat'
             actual = st.get('position')
             if actual is None:
                 no_fb += 1
-                # If we never get readback, fall back to a single blocking
-                # full-close so the pick can still finish, then bail.
+                # No readback: fall back to one blocking close so the pick
+                # can still finish, then bail (can't do contact detection
+                # blind).
                 if no_fb >= 3:
                     self.set_gripper(target, max(0.2, dwell))
                     return 'no_feedback'
                 continue
             actual = int(actual)
-            moved = actual - cur
+            moved = actual - prev
             cur = actual
-            if moved < int(stall_thresh) and cmd > cur + int(stall_thresh):
-                # Commanded forward but barely moved - jaws on object. Hold
-                # at the current position (a fresh same-value command so
-                # the servo's holding torque kicks in).
-                set_servo_position(self.joints_pub, float(dwell),
-                                   ((GRIPPER_ID, cur),))
-                return 'gripped'
+            # Contact = we asked the jaws to advance meaningfully but they
+            # didn't. Judged on this step's commanded-vs-actual, immune to
+            # earlier undershoot.
+            if commanded_delta > int(stall_thresh) and moved < int(stall_thresh):
+                stall_streak += 1
+                if stall_streak >= 2:
+                    # Hold at the current position (fresh same-value command
+                    # so the servo's holding torque engages).
+                    set_servo_position(self.joints_pub, float(dwell),
+                                       ((GRIPPER_ID, cur),))
+                    return 'gripped'
+            else:
+                stall_streak = 0
         return 'closed'
 
 
@@ -623,23 +643,33 @@ class ObjectSortingNodeV5(Node):
         ('gripper_close_duration', 0.35, (0.1, 2.0)),
         ('gripper_settle', 0.5, (0.0, 1.5)),
         ('grab_depth', 0.02, (0.0, 0.05)),
-        # ---- Compliance grasp (position-stall based) ----
-        # Position-stall is the available proxy for force: the driver's
-        # BusServoState does not expose load/current, but it does expose
-        # the servo's actual position. Close in increments; if the actual
-        # position fails to advance toward the commanded value, the jaws
-        # have stalled on an object and we stop. NO driver changes
-        # required. See INSTALL.md for the load-vs-position discussion.
-        ('grasp_step_pulse', 25, (5, 80)),    # commanded pulse increment per step
-        ('grasp_step_dwell', 0.08, (0.03, 0.3)),  # servo motion + readback window per step
-        ('grasp_stall_pulse', 8, (1, 40)),    # under this much movement per step = "stalled"
+        # ---- Force-limited grasp (BETA, opt-in) ----
+        # Default OFF: the standard close-to-pulse grasp runs. When the
+        # operator flips compliance_grasp_enabled (UI button), the close
+        # step becomes a position-stall "close until contact" loop.
+        #
+        # Why position-stall? The driver's BusServoState exposes only
+        # position / voltage / temperature - NO load/current field - so a
+        # true force loop isn't possible without patching driver+sdk+msg.
+        # Position-stall is the zero-driver-change proxy: close in small
+        # increments; when the commanded pulse advances but the actual
+        # position doesn't, the jaws have stalled on the object and we
+        # stop. The small step + dwell IS the force limit (the jaws inch,
+        # they can't slam). This is an honest contact-stop, not a sensor.
+        ('compliance_grasp_enabled', False, None),  # BETA toggle
+        # Per-class MAX HOLD STRENGTH: JSON {class_name: max_close_pulse}.
+        # The compliance loop never squeezes past this pulse for that
+        # class, so fragile cubes get a gentle cap and scaff gets a firm
+        # one. Missing class => global gripper_close_pulse. Editable in
+        # the tuner UI per-class targets table.
+        ('grasp_strength', '{}', None),
+        ('grasp_step_pulse', 15, (5, 80)),    # commanded pulse increment per step (smaller = gentler)
+        ('grasp_step_dwell', 0.10, (0.03, 0.3)),  # servo motion + readback window per step (>=1 driver cycle @50Hz)
+        ('grasp_stall_pulse', 8, (1, 40)),    # advance under this per step = stalled (contact)
         ('grasp_timeout', 2.0, (0.3, 5.0)),   # overall budget; failsafe
+        ('grasp_max_temp', 65, (40, 80)),     # servo over-temp cutoff (protect the gripper servo)
         # ---- Misc ----
         ('startup_self_calibrate', False, None),  # v5 has no color self-cal
-        # When True, the CALIBRATE button also drives the arm above each
-        # configured place position so the operator can eyeball IK
-        # accuracy. Only runs when sorting is OFF (safety).
-        ('calibrate_tour', False, None),
         ('inference_warmup', True, None),
         ('hot_log_inference_ms', False, None),
         ('debug', False, None),
@@ -1766,18 +1796,25 @@ class ObjectSortingNodeV5(Node):
         approach_dwell = float(self.p('approach_dwell'))
         open_pulse = int(self.p('gripper_open_pulse'))
         close_pulse = int(ov.get('gripper_close_pulse', self.p('gripper_close_pulse')))
+        close_dur = float(ov.get('gripper_close_duration', self.p('gripper_close_duration'))) * speed
         settle = float(ov.get('gripper_settle', self.p('gripper_settle')))
         grab_depth = float(ov.get('grab_depth', self.p('grab_depth')))
         parallel_base = bool(self.p('parallel_base_motion'))
+        use_compliance = bool(self.p('compliance_grasp_enabled'))
+        # Per-class MAX HOLD STRENGTH (compliance only): never squeeze past
+        # this for this class. Falls back to the global close pulse.
+        max_strength = int(self._grasp_strength_for(label, close_pulse))
         # Compliance knobs (per-target override capable).
         grasp_step = int(ov.get('grasp_step_pulse', self.p('grasp_step_pulse')))
         grasp_dwell = float(ov.get('grasp_step_dwell', self.p('grasp_step_dwell')))
         grasp_stall = int(ov.get('grasp_stall_pulse', self.p('grasp_stall_pulse')))
         grasp_timeout = float(ov.get('grasp_timeout', self.p('grasp_timeout')))
+        grasp_max_temp = int(self.p('grasp_max_temp'))
 
         if self.motion.aborted:
             return False
-        _dbg('pick', f'pick {label} target_close={close_pulse} '
+        _dbg('pick', f'pick {label} compliance={use_compliance} '
+                     f'close={close_pulse} max_strength={max_strength} '
                      f'grab_depth={grab_depth:.3f} settle={settle:.2f}')
         hover = [position[0], position[1], position[2] + hover_h]
         if self.motion.goto_pose(hover, pitch,
@@ -1798,14 +1835,17 @@ class ObjectSortingNodeV5(Node):
             _stage('pick', 'descend IK failed')
             self.motion.set_gripper(open_pulse, 0.2 * speed)
             return False
-        # Force-limited close: step until jaws stall on the object OR
-        # reach close_pulse. The jaw width auto-fits the object - scaff
-        # and cubes share one pick path without per-target close pulses.
-        outcome = self.motion.compliance_grasp(
-            target_pulse=close_pulse, open_pulse=open_pulse,
-            step=grasp_step, dwell=grasp_dwell,
-            stall_thresh=grasp_stall, timeout=grasp_timeout)
-        _stage('pick', f'compliance_grasp -> {outcome}')
+        # Close: STANDARD fixed-pulse grasp by default; opt-in BETA
+        # compliance "close until contact" with a per-class strength cap.
+        if use_compliance:
+            outcome = self.motion.compliance_grasp(
+                target_pulse=max_strength, open_pulse=open_pulse,
+                step=grasp_step, dwell=grasp_dwell,
+                stall_thresh=grasp_stall, timeout=grasp_timeout,
+                max_temp=grasp_max_temp)
+            _stage('pick', f'compliance_grasp -> {outcome}')
+        else:
+            self.motion.set_gripper(close_pulse, close_dur)
         # Settle so the servo holding torque has time to bite before lift.
         self.motion._sleep(settle)
         if self.motion.goto_pose(hover, pitch,
@@ -1815,6 +1855,18 @@ class ObjectSortingNodeV5(Node):
             return False
         _stage('pick', f'pick {label} complete ({outcome})')
         return True
+
+    def _grasp_strength_for(self, label, default_pulse):
+        """Per-class MAX HOLD STRENGTH cap (max close pulse) for the
+        compliance grasp. Reads the grasp_strength JSON {class: pulse};
+        falls back to the global close pulse when the class isn't set."""
+        try:
+            strengths = json.loads(self.p('grasp_strength') or '{}')
+            if isinstance(strengths, dict) and label in strengths:
+                return int(strengths[label])
+        except Exception as e:
+            _stage('grip', 'grasp_strength parse failed', exc=e)
+        return int(default_pulse)
 
     def _resolve_place_position(self, label):
         """Look up the place coords for a YOLO class label. UI-editable
