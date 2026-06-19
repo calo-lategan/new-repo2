@@ -44,7 +44,7 @@
 #   JETARM_V5_DEBUG=1          pass debug=true to the node
 #
 # Pass any launch args as positional args, e.g.:
-#   ./launch_v4.sh profile:=fast motion_speed:=2.0
+#   ./launch_v5.sh motion_speed:=2.0
 
 # NOTE on `set -u`: we deliberately DO NOT enable nounset because Hiwonder's
 # /opt/ros/humble/setup.bash and the workspace's install/setup.bash reference

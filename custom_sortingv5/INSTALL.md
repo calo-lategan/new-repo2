@@ -1,17 +1,19 @@
 # Custom Sorting v5 — install on the Hiwonder JetArm (Jetson Orin Nano)
 
-v5 is the stable cleanup of v4. Folder layout uses **`v5` for Python module names** (Python rejects a literal dot as a package separator) and **`v5` for everything else** — launcher script, launch file, desktop shortcut, the folder itself.
+v5 is the single, current version of the custom sorting stack — **one YOLO model for all detection** (no OpenCV/LAB color path), per-class place targets, a buffered Model-config tab, an opt-in force-limited grasp, and AprilTag calibration delegated to the vendor node. It replaces v2 / v4 / v4.1.
 
 | File | What it is |
 |---|---|
-| `custom_sortingv5.py` | The sorting node. Cameras always-on, gated inference, hot-swap engine. |
-| `tune_uiv5.py` | Tkinter tuner UI. Buttons to open rqt_image_view / image_view / browser. |
-| `custom_sorting_nodev5.launch.py` | The ROS 2 launch file. |
+| `custom_sortingv5.py` | The sorting node. Cameras always-on, YOLO-only detection, hot-swap engine. |
+| `tune_uiv5.py` | Tkinter tuner UI: Speed / Grip / Detection / Model / Places / Toggles / Profiles. |
+| `custom_sorting_nodev5.launch.py` | The ROS 2 launch file (includes the vendor AprilTag calibration node). |
 | `launch_v5.sh` | One-click bash launcher. Stops + disables the factory service first. |
 | `image_view_chain.sh` | rqt → image_view → browser chain, IP autodetected. |
 | `re-enable-factory.sh` | Opt-in: put Hiwonder's factory app back. |
 | `install.sh` | One-paste idempotent installer. |
-| `profiles/` (created at install) | `~/jetarm_v5_profiles/{default,fast,precision}.yaml` |
+| `profiles/` (created at install) | `~/jetarm_v5_profiles/{default,yolo}.yaml` (`yolo.yaml` is written by the Model-tab SAVE). |
+
+**v5 needs a YOLO model whose `model.names` include your objects** (e.g. cubes + scaff in one model). The class names drive the class filter, the per-class place targets, and per-class grip strength. Until you load such a model, v5 only detects whatever classes are in the currently-loaded engine.
 
 ---
 
@@ -29,7 +31,7 @@ This will:
 2. Symlink `custom_sortingv5.py` and `tune_uiv5.py` into `~/ros2_ws/src/app/app/`
 3. Symlink `custom_sorting_nodev5.launch.py` into `~/ros2_ws/src/app/launch/`
 4. Idempotently add the two `console_scripts` entries (`custom_sortingv5`, `tune_uiv5`) to `setup.py`
-5. Seed `~/jetarm_v5_profiles/` with the default + fast + precision profiles
+5. Seed `~/jetarm_v5_profiles/` with `default.yaml` + `yolo.yaml` (the Model-tab SAVE overwrites `yolo.yaml`)
 6. Install `~/jetarm_v5/launch_v5.sh` + `image_view_chain.sh` + `re-enable-factory.sh`
 7. Drop a **JetArm Sort v5** desktop shortcut on your Desktop and in the app menu
 8. Run `colcon build --packages-select app --symlink-install`
@@ -181,66 +183,83 @@ JETARM_V5_DEBUG=1 ~/jetarm_v5/launch_v5.sh
 
 ---
 
-## Performance + tunables (round 7)
+## The Model tab (buffered — nothing applies until SAVE)
 
-### What runs where on the Orin Nano
+Everything that configures the YOLO model lives on one **Model** tab:
+the engine picker, the YOLO knobs, and the per-class enable checkboxes.
+**Edits stay local until you press SAVE MODEL CONFIG** — the tab shows
+`Model *` while you have unsaved changes and prompts if you switch away.
 
-| Step | Hardware |
-|---|---|
-| **YOLO TensorRT inference** | **GPU** (Ampere CUDA + FP16 Tensor cores). Confirmed by `[TRT] TensorRT-managed allocation` lines on every launch. |
-| **rqt / image_view viewer paint** | **GPU** by default in round 7+. Earlier rounds forced software rendering via `LIBGL_ALWAYS_SOFTWARE=1` — removed. |
-| OpenCV drawing (rectangle, putText, line) | CPU. ~1 ms/frame — not the bottleneck. |
-| cv_bridge + DDS publish | CPU. ~1-2 ms/frame. |
-| Orbbec USB capture | CPU. Driver-level, unavoidable. |
-| HED edge detection (color-blob branch only) | CPU (container's OpenCV not built with CUDA). Not on the YOLO scaff path. |
+SAVE writes `~/jetarm_v5_profiles/yolo.yaml` and **hot-applies atomically**:
+the engine swaps between inference frames (no app restart), and conf / iou /
+max_det / enabled-classes land together. On boot the node auto-loads
+`yolo.yaml`.
 
-If for any reason Qt mis-renders on your host, restore the round-2 safe mode:
-
-```bash
-echo 'JETARM_V5_QT_SAFE=1' >> ~/.jetarm_v5.env
-```
-
-### New live tunables in the Vision tab
-
-| Slider | Default | Effect |
+| Knob | Default | Effect |
 |---|---|---|
-| `yolo_conf_thresh` | 0.25 | Confidence threshold. 0.5 = stricter (fewer false positives); 0.1 = looser. |
-| `yolo_iou_thresh` | 0.7 | NMS IoU. Lower = more overlapping boxes get suppressed. |
+| `engine_path` | best_scaff2.engine | TensorRT `.engine` (or `.pt`). Pick from the list, Browse, or type a path. |
+| `yolo_conf_thresh` | 0.25 | Confidence threshold. Higher = stricter. |
+| `yolo_iou_thresh` | 0.7 | NMS IoU. |
 | `yolo_max_det` | 100 | Max detections per frame. |
-| `inference_max_hz` | 0 | Cap inference rate (0 = uncapped). Lower if GPU thermals get hot. |
-| `publish_max_hz` | 0 | Cap result-publisher rate. Match your viewer's actual paint rate to save bandwidth. |
-| `publish_scale` | 1.0 | Downsample annotated frame before publish (0.5 → 320×240, ~4× less bytes). |
-| `publish_jpeg_quality` | 80 | JPEG quality of `image_result/compressed` (browser/remote viewing). Only encoded while subscribed. |
+| `inference_max_hz` | 0 | Cap inference rate (0 = uncapped). |
+| Enabled classes | all | Tick which `model.names` classes to detect (none ticked = all). Scrollable + filter box + All/None/Invert for big models. |
 
-YOLO knobs (`yolo_conf_thresh` / `yolo_iou_thresh` / `yolo_max_det` /
-`inference_max_hz`) apply **instantly while STOPPED** — detection runs
-even when sorting is off, so you see the boxes change in the live viewer
-as you drag. While RUNNING they queue and land when you press STOP, so a
-slider can't change detection mid-pick.
+`yolo_imgsz` is **not** tunable — TensorRT engines bake the input size in at
+export; re-export from Ultralytics and pick the new `.engine` here.
 
-Note: `yolo_imgsz` is **not** tunable — TensorRT engines bake the input
-size in at export time. To change it, re-export from Ultralytics with the
-new `imgsz` and load the new `.engine` from the Models tab.
+## The Places tab (per-class targets)
 
-### Grip tab (round 15: one-shot pick)
+Rows auto-populate from the loaded model's class names. For each class set:
 
-The retry-era knobs (`max_pick_retries`, `vision_confirm_pick`,
-`servo_feedback_enabled`, `gripper_full_closed_pulse`, `gripper_slack`,
-`gripper_step_pulse`) are gone — the pick is a single
-hover → align → descend → close → settle → lift, like the stock
-object_sorting app. The grip-reliability knobs are now:
+- **x / y / z** — the world drop point for that object.
+- **grip** — the per-class **max hold strength** (max close pulse) used by
+  the force-limited BETA grasp, so fragile cubes get a gentle cap and scaff
+  gets a firm one.
 
-| Slider | Default | Effect |
+Save a single row, or **Save all rows**. A class with no place target is
+**refused at drop time** (no random drops) and its count is badged in the
+perf line (`unmapped=N`).
+
+## Grip: standard by default, force-limited is opt-in BETA
+
+The default grasp is the standard one-shot close-to-pulse
+(hover → align → descend → close → settle → lift). Flip
+**`compliance_grasp_enabled`** (Toggles tab) to switch to the BETA
+**force-limited "close until contact"** grasp.
+
+The hardware exposes **no servo load/current** (only position / voltage /
+temperature), so this is an honest *contact-stop*, not a force sensor: the
+jaws close in small steps and stop the moment the position stalls against
+the object. The slow small-step approach **is** the force limit — it can't
+slam — and per-class `grip` strength caps how hard it can ever squeeze.
+A temperature cutoff (`grasp_max_temp`) protects the gripper servo.
+
+| Knob | Default | Effect |
 |---|---|---|
-| `gripper_settle` | 0.5 | Dwell after the close command before the lift starts (and after release on place). Raise if objects slip out during lift. Not scaled by `motion_speed`. |
-| `grab_depth` | 0.02 | How far below the detected object-z the descend goes, so the jaws wrap the body instead of pinching the top. |
+| `grasp_step_pulse` | 15 | Pulses per step. Smaller = gentler contact. |
+| `grasp_step_dwell` | 0.10 | Sec per step (≥ one 50 Hz driver cycle so readback is fresh). |
+| `grasp_stall_pulse` | 8 | Advance under this per step = contact detected. |
+| `grasp_timeout` | 2.0 | Sec failsafe budget. |
+| `grasp_max_temp` | 65 | °C — stop to protect the gripper servo. |
+| `gripper_settle` / `grab_depth` | 0.5 / 0.02 | Settle before lift; descend below z so jaws wrap the body. |
 
-Both support **per-target overrides** for mixed object heights via the
-`target_overrides` JSON param, e.g.:
+Per-class overrides also work via `target_overrides` JSON, e.g.
+`'{"scaff": {"grab_depth": 0.025}, "cube_red": {"motion_speed": 1.8}}'`.
 
-```
-target_overrides: '{"scaff": {"grab_depth": 0.025, "gripper_settle": 0.8}, "blue": {"grab_depth": 0.01, "motion_speed": 1.8}}'
-```
+## Calibrate (AprilTag — same as the factory app)
+
+The **CALIBRATE** button runs the **vendor AprilTag calibration node** (it's
+launched alongside v5 and sits idle until triggered). It **stops sorting and
+moves the arm** to the calibration pose, collects AprilTag readings, solves
+the camera→world transform, and writes `transform.yaml` — the same file the
+sorting node uses for its ROI / world projection. v5 rebuilds the ROI
+automatically when it finishes.
+
+Requires **AprilTags IDs 1 / 2 / 3 (fallback 100), 2.5 cm**, flat and fully
+in the camera view. The button confirms before moving the arm. If the
+calibration node isn't running, v5 logs and stays alive (no crash).
+
+### Heartbeat mirror
 
 ### Heartbeat mirror
 

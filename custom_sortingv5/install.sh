@@ -7,7 +7,7 @@
 #   3. Symlinks the v4 launch file into ~/ros2_ws/src/app/launch/
 #   4. Adds the v4 console_scripts entries to ~/ros2_ws/src/app/setup.py
 #      (only if they're not already there)
-#   5. Seeds ~/jetarm_v5_profiles/ with default.yaml, fast.yaml, precision.yaml
+#   5. Seeds ~/jetarm_v5_profiles/ with default.yaml + yolo.yaml (sample)
 #   6. Installs ~/jetarm_v5/launch_v5.sh + image_view_chain.sh + re-enable-factory.sh
 #   7. Installs the desktop shortcut to ~/Desktop and ~/.local/share/applications
 #   8. Runs `colcon build --packages-select app --symlink-install`
@@ -178,7 +178,10 @@ patch_entry "tune_uiv5 = app.tune_uiv5:main"
 
 stage "seeding profiles in $PROFILES_DIR"
 mkdir -p "$PROFILES_DIR"
-for p in default.yaml fast.yaml precision.yaml; do
+# v5 ships default.yaml (boot fallback) + yolo.yaml (sample model config;
+# the Model-tab SAVE overwrites it). The vendor AprilTag calibration node
+# is pulled from package 'app' by the launch include - no extra install.
+for p in default.yaml yolo.yaml; do
     src="$V4/profiles/$p"
     dst="$PROFILES_DIR/$p"
     if [ -f "$dst" ]; then
@@ -358,7 +361,7 @@ or package.xml changed upstream (entry_points / dependencies).
 
 Other files installed:
 
-  $PROFILES_DIR/{default,fast,precision}.yaml
+  $PROFILES_DIR/{default,yolo}.yaml
   $LAUNCHER_DIR/launch_v5.sh
   $DESKTOP_FILE
   $APP_FILE
@@ -375,7 +378,7 @@ To launch:
   JETARM_V5_DEBUG=1 $LAUNCHER_DIR/launch_v5.sh
 
   # boot into a preset profile:
-  $LAUNCHER_DIR/launch_v5.sh profile:=fast
+  $LAUNCHER_DIR/launch_v5.sh
 
 If the camera doesn't come up, see:
   custom_sortingv5/QUICK_SETUP_HIWONDER.md  in $SRC_DIR
