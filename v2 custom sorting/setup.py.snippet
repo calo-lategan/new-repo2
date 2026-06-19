@@ -1,0 +1,26 @@
+# Apply this snippet to ~/ros2_ws/src/app/setup.py - add the two new console
+# scripts inside the existing entry_points -> console_scripts list.
+#
+# Before:
+#
+#     entry_points={
+#         'console_scripts': [
+#             'calibration = app.calibration:main',
+#             'object_tracking = app.object_tracking:main',
+#             ...existing entries...
+#             'lab_manager = app.lab_manager:main',
+#         ],
+#     },
+#
+# After:
+#
+#     entry_points={
+#         'console_scripts': [
+#             'calibration = app.calibration:main',
+#             'object_tracking = app.object_tracking:main',
+#             ...existing entries...
+#             'lab_manager = app.lab_manager:main',
+#             'custom_sortingv2 = app.custom_sortingv2:main',
+#             'tune_ui          = app.tune_ui:main',
+#         ],
+#     },

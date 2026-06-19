@@ -1,0 +1,10 @@
+# Precision: slower phases, longer stillness confirmation before lock,
+# generous jaw-clamp settle before lift.
+/**:
+  ros__parameters:
+    motion_speed: 0.9
+    aggression: 0.8
+    gripper_close_duration: 0.5
+    gripper_settle: 0.8
+    count_still_threshold: 8
+    detection_avg_frames: 6

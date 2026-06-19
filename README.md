@@ -46,6 +46,17 @@ Then launch from the **JetArm Sort v5** desktop shortcut, or:
 ~/jetarm_v5/launch_v5.sh
 ```
 
+## Archived previous versions (reference only)
+
+- [`custom_sortingv4.1/`](custom_sortingv4.1/) — the v4.1 stack (two-headed
+  YOLO + LAB color, retry-era grip). Superseded by v5.
+- [`v4 custom sorting/`](v4%20custom%20sorting/) — v4.
+- [`v2 custom sorting/`](v2%20custom%20sorting/) — v2.
+
+These are kept in the repo for history. **Do not install them alongside v5.**
+The v5 installer automatically uninstalls v2 / v4 / v4.1 from your JetArm if
+it finds them, so a fresh `bash install.sh` leaves only v5 on the device.
+
 ## Other folders
 
 - `full jetarm source for context src/` — the stock Hiwonder ROS 2 source,
