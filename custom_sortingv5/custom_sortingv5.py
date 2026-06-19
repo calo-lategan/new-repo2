@@ -1085,6 +1085,8 @@ class ObjectSortingNodeV5(Node):
         self._pending_yolo_knobs = {}
         # Last calibrate result for the heartbeat mirror.
         self._last_calibrate = None
+        # YOLO classes with no place target (set in _on_engine_loaded).
+        self._unmapped_classes = []
         self.white_area_center = None
         self.enter = False
         self.roi = []
@@ -1175,6 +1177,10 @@ class ObjectSortingNodeV5(Node):
                 # this changes.
                 'class_names': {str(k): v for k, v in class_names.items()},
                 'last_calibrate': self._last_calibrate,
+                # Classes the loaded model can detect but that have no
+                # place target configured (UI badges these).
+                'unmapped_classes': list(getattr(self, '_unmapped_classes', [])),
+                'unmapped_count': len(getattr(self, '_unmapped_classes', [])),
             })))
         except Exception as e:
             if not getattr(self, '_status_pub_warned', False):
@@ -1378,120 +1384,21 @@ class ObjectSortingNodeV5(Node):
         return response
 
     def recalibrate_srv_callback(self, request, response):
-        # v5 calibrate: verifies the things that actually matter for
-        # accurate picking, with NO color self-cal (gone with the LAB
-        # pipeline). The button checks: camera intrinsics arrived,
-        # transform.yaml reloaded + ROI rebuilt, IK service alive, and
-        # IK actually solves at each configured place position. Optionally
-        # tours the arm over those positions so the operator can eyeball
-        # accuracy. State is reset too so any stale lock is cleared.
-        _stage('svc', 'calibrate requested')
-        threading.Thread(target=self._calibrate, daemon=True).start()
+        # Commit 2 shim: a pure ROI rebuild from the current transform.yaml,
+        # no motion. Commit 3 rewires this (and the new ~/run_calibration
+        # service) to drive the vendor AprilTag calibration node.
+        _stage('svc', 'recalibrate -> ROI rebuild requested')
+        self.start_get_roi = True
         response.success = True
         return response
-
-    def _calibrate(self):
-        _stage('calibrate', 'starting')
-        self._init_state()
-        self.start_get_roi = True
-
-        # 1. Wait briefly for intrinsics + ROI rebuild
-        deadline = time.time() + 8.0
-        while time.time() < deadline:
-            if (self.intrinsic is not None and self.distortion is not None
-                    and len(self.roi) > 0 and self.white_area_center is not None):
-                break
-            time.sleep(0.2)
-        ok_intr = self.intrinsic is not None and self.distortion is not None
-        ok_roi = len(self.roi) > 0
-        _stage('calibrate', f'intrinsics={ok_intr} roi={ok_roi}')
-
-        # 2. Verify IK service ready
-        ok_ik = (self.kinematics_client is not None
-                 and self.kinematics_client.wait_for_service(timeout_sec=2.0))
-        _stage('calibrate', f'kinematics_client ready={ok_ik}')
-
-        # 3. Try to IK-solve each configured place position WITHOUT moving.
-        # If IK fails for a position, the user has it outside the arm's
-        # reachable workspace - the place would silently bail at runtime
-        # otherwise.
-        place_results = {}
-        try:
-            user_pp = json.loads(self.p('place_positions') or '{}')
-        except Exception:
-            user_pp = {}
-        candidates = dict(self.place_position)
-        if isinstance(user_pp, dict):
-            candidates.update(user_pp)
-        for label, pos in candidates.items():
-            if not isinstance(pos, (list, tuple)) or len(pos) != 3:
-                place_results[label] = 'malformed'
-                continue
-            try:
-                msg = set_pose_target([float(pos[0]), float(pos[1]),
-                                        float(pos[2]) + 0.05],
-                                       80, [-90.0, 90.0], 1.0, duration=1.0)
-                if self.kinematics_client is None:
-                    place_results[label] = 'no_ik_service'
-                    continue
-                fut = self.kinematics_client.call_async(msg)
-                # Spin the future on this thread (the executor will service
-                # it via the svc_group ReentrantCallbackGroup).
-                t0 = time.time()
-                while not fut.done() and time.time() - t0 < 1.5:
-                    time.sleep(0.02)
-                res = fut.result() if fut.done() else None
-                if res is None or not res.pulse:
-                    place_results[label] = 'unreachable'
-                else:
-                    place_results[label] = 'ok'
-            except Exception as e:
-                place_results[label] = f'err:{type(e).__name__}'
-        for k, v in place_results.items():
-            _stage('calibrate', f'  place[{k}] -> {v}')
-
-        # 4. Optional physical tour: drive the arm above each reachable
-        # place position briefly so the operator can EYEBALL accuracy.
-        # Triggered by the second-stage tour flag in the request - the
-        # default is just verify (no motion). Honor sorting=OFF as a
-        # safety gate too.
-        tour = (self.p('calibrate_tour') if 'calibrate_tour' in
-                {n for n, *_ in self.TUNABLE_PARAMS} else False)
-        if tour and not self.enable_sorting:
-            _stage('calibrate', 'tour: driving arm over each reachable place')
-            try:
-                self.go_home(False)
-                for label, status in place_results.items():
-                    if status != 'ok':
-                        continue
-                    pos = candidates[label]
-                    above = [float(pos[0]), float(pos[1]), float(pos[2]) + 0.08]
-                    self.motion.goto_pose(above, 80, duration=1.0,
-                                          parallel_base=True,
-                                          pitch_range=(-90.0, 90.0))
-                    self.motion._sleep(0.6)
-                self.go_home(False)
-            except Exception as e:
-                _stage('calibrate', 'tour aborted', exc=e)
-
-        # 5. Stash the result on the heartbeat so the UI can show pass/fail.
-        self._last_calibrate = {
-            'ts': time.time(),
-            'intrinsics': ok_intr,
-            'roi': ok_roi,
-            'kinematics': ok_ik,
-            'places': place_results,
-        }
-        ok_all = ok_intr and ok_roi and ok_ik and all(
-            v == 'ok' for v in place_results.values())
-        _stage('calibrate', f'done ok_all={ok_all}')
 
     def _on_engine_loaded(self, path):
         """InferenceWorker callback: fires from the worker thread after a
         successful engine load (initial or hot-swap). Mirrors model.names
         into target_labels so the tuner UI can render per-class checkboxes,
-        and applies the YOLO classes filter from the saved config (or all
-        classes if none saved)."""
+        applies the YOLO classes filter from the saved config, and flags
+        any class that has no place target so the operator knows it won't
+        be sortable until they set one."""
         self.get_logger().info(f'engine active: {path}')
         try:
             names = self.inference.class_names()
@@ -1502,6 +1409,21 @@ class ObjectSortingNodeV5(Node):
                 self.target_labels = {n: old.get(n, True) for n in names.values()}
                 _stage('engine-load', f'class names from model.names: '
                                       f'{list(names.values())}')
+                # Validate place coverage: a detected class with no place
+                # target will be refused at drop time (_do_place returns
+                # False). Surface it loudly + on the heartbeat for the UI.
+                try:
+                    user_pp = json.loads(self.p('place_positions') or '{}')
+                    place_keys = set(user_pp.keys()) if isinstance(user_pp, dict) else set()
+                except Exception:
+                    place_keys = set()
+                place_keys |= set(self.DEFAULT_PLACE_POSITIONS.keys())
+                self._unmapped_classes = sorted(
+                    n for n in names.values() if n not in place_keys)
+                for n in self._unmapped_classes:
+                    _stage('engine-load', f'class {n!r} has NO place target - '
+                                          f'_do_place will refuse it; set one in '
+                                          f'the Places tab')
             # Apply persisted classes filter (empty list = all classes).
             try:
                 enabled_json = self.p('yolo_enabled_classes') or '[]'
