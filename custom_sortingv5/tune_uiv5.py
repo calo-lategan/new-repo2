@@ -50,7 +50,7 @@ FLOAT_PARAMS = [
     ('gripper_close_duration', 0.1, 2.0, 0.05),
     ('gripper_settle',        0.0, 1.5, 0.05),
     ('grab_depth',            0.0, 0.05, 0.001),
-    # Compliance grasp (close until jaws stall on object).
+    # Force-limited grasp BETA (close until contact). Live-editable.
     ('grasp_step_dwell',      0.03, 0.3, 0.01),
     ('grasp_timeout',         0.3, 5.0, 0.1),
     ('publish_max_hz',        0.0,  60.0, 1.0),
@@ -63,11 +63,26 @@ INT_PARAMS = [
     ('detection_avg_frames',     1, 10, 1),
     ('gripper_open_pulse',       50, 500, 5),
     ('gripper_close_pulse',      300, 700, 5),
-    # Compliance grasp tunables.
+    # Force-limited grasp BETA tunables.
     ('grasp_step_pulse',         5, 80, 1),
     ('grasp_stall_pulse',        1, 40, 1),
+    ('grasp_max_temp',           40, 80, 1),
     ('publish_jpeg_quality',     30, 95, 5),
 ]
+
+# Friendly display names + help for otherwise-opaque param keys. The ROS
+# param name stays the dict key; only the visible label changes.
+PARAM_LABELS = {
+    'grasp_step_pulse':  ('Grip step', 'pulses/step - smaller = gentler contact'),
+    'grasp_step_dwell':  ('Grip step dwell', 'sec - wait per step for servo + readback'),
+    'grasp_stall_pulse': ('Grip stall threshold', 'pulses - below this = contact detected'),
+    'grasp_timeout':     ('Grip timeout', 'sec - failsafe budget'),
+    'grasp_max_temp':    ('Grip max temp', 'degC - stop to protect the gripper servo'),
+    'gripper_close_pulse': ('Gripper close pulse', 'standard-grasp close target'),
+    'gripper_open_pulse':  ('Gripper open pulse', 'jaw-open position'),
+    'gripper_settle':    ('Grip settle', 'sec dwell after close before lift'),
+    'grab_depth':        ('Grab depth', 'm below detected z so jaws wrap the body'),
+}
 
 # v5: buffered until SAVE. The Model tab renders these but does NOT push
 # to ROS on slider release. The SAVE button calls ~/save_yolo_config which
@@ -83,12 +98,10 @@ MODEL_INT_PARAMS = [
 
 BOOL_PARAMS = [
     'parallel_base_motion',
-    'startup_self_calibrate',
+    # Force-limited grasp BETA: OFF = standard close-to-pulse grasp.
+    'compliance_grasp_enabled',
     'inference_warmup',
     'hot_log_inference_ms',
-    # When True, CALIBRATE physically tours the arm above each configured
-    # place position after IK verification.
-    'calibrate_tour',
     # Independent stop/start of camera subscription + inference.
     'enable_camera_sub',
     'enable_inference',
@@ -104,6 +117,7 @@ class TunerClient(Node):
         self.list_cli = self.create_client(ListParameters, f'/{target_node}/list_parameters')
         self.enable_cli = self.create_client(SetBool, f'/{target_node}/enable_sorting')
         self.recalibrate_cli = self.create_client(Trigger, f'/{target_node}/recalibrate')
+        self.run_calibration_cli = self.create_client(Trigger, f'/{target_node}/run_calibration')
         self.enter_cli = self.create_client(Trigger, f'/{target_node}/enter')
         self.exit_cli = self.create_client(Trigger, f'/{target_node}/exit')
         self.load_engine_cli = self.create_client(SetStringBool, f'/{target_node}/load_engine')
@@ -206,6 +220,7 @@ class TunerClient(Node):
         return future.done() and future.result() is not None
 
     def call_recalibrate(self): return self._trigger(self.recalibrate_cli)
+    def call_run_calibration(self): return self._trigger(self.run_calibration_cli)
     def call_enter(self):       return self._trigger(self.enter_cli)
     def call_exit(self):        return self._trigger(self.exit_cli)
     def call_save_default(self): return self._trigger(self.save_default_cli)
@@ -251,14 +266,26 @@ class TunerUI:
             elif age > 12.0:
                 self.perf_var.set(f'perf: NO HEARTBEAT for {age:.0f}s - node down?')
             else:
+                unmapped = int(st.get('unmapped_count', 0) or 0)
+                badge = f"  unmapped={unmapped}" if unmapped else ''
                 self.perf_var.set(
                     f"perf: cam={st.get('cam_fps', '-')}fps "
                     f"pub={st.get('pub_fps', '-')}fps "
                     f"ai={st.get('ai', '?')} "
-                    f"inf_age={st.get('inference_age_ms', '-')}ms")
+                    f"inf_age={st.get('inference_age_ms', '-')}ms{badge}")
                 engine = st.get('engine') or ''
                 if engine:
                     self.engine_var.set(engine)
+                # Populate the Model class filter + Places rows from the
+                # model's class names (this is the wiring that makes those
+                # tabs work at all). Guards inside skip rebuilds while the
+                # Model tab is dirty.
+                cnames = st.get('class_names') or {}
+                try:
+                    self._refresh_class_filter(cnames)
+                    self._refresh_places(cnames)
+                except Exception:
+                    pass
                 # Node state is authoritative for the steady RUNNING/STOPPED
                 # display. Don't stomp the long-running CALIBRATING...
                 # transient; short transients (PROFILE SAVED etc.) get
@@ -386,17 +413,19 @@ class TunerUI:
         notebook = ttk.Notebook(self.root)
         notebook.pack(fill='both', expand=True, padx=8, pady=8)
 
-        # v5 tab layout. The "Model" tab REPLACES the old Vision tab and
-        # uses buffered widgets: edits stay local until the SAVE button
-        # at the bottom calls ~/save_yolo_config. Places tab is new:
-        # per-class place-position editor populated from model.names.
+        # v5 tab layout. The single "Model" tab owns the engine picker AND
+        # the buffered YOLO knobs + class checkboxes: edits stay local until
+        # the SAVE button calls ~/save_yolo_config (engine hot-swap + knobs
+        # applied atomically, no node reset). Places = per-class targets.
+        self._notebook = notebook
         speed_tab = ttk.Frame(notebook); notebook.add(speed_tab, text='Speed / motion')
         grip_tab = ttk.Frame(notebook); notebook.add(grip_tab, text='Grip')
         detect_tab = ttk.Frame(notebook); notebook.add(detect_tab, text='Detection')
-        model_tab = ttk.Frame(notebook); notebook.add(model_tab, text='Model (buffered)')
+        model_tab = ttk.Frame(notebook); notebook.add(model_tab, text='Model')
+        self._model_tab = model_tab
+        self._model_tab_index = notebook.index('end') - 1
         places_tab = ttk.Frame(notebook); notebook.add(places_tab, text='Places')
         toggles_tab = ttk.Frame(notebook); notebook.add(toggles_tab, text='Toggles')
-        engines_tab = ttk.Frame(notebook); notebook.add(engines_tab, text='Engines')
         profiles_tab = ttk.Frame(notebook); notebook.add(profiles_tab, text='Profiles')
 
         all_names = ([n for n, *_ in FLOAT_PARAMS] + [n for n, *_ in INT_PARAMS]
@@ -424,13 +453,14 @@ class TunerUI:
         for name in BOOL_PARAMS:
             self._add_bool(toggles_tab, name, bool(current.get(name, False)))
 
-        # Model tab (BUFFERED). Widgets edit a local dict; SAVE button
-        # writes it via ~/save_yolo_config.
+        # Model tab (BUFFERED): engine picker + YOLO knobs + class filter,
+        # all applied only on SAVE.
         self._build_model_tab(model_tab, current)
-        # Places tab — per-class place position editor.
+        # Places tab — per-class targets (place position + grip strength).
         self._build_places_tab(places_tab, current.get('place_positions', '{}'))
-        self._build_models_tab(engines_tab, current.get('engine_path', ''))
         self._build_profiles_tab(profiles_tab)
+        # Prompt on leaving the Model tab with unsaved buffered edits.
+        notebook.bind('<<NotebookTabChanged>>', self._on_tab_changed)
 
         # Presets bar
         preset = ttk.LabelFrame(self.root, text='Presets')
@@ -473,6 +503,30 @@ class TunerUI:
     def _add_int(self, parent, name, lo, hi, res, init):
         self._add_numeric(parent, name, lo, hi, res, init, kind='int')
 
+    def _attach_tooltip(self, widget, text):
+        """Lightweight hover tooltip (no external deps)."""
+        tip = {'win': None}
+
+        def show(_e):
+            if tip['win'] is not None:
+                return
+            x = widget.winfo_rootx() + 20
+            y = widget.winfo_rooty() + widget.winfo_height() + 2
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.wm_geometry(f'+{x}+{y}')
+            tk.Label(win, text=text, justify='left', bg='#ffffe0',
+                     relief='solid', borderwidth=1,
+                     font=('TkDefaultFont', 8)).pack()
+            tip['win'] = win
+
+        def hide(_e):
+            if tip['win'] is not None:
+                tip['win'].destroy(); tip['win'] = None
+
+        widget.bind('<Enter>', show)
+        widget.bind('<Leave>', hide)
+
     def _add_numeric(self, parent, name, lo, hi, res, init, kind):
         """One slider row with:
           - label (name)
@@ -484,7 +538,14 @@ class TunerUI:
             Both paths produce exactly one ROS call per finalized value.
         """
         frame = ttk.Frame(parent); frame.pack(fill='x', padx=6, pady=3)
-        ttk.Label(frame, text=name, width=28).pack(side='left')
+        disp, help_txt = PARAM_LABELS.get(name, (name, ''))
+        lbl = ttk.Label(frame, text=disp, width=28)
+        lbl.pack(side='left')
+        if help_txt:
+            try:
+                self._attach_tooltip(lbl, f'{name}\n{help_txt}')
+            except Exception:
+                pass
 
         fmt = (lambda v: f'{float(v):.3f}') if kind == 'float' else (lambda v: f'{int(round(float(v)))}')
         var = tk.DoubleVar(value=float(init)) if kind == 'float' else tk.IntVar(value=int(init))
@@ -566,34 +627,53 @@ class TunerUI:
     # ---- Model tab (BUFFERED until SAVE) ----
 
     def _build_model_tab(self, parent, current):
-        """All YOLO knobs + per-class enable checkboxes live here. Edits
-        update a LOCAL buffer; nothing reaches the node until SAVE."""
-        # _model_buf: name -> value. Seeded from current; overwritten by
-        # widget changes; flushed via ~/save_yolo_config on SAVE.
+        """ONE place to manage the model: engine picker + buffered YOLO
+        knobs + per-class enable checkboxes. Edits stay LOCAL; nothing
+        reaches the node until SAVE (engine hot-swap + knobs + classes
+        applied atomically via ~/save_yolo_config, no node restart)."""
         self._model_buf = {}
-        self._model_class_vars = {}  # class_name -> tk.BooleanVar
-        self._model_class_id_map = {}  # class_name -> int id
+        self._model_dirty = False
+        self._model_class_vars = {}       # class_name -> tk.BooleanVar
+        self._model_class_id_map = {}     # class_name -> int id
+        self._model_class_widgets = []    # (frame, name) for the filter
 
         ttk.Label(parent, foreground='#226666', wraplength=720,
                   justify='left',
-                  text='Model config is BUFFERED. Move sliders, toggle '
-                       'classes, then press SAVE MODEL CONFIG (bottom) '
-                       'to write yolo.yaml + hot-apply atomically. '
-                       'Nothing reaches the running model until you save.'
-                  ).pack(anchor='w', padx=8, pady=(8, 6))
+                  text='Everything here is BUFFERED. Pick an engine, set the '
+                       'YOLO knobs and enabled classes, then press SAVE. SAVE '
+                       'writes ~/jetarm_v5_profiles/yolo.yaml and hot-applies '
+                       '(engine swaps between frames, no app restart). The tab '
+                       'shows "Model *" while you have unsaved edits.'
+                  ).pack(anchor='w', padx=8, pady=(8, 4))
 
-        # Engine path entry (also buffered).
-        engrow = ttk.Frame(parent); engrow.pack(fill='x', padx=8, pady=4)
-        ttk.Label(engrow, text='engine_path', width=18).pack(side='left')
-        self._model_engine_entry = ttk.Entry(engrow)
+        # --- Engine picker (buffered: populates the entry, no live swap) ---
+        eng_frame = ttk.LabelFrame(parent, text='Engine (.engine / .pt)')
+        eng_frame.pack(fill='x', padx=8, pady=4)
+        self._active_engine = str(current.get('engine_path', ''))
+        lb_frame = ttk.Frame(eng_frame); lb_frame.pack(fill='x', padx=4, pady=4)
+        self.engine_listbox = tk.Listbox(lb_frame, height=5)
+        self.engine_listbox.pack(side='left', fill='x', expand=True)
+        sb = ttk.Scrollbar(lb_frame, orient='vertical',
+                           command=self.engine_listbox.yview)
+        sb.pack(side='right', fill='y')
+        self.engine_listbox.configure(yscrollcommand=sb.set)
+        self._refresh_engine_list(self._active_engine)
+        ebtn = ttk.Frame(eng_frame); ebtn.pack(fill='x', padx=4, pady=2)
+        ttk.Button(ebtn, text='Refresh',
+                   command=lambda: self._refresh_engine_list(self._active_engine)
+                   ).pack(side='left', padx=4)
+        ttk.Button(ebtn, text='Use selected',
+                   command=self._on_pick_selected_engine).pack(side='left', padx=4)
+        ttk.Button(ebtn, text='Browse...',
+                   command=self._on_browse_engine).pack(side='left', padx=4)
+        erow = ttk.Frame(eng_frame); erow.pack(fill='x', padx=4, pady=2)
+        ttk.Label(erow, text='path', width=6).pack(side='left')
+        self._model_engine_entry = ttk.Entry(erow)
         self._model_engine_entry.pack(side='left', fill='x', expand=True, padx=4)
-        self._model_engine_entry.insert(0, str(current.get('engine_path', '')))
-        self._model_engine_entry.bind(
-            '<KeyRelease>',
-            lambda e: self._model_buf.__setitem__(
-                'engine_path', self._model_engine_entry.get().strip()))
+        self._model_engine_entry.insert(0, self._active_engine)
+        self._model_engine_entry.bind('<KeyRelease>', lambda e: self._mark_model_dirty())
 
-        # YOLO sliders - buffered.
+        # --- Buffered YOLO sliders ---
         for name, lo, hi, res in MODEL_FLOAT_PARAMS:
             self._add_buffered_numeric(parent, name, lo, hi, res,
                                        float(current.get(name, lo)), 'float')
@@ -601,35 +681,91 @@ class TunerUI:
             self._add_buffered_numeric(parent, name, lo, hi, res,
                                        int(current.get(name, lo)), 'int')
 
-        # Classes filter: per-class checkbox grid. Populated from the
-        # node's status JSON (~/status -> class_names) on the after() poll.
+        # --- Classes filter (scrollable; scales to COCO-80) ---
         cls_frame = ttk.LabelFrame(parent, text='Enabled YOLO classes '
-                                                 '(empty selection = all)')
-        cls_frame.pack(fill='x', padx=8, pady=(10, 4))
-        self._model_classes_inner = ttk.Frame(cls_frame)
-        self._model_classes_inner.pack(fill='x', padx=4, pady=4)
+                                                 '(none ticked = all classes)')
+        cls_frame.pack(fill='both', expand=True, padx=8, pady=(8, 4))
+        ftop = ttk.Frame(cls_frame); ftop.pack(fill='x', padx=4, pady=2)
+        ttk.Label(ftop, text='filter:').pack(side='left')
+        self._class_filter_entry = ttk.Entry(ftop, width=18)
+        self._class_filter_entry.pack(side='left', padx=4)
+        self._class_filter_entry.bind('<KeyRelease>', lambda e: self._apply_class_filter_text())
+        ttk.Button(ftop, text='All', width=5,
+                   command=lambda: self._set_all_classes(True)).pack(side='left', padx=2)
+        ttk.Button(ftop, text='None', width=5,
+                   command=lambda: self._set_all_classes(False)).pack(side='left', padx=2)
+        ttk.Button(ftop, text='Invert', width=6,
+                   command=self._invert_classes).pack(side='left', padx=2)
+        canvas = tk.Canvas(cls_frame, height=170, highlightthickness=0)
+        cbar = ttk.Scrollbar(cls_frame, orient='vertical', command=canvas.yview)
+        self._model_classes_inner = ttk.Frame(canvas)
+        self._model_classes_inner.bind(
+            '<Configure>',
+            lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.create_window((0, 0), window=self._model_classes_inner, anchor='nw')
+        canvas.configure(yscrollcommand=cbar.set)
+        canvas.pack(side='left', fill='both', expand=True, padx=4, pady=2)
+        cbar.pack(side='right', fill='y')
         ttk.Label(self._model_classes_inner, foreground='#888',
-                  text='(waiting for engine load to read class names from '
-                       'model.names...)').pack(anchor='w', padx=4, pady=2)
+                  text='(waiting for engine load to read model.names...)'
+                  ).pack(anchor='w', padx=4, pady=2)
 
-        # SAVE button (writes yolo.yaml + hot-applies).
-        btn_row = ttk.Frame(parent); btn_row.pack(fill='x', padx=8, pady=(12, 6))
+        # --- SAVE ---
+        btn_row = ttk.Frame(parent); btn_row.pack(fill='x', padx=8, pady=(10, 6))
         tk.Button(btn_row, text='SAVE MODEL CONFIG', bg='#2e8b57', fg='white',
                   font=('TkDefaultFont', 11, 'bold'), width=20, height=2,
                   command=self._on_save_model_config).pack(side='left', padx=4)
-        tk.Button(btn_row, text='Apply only (don\'t persist)',
-                  command=lambda: self._on_save_model_config(persist=False)
-                  ).pack(side='left', padx=4)
         ttk.Label(btn_row, foreground='#666',
-                  text='SAVE writes ~/jetarm_v5_profiles/yolo.yaml and applies '
-                       'live. Apply-only skips the disk write.'
+                  text='Writes yolo.yaml + hot-applies engine/knobs/classes.'
                   ).pack(side='left', padx=12)
 
+    # ---- dirty tracking ----
+
+    def _mark_model_dirty(self):
+        if getattr(self, '_building', False):
+            return
+        self._model_dirty = True
+        try:
+            self._notebook.tab(self._model_tab_index, text='Model *')
+        except Exception:
+            pass
+
+    def _clear_model_dirty(self):
+        self._model_dirty = False
+        try:
+            self._notebook.tab(self._model_tab_index, text='Model')
+        except Exception:
+            pass
+
+    def _on_tab_changed(self, _event):
+        # If we LEFT the Model tab with unsaved edits, offer to discard.
+        if not getattr(self, '_model_dirty', False):
+            return
+        try:
+            cur = self._notebook.index(self._notebook.select())
+        except Exception:
+            return
+        if cur == self._model_tab_index:
+            return  # still on Model tab
+        if not messagebox.askyesno(
+                'Unsaved model changes',
+                'You have unsaved model edits. Discard them?'):
+            self._notebook.select(self._model_tab_index)
+        else:
+            self._clear_model_dirty()
+            self._model_buf.clear()
+
     def _add_buffered_numeric(self, parent, name, lo, hi, res, init, kind):
-        """A slider+entry that writes into self._model_buf instead of
-        pushing to ROS. Same UX as live sliders, just no traffic until SAVE."""
+        """Slider+entry that writes into self._model_buf (not ROS) and marks
+        the Model tab dirty. Applied only on SAVE."""
         frame = ttk.Frame(parent); frame.pack(fill='x', padx=6, pady=3)
-        ttk.Label(frame, text=name, width=24).pack(side='left')
+        disp, help_txt = PARAM_LABELS.get(name, (name, ''))
+        lbl = ttk.Label(frame, text=disp, width=24); lbl.pack(side='left')
+        if help_txt:
+            try:
+                self._attach_tooltip(lbl, f'{name}\n{help_txt}')
+            except Exception:
+                pass
         fmt = (lambda v: f'{float(v):.3f}') if kind == 'float' \
               else (lambda v: f'{int(round(float(v)))}')
         var = tk.DoubleVar(value=float(init)) if kind == 'float' \
@@ -647,6 +783,7 @@ class TunerUI:
             var.set(v)
             entry.delete(0, 'end'); entry.insert(0, fmt(v))
             self._model_buf[name] = v
+            self._mark_model_dirty()
 
         scale = ttk.Scale(frame, from_=lo, to=hi, variable=var,
                           orient='horizontal',
@@ -657,181 +794,90 @@ class TunerUI:
         entry.bind('<Return>',   lambda e: buffer_value(entry.get()))
         entry.bind('<FocusOut>', lambda e: buffer_value(entry.get()))
 
+    def _set_all_classes(self, value):
+        for var in self._model_class_vars.values():
+            var.set(bool(value))
+        self._mark_model_dirty()
+
+    def _invert_classes(self):
+        for var in self._model_class_vars.values():
+            var.set(not var.get())
+        self._mark_model_dirty()
+
+    def _apply_class_filter_text(self):
+        q = self._class_filter_entry.get().strip().lower()
+        for frame, name in self._model_class_widgets:
+            if q in name.lower():
+                frame.pack(anchor='w', padx=4, pady=1)
+            else:
+                frame.pack_forget()
+
     def _refresh_class_filter(self, class_names):
-        """Called from the status poll when class_names appears or changes.
-        class_names is {str_id: name}."""
+        """Status-poll hook. Rebuilds the class grid when model.names
+        changes - but NEVER while the user has unsaved edits, and preserves
+        existing tick state for classes that survive a model change."""
         if not class_names:
             return
-        # Stable name->id map (sort by id so the grid is deterministic).
+        if getattr(self, '_model_dirty', False):
+            return  # don't wipe a half-made selection during a hot-swap poll
         items = sorted(((int(k), v) for k, v in class_names.items()),
                        key=lambda x: x[0])
         new_names = [v for _, v in items]
-        existing_names = list(self._model_class_vars.keys())
-        if new_names == existing_names:
+        if new_names == list(self._model_class_vars.keys()):
             return  # no change
-
-        # Wipe + rebuild.
+        # Snapshot current ticks so surviving classes keep their state.
+        prev = {n: v.get() for n, v in self._model_class_vars.items()}
         for w in self._model_classes_inner.winfo_children():
             w.destroy()
         self._model_class_vars.clear()
         self._model_class_id_map.clear()
-        cols = 3
-        for i, (cid, name) in enumerate(items):
-            var = tk.BooleanVar(value=True)
+        self._model_class_widgets = []
+        # Seed from persisted yolo_enabled_classes for classes we haven't
+        # seen before.
+        try:
+            persisted = json.loads(
+                self.client.get_values(['yolo_enabled_classes'])
+                .get('yolo_enabled_classes', '[]') or '[]')
+            persisted_set = set(int(x) for x in persisted) if persisted else None
+        except Exception:
+            persisted_set = None
+        for cid, name in items:
+            if name in prev:
+                init = prev[name]
+            elif persisted_set is not None:
+                init = cid in persisted_set
+            else:
+                init = True
+            var = tk.BooleanVar(value=init)
             self._model_class_vars[name] = var
             self._model_class_id_map[name] = cid
-            cb = ttk.Checkbutton(self._model_classes_inner,
-                                 text=f'{cid}: {name}', variable=var)
-            cb.grid(row=i // cols, column=i % cols, sticky='w', padx=8, pady=2)
-
-        # Seed checkbox states from the persisted yolo_enabled_classes if any.
-        try:
-            current = self.client.get_values(['yolo_enabled_classes'])
-            enabled = json.loads(current.get('yolo_enabled_classes', '[]') or '[]')
-            if isinstance(enabled, list) and enabled:
-                enabled_set = set(int(x) for x in enabled)
-                for name, var in self._model_class_vars.items():
-                    var.set(self._model_class_id_map[name] in enabled_set)
-        except Exception:
-            pass
+            row = ttk.Frame(self._model_classes_inner)
+            row.pack(anchor='w', padx=4, pady=1)
+            ttk.Checkbutton(row, text=f'{cid}: {name}', variable=var,
+                            command=self._mark_model_dirty).pack(side='left')
+            self._model_class_widgets.append((row, name))
 
     def _on_save_model_config(self, persist=True):
         cfg = dict(self._model_buf)
         cfg['engine_path'] = self._model_engine_entry.get().strip()
-        # Selected class IDs (empty list = "all classes"; that's what the
-        # node treats as None internally).
         if self._model_class_vars:
             sel = [self._model_class_id_map[n]
                    for n, v in self._model_class_vars.items() if v.get()]
             all_sel = len(sel) == len(self._model_class_vars)
             cfg['classes'] = [] if all_sel else sel
-        # Drop any keys whose buffered value matches the current ROS value
-        # to avoid noisy "rejected" logs on no-op SAVE.
         def go():
             ok = self.client.call_save_yolo_config(cfg, persist=persist)
             if ok:
-                self._set_status(
-                    'MODEL SAVED' if persist else 'MODEL APPLIED',
-                    '#3366aa')
-                self._model_buf.clear()  # buffer is now in sync with node
+                self._set_status('MODEL SAVED', '#3366aa')
+                self._active_engine = cfg['engine_path']
+                self._model_buf.clear()
+                self._clear_model_dirty()
             else:
                 messagebox.showerror('Save failed',
                                      'save_yolo_config service rejected.')
         threading.Thread(target=go, daemon=True).start()
 
-    # ---- Places tab (per-class place position editor) ----
-
-    def _build_places_tab(self, parent, current_places_json):
-        """Per-class place position editor. Rows appear/disappear based on
-        the model's class names (from ~/status). Each row has x/y/z entries
-        and a SAVE button; the dict is persisted via the place_positions
-        ROS param (live - no buffer; the user is explicitly clicking SAVE
-        per row anyway)."""
-        try:
-            self._places = json.loads(current_places_json or '{}')
-            if not isinstance(self._places, dict):
-                self._places = {}
-        except Exception:
-            self._places = {}
-        ttk.Label(parent, foreground='#226666', wraplength=720,
-                  justify='left',
-                  text='Set the world (x, y, z) target for each detected '
-                       'class. Rows auto-populate when the engine loads. '
-                       'Use CALIBRATE (top bar, with Calibrate tour ON in '
-                       'Toggles) to physically tour the arm over these '
-                       'positions and verify IK accuracy.'
-                  ).pack(anchor='w', padx=8, pady=(8, 6))
-        self._places_inner = ttk.Frame(parent)
-        self._places_inner.pack(fill='both', expand=True, padx=8, pady=4)
-        self._places_rows = {}  # class_name -> {'x':Entry,'y':Entry,'z':Entry}
-        ttk.Label(self._places_inner, foreground='#888',
-                  text='(waiting for engine load...)').pack(anchor='w')
-
-    def _refresh_places(self, class_names):
-        """Called from the status poll: ensure one row per class."""
-        if not class_names:
-            return
-        names = sorted(class_names.values())
-        if list(self._places_rows.keys()) == names:
-            return
-        for w in self._places_inner.winfo_children():
-            w.destroy()
-        self._places_rows = {}
-        header = ttk.Frame(self._places_inner)
-        header.pack(fill='x', pady=(0, 4))
-        ttk.Label(header, text='class', width=18,
-                  font=('TkDefaultFont', 9, 'bold')).pack(side='left')
-        for col in ('x', 'y', 'z'):
-            ttk.Label(header, text=col, width=10,
-                      font=('TkDefaultFont', 9, 'bold')).pack(side='left')
-        for name in names:
-            row = ttk.Frame(self._places_inner)
-            row.pack(fill='x', pady=2)
-            ttk.Label(row, text=name, width=18).pack(side='left')
-            existing = self._places.get(name, [0.0, 0.2, 0.015])
-            entries = {}
-            for i, col in enumerate(('x', 'y', 'z')):
-                e = ttk.Entry(row, width=10, justify='right')
-                e.insert(0, f'{float(existing[i]):.3f}')
-                e.pack(side='left', padx=2)
-                entries[col] = e
-            ttk.Button(row, text='Save',
-                       command=lambda nm=name, ents=entries:
-                           self._on_save_place(nm, ents)
-                       ).pack(side='left', padx=6)
-            self._places_rows[name] = entries
-
-    def _on_save_place(self, name, entries):
-        try:
-            x = float(entries['x'].get())
-            y = float(entries['y'].get())
-            z = float(entries['z'].get())
-        except ValueError:
-            messagebox.showerror('Bad value',
-                                 f'{name}: x/y/z must be floats.')
-            return
-        self._places[name] = [x, y, z]
-        def go():
-            self.client.set_value('place_positions', json.dumps(self._places))
-            self._set_status(f'PLACE {name} SAVED', '#3366aa')
-        threading.Thread(target=go, daemon=True).start()
-
-    # ---- Engines tab ----
-
-    def _build_models_tab(self, parent, current_path):
-        # Track the live engine path so Refresh marks the CURRENT engine
-        # [active] - a lambda closing over current_path froze the marker at
-        # the boot engine after hot-swaps.
-        self._active_engine = current_path
-        ttk.Label(parent,
-                  text=f'Discovered .engine files in {DEFAULT_ENGINES_DIR}:',
-                  foreground='#444').pack(anchor='w', padx=8, pady=(8, 4))
-        listbox_frame = ttk.Frame(parent); listbox_frame.pack(fill='both', expand=True,
-                                                              padx=8, pady=4)
-        self.engine_listbox = tk.Listbox(listbox_frame, height=8)
-        self.engine_listbox.pack(side='left', fill='both', expand=True)
-        scrollbar = ttk.Scrollbar(listbox_frame, orient='vertical',
-                                  command=self.engine_listbox.yview)
-        scrollbar.pack(side='right', fill='y')
-        self.engine_listbox.configure(yscrollcommand=scrollbar.set)
-        self._refresh_engine_list(current_path)
-
-        btn_row = ttk.Frame(parent); btn_row.pack(fill='x', padx=8, pady=6)
-        ttk.Button(btn_row, text='Refresh',
-                   command=lambda: self._refresh_engine_list(self._active_engine)
-                   ).pack(side='left', padx=4)
-        ttk.Button(btn_row, text='Load selected',
-                   command=self._on_load_selected_engine).pack(side='left', padx=4)
-        ttk.Button(btn_row, text='Browse for .engine...',
-                   command=self._on_browse_engine).pack(side='left', padx=4)
-
-        ttk.Label(parent, text='Manual path:',
-                  foreground='#444').pack(anchor='w', padx=8, pady=(8, 2))
-        self.engine_entry = ttk.Entry(parent)
-        self.engine_entry.pack(fill='x', padx=8)
-        self.engine_entry.insert(0, current_path or '')
-        ttk.Button(parent, text='Load entered path',
-                   command=self._on_load_entry).pack(anchor='e', padx=8, pady=4)
+    # ---- engine picker helpers (buffered: populate entry, no live swap) ----
 
     def _refresh_engine_list(self, current_path):
         self.engine_listbox.delete(0, tk.END)
@@ -846,35 +892,130 @@ class TunerUI:
             marker = ' [active]' if str(p) == current_path else ''
             self.engine_listbox.insert(tk.END, f'{p.name}{marker}')
 
-    def _on_load_selected_engine(self):
+    def _set_engine_buffer(self, path):
+        self._model_engine_entry.delete(0, 'end')
+        self._model_engine_entry.insert(0, path)
+        self._mark_model_dirty()
+
+    def _on_pick_selected_engine(self):
         sel = self.engine_listbox.curselection()
         if not sel: return
         text = self.engine_listbox.get(sel[0]).split(' [active]')[0]
-        path = str(DEFAULT_ENGINES_DIR / text)
-        self._do_engine_swap(path)
+        self._set_engine_buffer(str(DEFAULT_ENGINES_DIR / text))
 
     def _on_browse_engine(self):
         path = filedialog.askopenfilename(
-            title='Pick .engine file', initialdir=str(DEFAULT_ENGINES_DIR),
-            filetypes=[('TensorRT engine', '*.engine'), ('All files', '*.*')])
+            title='Pick model file', initialdir=str(DEFAULT_ENGINES_DIR),
+            filetypes=[('TensorRT engine', '*.engine'),
+                       ('PyTorch', '*.pt'), ('All files', '*.*')])
         if path:
-            self._do_engine_swap(path)
+            self._set_engine_buffer(path)
 
-    def _on_load_entry(self):
-        path = self.engine_entry.get().strip()
-        if path: self._do_engine_swap(path)
+    # ---- Places tab (per-class targets: place position + grip strength) ----
 
-    def _do_engine_swap(self, path):
+    def _build_places_tab(self, parent, current_places_json):
+        """Per-class targets editor. Rows populate from model.names (~/status).
+        Each row: place x/y/z + max grip strength. Per-row save AND save-all.
+        place_positions and grasp_strength are live params (the user is
+        explicitly clicking Save)."""
+        try:
+            self._places = json.loads(current_places_json or '{}')
+            if not isinstance(self._places, dict):
+                self._places = {}
+        except Exception:
+            self._places = {}
+        try:
+            self._grasp_strength = json.loads(
+                self.client.get_values(['grasp_strength'])
+                .get('grasp_strength', '{}') or '{}')
+            if not isinstance(self._grasp_strength, dict):
+                self._grasp_strength = {}
+        except Exception:
+            self._grasp_strength = {}
+        ttk.Label(parent, foreground='#226666', wraplength=720,
+                  justify='left',
+                  text='Per-class targets. Set the world (x, y, z) drop point '
+                       'and the MAX grip strength (close pulse cap, used by the '
+                       'force-limited BETA grasp) for each detected class. Rows '
+                       'auto-populate when the engine loads. CALIBRATE (top bar) '
+                       'runs AprilTag calibration to keep IK/workspace accurate.'
+                  ).pack(anchor='w', padx=8, pady=(8, 4))
+        topbtn = ttk.Frame(parent); topbtn.pack(fill='x', padx=8, pady=2)
+        ttk.Button(topbtn, text='Save all rows',
+                   command=self._on_save_all_places).pack(side='left', padx=4)
+        self._places_inner = ttk.Frame(parent)
+        self._places_inner.pack(fill='both', expand=True, padx=8, pady=4)
+        self._places_rows = {}  # class -> {'x','y','z','strength'} entries
+        ttk.Label(self._places_inner, foreground='#888',
+                  text='(waiting for engine load...)').pack(anchor='w')
+
+    def _refresh_places(self, class_names):
+        if not class_names:
+            return
+        names = sorted(class_names.values())
+        if list(self._places_rows.keys()) == names:
+            return
+        for w in self._places_inner.winfo_children():
+            w.destroy()
+        self._places_rows = {}
+        header = ttk.Frame(self._places_inner); header.pack(fill='x', pady=(0, 4))
+        ttk.Label(header, text='class', width=16,
+                  font=('TkDefaultFont', 9, 'bold')).pack(side='left')
+        for col in ('x', 'y', 'z', 'grip'):
+            ttk.Label(header, text=col, width=9,
+                      font=('TkDefaultFont', 9, 'bold')).pack(side='left')
+        for name in names:
+            row = ttk.Frame(self._places_inner); row.pack(fill='x', pady=2)
+            ttk.Label(row, text=name, width=16).pack(side='left')
+            existing = self._places.get(name, [0.0, 0.2, 0.015])
+            entries = {}
+            for i, col in enumerate(('x', 'y', 'z')):
+                e = ttk.Entry(row, width=9, justify='right')
+                e.insert(0, f'{float(existing[i]):.3f}')
+                e.pack(side='left', padx=2); entries[col] = e
+            se = ttk.Entry(row, width=9, justify='right')
+            se.insert(0, str(int(self._grasp_strength.get(name, 540))))
+            se.pack(side='left', padx=2); entries['strength'] = se
+            ttk.Button(row, text='Save',
+                       command=lambda nm=name, ents=entries:
+                           self._on_save_place(nm, ents)).pack(side='left', padx=6)
+            self._places_rows[name] = entries
+
+    def _parse_place_row(self, name, entries):
+        x = float(entries['x'].get()); y = float(entries['y'].get())
+        z = float(entries['z'].get()); s = int(float(entries['strength'].get()))
+        return [x, y, z], s
+
+    def _on_save_place(self, name, entries):
+        try:
+            pos, strength = self._parse_place_row(name, entries)
+        except ValueError:
+            messagebox.showerror('Bad value', f'{name}: x/y/z and grip must be numbers.')
+            return
+        self._places[name] = pos
+        self._grasp_strength[name] = strength
         def go():
-            ok = self.client.call_load_engine(path)
-            if ok:
-                self._active_engine = path
-                self.engine_var.set(self._short_engine(path))
-                self._refresh_engine_list(path)
-                self._set_status('ENGINE SWAPPED', '#3366aa')
-            else:
-                messagebox.showerror('Engine swap failed',
-                                     f'Could not load:\n{path}')
+            self.client.set_value('place_positions', json.dumps(self._places))
+            self.client.set_value('grasp_strength', json.dumps(self._grasp_strength))
+            self._set_status(f'TARGET {name} SAVED', '#3366aa')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_save_all_places(self):
+        bad = []
+        for name, entries in self._places_rows.items():
+            try:
+                pos, strength = self._parse_place_row(name, entries)
+                self._places[name] = pos
+                self._grasp_strength[name] = strength
+            except ValueError:
+                bad.append(name)
+        if bad:
+            messagebox.showerror('Bad value',
+                                 f'Skipped (non-numeric): {", ".join(bad)}')
+        def go():
+            self.client.set_value('place_positions', json.dumps(self._places))
+            self.client.set_value('grasp_strength', json.dumps(self._grasp_strength))
+            self._set_status('ALL TARGETS SAVED', '#3366aa')
         threading.Thread(target=go, daemon=True).start()
 
     # ---- Profiles tab ----
@@ -974,10 +1115,18 @@ class TunerUI:
         threading.Thread(target=go, daemon=True).start()
 
     def _on_calibrate(self):
+        # Vendor AprilTag calibration: STOPS sorting and MOVES the arm.
+        if not messagebox.askyesno(
+                'Run calibration?',
+                'This STOPS sorting and MOVES the arm to the calibration '
+                'pose, then runs AprilTag calibration.\n\n'
+                'Requires AprilTags (IDs 1/2/3, fallback 100; 2.5 cm) flat '
+                'and fully in the camera view.\n\nContinue?'):
+            return
         def go():
             self.client.call_enable_sorting(False)
             self._set_status('CALIBRATING...', '#3366aa')
-            ok = self.client.call_recalibrate()
+            ok = self.client.call_run_calibration()
             self._set_status('STOPPED (calibrated)' if ok else 'CALIBRATE FAILED',
                              '#aa3333' if ok else '#aa6633')
         threading.Thread(target=go, daemon=True).start()
