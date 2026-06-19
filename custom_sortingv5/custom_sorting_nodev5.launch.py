@@ -93,9 +93,11 @@ def launch_setup(context):
     if compiled == 'True':
         sdk_package_path = get_package_share_directory('sdk')
         peripherals_package_path = get_package_share_directory('peripherals')
+        app_package_path = get_package_share_directory('app')
     else:
         sdk_package_path = '/home/ubuntu/ros2_ws/src/driver/sdk'
         peripherals_package_path = '/home/ubuntu/ros2_ws/src/peripherals'
+        app_package_path = '/home/ubuntu/ros2_ws/src/app'
     depth_camera_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(peripherals_package_path, 'launch/depth_camera.launch.py')),
@@ -103,6 +105,15 @@ def launch_setup(context):
     sdk_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(sdk_package_path, 'launch/jetarm_sdk.launch.py')),
+    )
+    # v5: bring up the vendor AprilTag calibration node alongside us. It
+    # sits idle (services only fire on /calibration/enter+start) until the
+    # tuner UI's CALIBRATE button triggers it via the node's
+    # ~/run_calibration orchestrator. It writes the same transform.yaml the
+    # sorting node reads in get_roi(), so calibration == workspace accuracy.
+    calibration_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(app_package_path, 'launch/calibration_node.launch.py')),
     )
 
     # --- Resolve the optional named profile to a YAML file path -----------
@@ -221,6 +232,7 @@ def launch_setup(context):
         image_view_topic_arg,
         sdk_launch,
         depth_camera_launch,
+        calibration_launch,
         custom_sorting_v4_node,
         tune_ui_node,
         web_video_server_node,

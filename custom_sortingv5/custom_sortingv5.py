@@ -98,7 +98,7 @@ from rcl_interfaces.msg import SetParametersResult, ParameterDescriptor, Floatin
 from rcl_interfaces.srv import GetParameters, ListParameters, SetParameters
 from rcl_interfaces.msg import Parameter as ParameterMsg, ParameterValue, ParameterType
 from std_srvs.srv import Trigger, SetBool
-from std_msgs.msg import String
+from std_msgs.msg import String, Bool
 from sensor_msgs.msg import Image, CameraInfo, CompressedImage
 from rclpy.executors import MultiThreadedExecutor
 from cv_bridge import CvBridge
@@ -816,6 +816,28 @@ class ObjectSortingNodeV5(Node):
         self.create_service(SetStringBool, '~/save_yolo_config',
                             self.save_yolo_config_srv_callback,
                             callback_group=self.svc_group)
+        # v5: CALIBRATE orchestrator. The UI button calls this; the node
+        # drives the vendor AprilTag calibration node (enter/start/finish/
+        # exit) and rebuilds ROI from the transform.yaml it writes. Owning
+        # this server-side guarantees sorting is stopped before the vendor
+        # 'enter' moves the arm, and only the node can refresh the ROI.
+        self.create_service(Trigger, '~/run_calibration',
+                            self.run_calibration_srv_callback,
+                            callback_group=self.svc_group)
+
+        # ---- Vendor calibration node clients (idle until CALIBRATE) ----
+        # Created, not blocked on: if the calibration node isn't running we
+        # degrade gracefully (run_calibration logs + returns failure).
+        self.calib_enter_cli = self.create_client(
+            Trigger, '/calibration/enter', callback_group=self.svc_group)
+        self.calib_start_cli = self.create_client(
+            Trigger, '/calibration/start', callback_group=self.svc_group)
+        self.calib_exit_cli = self.create_client(
+            Trigger, '/calibration/exit', callback_group=self.svc_group)
+        self._calib_finished = threading.Event()
+        self.create_subscription(
+            Bool, '/calibration/finish', self._on_calib_finish,
+            1, callback_group=self.svc_group)
 
         # ---- Service clients ----
         # NB: kinematics comes up via the SDK launch (which our launch
@@ -1087,6 +1109,8 @@ class ObjectSortingNodeV5(Node):
         self._last_calibrate = None
         # YOLO classes with no place target (set in _on_engine_loaded).
         self._unmapped_classes = []
+        # Calibration in-progress guard.
+        self._calibrating = False
         self.white_area_center = None
         self.enter = False
         self.roi = []
@@ -1383,14 +1407,93 @@ class ObjectSortingNodeV5(Node):
         response.success = True
         return response
 
+    def _on_calib_finish(self, msg):
+        if getattr(msg, 'data', False):
+            self._calib_finished.set()
+
     def recalibrate_srv_callback(self, request, response):
-        # Commit 2 shim: a pure ROI rebuild from the current transform.yaml,
-        # no motion. Commit 3 rewires this (and the new ~/run_calibration
-        # service) to drive the vendor AprilTag calibration node.
-        _stage('svc', 'recalibrate -> ROI rebuild requested')
-        self.start_get_roi = True
+        # Alias of ~/run_calibration so the existing UI client keeps working.
+        return self.run_calibration_srv_callback(request, response)
+
+    def run_calibration_srv_callback(self, request, response):
+        # Spawn a worker and return immediately so the service reply isn't
+        # held for the whole multi-second AprilTag sequence.
+        if getattr(self, '_calibrating', False):
+            _stage('svc', 'run_calibration ignored - already calibrating')
+            response.success = False
+            return response
+        if not self.calib_enter_cli.wait_for_service(timeout_sec=2.0):
+            _stage('calibrate', 'vendor calibration node not running - is '
+                                'calibration_node.launch.py included? Aborting.')
+            self._last_calibrate = {'ts': time.time(), 'ok': False,
+                                    'error': 'no_vendor_node'}
+            response.success = False
+            return response
+        self._calibrating = True
+        threading.Thread(target=self._run_vendor_calibration, daemon=True).start()
         response.success = True
         return response
+
+    def _call_trigger(self, client, timeout=5.0):
+        """Call a std_srvs/Trigger client off the executor thread and poll
+        its future (this runs on our own worker thread)."""
+        fut = client.call_async(Trigger.Request())
+        deadline = time.time() + timeout
+        while not fut.done() and time.time() < deadline:
+            time.sleep(0.02)
+        res = fut.result() if fut.done() else None
+        return bool(res and res.success)
+
+    def _run_vendor_calibration(self):
+        """Drive the vendor AprilTag calibration node end to end, then
+        rebuild ROI from the transform.yaml it writes. Fully guarded -
+        never raises, always tries to leave the vendor node in 'exit'."""
+        try:
+            # Safety: stop sorting + motion BEFORE the vendor 'enter' moves
+            # the arm to its calibration pose.
+            self.enable_sorting = False
+            try:
+                self.motion.abort(True)
+            except Exception:
+                pass
+            self.target = None
+            _stage('calibrate', 'sorting force-stopped; starting vendor calibration')
+            self._calib_finished.clear()
+
+            if not self._call_trigger(self.calib_enter_cli):
+                _stage('calibrate', 'vendor enter failed/timed out')
+                self._last_calibrate = {'ts': time.time(), 'ok': False,
+                                        'error': 'enter_failed'}
+                self._call_trigger(self.calib_exit_cli, timeout=3.0)
+                return
+            if not self._call_trigger(self.calib_start_cli):
+                _stage('calibrate', 'vendor start failed/timed out')
+                self._last_calibrate = {'ts': time.time(), 'ok': False,
+                                        'error': 'start_failed'}
+                self._call_trigger(self.calib_exit_cli, timeout=3.0)
+                return
+            # Wait for the vendor's /calibration/finish Bool (PnP solved).
+            got = self._calib_finished.wait(timeout=20.0)
+            if not got:
+                _stage('calibrate', 'timed out waiting for /calibration/finish '
+                                    '(too few AprilTags in view?)')
+            self._call_trigger(self.calib_exit_cli, timeout=3.0)
+            if got:
+                # transform.yaml was rewritten - rebuild ROI from it.
+                self.start_get_roi = True
+                _stage('calibrate', 'finished; rebuilding ROI from new transform.yaml')
+            self._last_calibrate = {'ts': time.time(), 'ok': bool(got),
+                                    'source': 'vendor'}
+        except Exception as e:
+            _stage('calibrate', 'vendor calibration crashed', exc=e)
+            try:
+                self._call_trigger(self.calib_exit_cli, timeout=3.0)
+            except Exception:
+                pass
+            self._last_calibrate = {'ts': time.time(), 'ok': False,
+                                    'error': 'exception'}
+        finally:
+            self._calibrating = False
 
     def _on_engine_loaded(self, path):
         """InferenceWorker callback: fires from the worker thread after a
