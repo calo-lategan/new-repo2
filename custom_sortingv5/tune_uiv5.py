@@ -82,6 +82,10 @@ PARAM_LABELS = {
     'gripper_open_pulse':  ('Gripper open pulse', 'jaw-open position'),
     'gripper_settle':    ('Grip settle', 'sec dwell after close before lift'),
     'grab_depth':        ('Grab depth', 'm below detected z so jaws wrap the body'),
+    'detection_offset_x': ('Overlay offset X', 'px - nudge boxes +right/-left onto objects'),
+    'detection_offset_y': ('Overlay offset Y', 'px - nudge boxes +down/-up onto objects'),
+    'grip_offset_x':     ('Grip offset X', 'm - shift where the arm lands (after calibration)'),
+    'grip_offset_y':     ('Grip offset Y', 'm - shift where the arm lands (after calibration)'),
 }
 
 # v5 Round 2: live YOLO knobs rendered on the Detection tab (apply on release
@@ -90,9 +94,15 @@ MODEL_FLOAT_PARAMS = [
     ('yolo_conf_thresh',      0.05, 0.95, 0.01),
     ('yolo_iou_thresh',       0.10, 0.90, 0.01),
     ('inference_max_hz',      0.0,  60.0, 1.0),
+    # World-space grip nudge (metres) - shift where the arm lands.
+    ('grip_offset_x',        -0.1,  0.1, 0.005),
+    ('grip_offset_y',        -0.1,  0.1, 0.005),
 ]
 MODEL_INT_PARAMS = [
     ('yolo_max_det',             1, 300, 1),
+    # Pixel-space overlay nudge - shift boxes to sit on the objects.
+    ('detection_offset_x',    -300, 300, 1),
+    ('detection_offset_y',    -300, 300, 1),
 ]
 # Factory defaults for the Detection tab "Reset knobs to defaults" button.
 # Keep in sync with the node's declared defaults in custom_sortingv5.py

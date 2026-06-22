@@ -661,6 +661,15 @@ class ObjectSortingNodeV5(Node):
         ('count_still_threshold', 4, (1, 30)),
         ('count_move_threshold', 8, (1, 30)),
         ('detection_avg_frames', 3, (1, 10)),
+        # ---- Manual offsets (calibration-free nudge) ----
+        # Pixel-space: shifts detection coords so the overlay boxes sit on
+        # the objects (also corrects the pixel fed to the world projection).
+        ('detection_offset_x', 0, (-300, 300)),   # +x shifts detections RIGHT (px)
+        ('detection_offset_y', 0, (-300, 300)),   # +y shifts detections DOWN (px)
+        # World-space: shifts the final pick position (metres) so the arm
+        # lands on the object, compensating calibration without the AprilTag.
+        ('grip_offset_x', 0.0, (-0.1, 0.1)),
+        ('grip_offset_y', 0.0, (-0.1, 0.1)),
         # ---- Motion ----
         ('motion_speed', 1.5, (0.3, 2.5)),
         ('aggression', 1.3, (0.3, 2.0)),
@@ -2009,6 +2018,12 @@ class ObjectSortingNodeV5(Node):
         # frame in InferenceWorker (see L368), so detection coords are
         # already in full-frame pixel space. roi is used for ROI gating /
         # workspace bounds only, not for shifting detection coords.
+        # Manual pixel nudge (default 0): shifts every detection so the
+        # overlay boxes sit on the objects when calibration can't be redone.
+        # Same coords feed the world projection, so this also corrects the
+        # pixel used for picking.
+        ox = int(self.p('detection_offset_x'))
+        oy = int(self.p('detection_offset_y'))
         # v5: ALL detection comes from YOLO. The model's class names
         # (model.names) are the source of truth - no hardcoded
         # red/green/blue/scaff list, no LAB color thresholding, no HED.
@@ -2021,11 +2036,12 @@ class ObjectSortingNodeV5(Node):
                     cx, cy, w, h, r = obb.xywhr[0].cpu().numpy()
                     cls_id = int(obb.cls.cpu().numpy()) if hasattr(obb, 'cls') else 0
                     label = names.get(cls_id, f'cls_{cls_id}')
+                    cx += ox; cy += oy
                     # ultralytics OBB r is in radians, ~[-pi/2, pi/2]. If the
                     # gripper rotates 90 off the intended grasp, try `90 - ...`.
                     angle = int(math.degrees(r))
                     corners = obb.xyxyxyxy[0].cpu().numpy()
-                    corners = [(int(x), int(y)) for x, y in corners]
+                    corners = [(int(x + ox), int(y + oy)) for x, y in corners]
                     target_info.append([label, 1, (int(cx), int(cy)),
                                         (int(w), int(h)), angle])
                     yolo_ops.append(('obb', corners, label))
@@ -2034,14 +2050,14 @@ class ObjectSortingNodeV5(Node):
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                     cls_id = int(box.cls.cpu().numpy()) if hasattr(box, 'cls') else 0
                     label = names.get(cls_id, f'cls_{cls_id}')
-                    cx = (x1 + x2) / 2
-                    cy = (y1 + y2) / 2
+                    cx = (x1 + x2) / 2 + ox
+                    cy = (y1 + y2) / 2 + oy
                     w, h = x2 - x1, y2 - y1
                     target_info.append([label, 1, (int(cx), int(cy)),
                                         (int(w), int(h)), 0])
                     yolo_ops.append(('rect',
-                                     (int(x1), int(y1)),
-                                     (int(x2), int(y2)),
+                                     (int(x1 + ox), int(y1 + oy)),
+                                     (int(x2 + ox), int(y2 + oy)),
                                      label))
         primitives = {'yolo_ops': yolo_ops, 'color_corners': []}
         return target_info, primitives
@@ -2061,6 +2077,12 @@ class ObjectSortingNodeV5(Node):
         scale = tuple(config_data['pixel']['scale'])
         for i in range(3):
             position[i] = position[i] * scale[i] + offset[i]
+        # Manual world nudge (default 0): shift the final pick position so
+        # the arm lands on the object, compensating calibration drift when
+        # the AprilTag can't be re-run. Read live so the slider applies on
+        # the next pick.
+        position[0] += float(self.p('grip_offset_x'))
+        position[1] += float(self.p('grip_offset_y'))
         return position, projection_matrix
 
     def calculate_pick_grasp_yaw(self, position, target, target_info,

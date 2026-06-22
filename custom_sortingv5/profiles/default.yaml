@@ -39,6 +39,15 @@
     count_move_threshold: 8
     detection_avg_frames: 3
 
+    # ---- Manual offsets (calibration-free nudge; 0 = no change) ----
+    # Pixel-space: move the overlay boxes onto the objects (also corrects
+    # the pixel fed to the world projection used for picking).
+    detection_offset_x: 0
+    detection_offset_y: 0
+    # World-space (metres): shift where the arm actually lands.
+    grip_offset_x: 0.0
+    grip_offset_y: 0.0
+
     # ---- Motion ----
     motion_speed: 1.5
     aggression: 1.3
