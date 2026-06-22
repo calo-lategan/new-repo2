@@ -99,10 +99,10 @@ MODEL_INT_PARAMS = [
 # (_v5_tunables block around L615 - yolo_conf_thresh / yolo_iou_thresh /
 # yolo_max_det / inference_max_hz).
 MODEL_DEFAULTS = {
-    'yolo_conf_thresh': 0.25,
-    'yolo_iou_thresh':  0.7,
-    'yolo_max_det':     100,
-    'inference_max_hz': 0.0,
+    'yolo_conf_thresh': 0.60,
+    'yolo_iou_thresh':  0.45,
+    'yolo_max_det':     5,
+    'inference_max_hz': 15.0,
 }
 
 BOOL_PARAMS = [
@@ -318,6 +318,9 @@ class TunerUI:
         # name -> callable(value) that updates that param's widget locally
         # (no ROS traffic). Used by presets to keep the UI in sync.
         self._param_setters = {}
+        # name -> callable() returning the current widget value (for per-tab
+        # Save & Apply; read straight from the widget, no service round-trip).
+        self._param_get = {}
         self._building = True
         self._build()
         self._building = False
@@ -794,6 +797,14 @@ class TunerUI:
             var.set(v)
             entry.delete(0, 'end'); entry.insert(0, fmt(v))
         self._param_setters[name] = set_local
+        # Getter for per-tab Save & Apply: read the CURRENT widget value
+        # directly (WYSIWYG, no service round-trip). The Scale tracks `var`
+        # live, so this reflects exactly what the user sees.
+        if not hasattr(self, '_param_get'):
+            self._param_get = {}
+        self._param_get[name] = (
+            (lambda: max(lo, min(hi, float(var.get())))) if kind == 'float'
+            else (lambda: int(max(lo, min(hi, round(float(var.get())))))))
 
     def _add_bool(self, parent, name, init):
         var = tk.BooleanVar(value=bool(init))
@@ -803,6 +814,9 @@ class TunerUI:
         ttk.Checkbutton(parent, text=name, variable=var, command=on_change
                         ).pack(anchor='w', padx=12, pady=4)
         self._param_setters[name] = lambda v: var.set(bool(v))
+        if not hasattr(self, '_param_get'):
+            self._param_get = {}
+        self._param_get[name] = lambda: bool(var.get())
 
     # ---- Model section (built into the Detection tab; live + Save & Apply) ----
 
@@ -935,23 +949,35 @@ class TunerUI:
                   ).pack(side='right', padx=8)
 
     def _on_tab_save(self, keys, label, get_extra=None):
+        # Build the payload from the WIDGETS directly (no get_values service
+        # round-trip - that was returning {} and silently saving nothing).
+        getters = getattr(self, '_param_get', {})
+        vals = {}
+        for k in (keys or []):
+            if k in getters:
+                try:
+                    vals[k] = getters[k]()
+                except Exception:
+                    pass
+            elif k == 'place_positions':
+                vals[k] = json.dumps(getattr(self, '_places', {}) or {})
+            elif k == 'grasp_strength':
+                vals[k] = json.dumps(getattr(self, '_grasp_strength', {}) or {})
+        if get_extra is not None:
+            try:
+                vals.update(get_extra() or {})
+            except Exception:
+                pass
+
         def go():
-            vals = {}
-            if keys:
-                try:
-                    vals.update(self.client.get_values(list(keys)))
-                except Exception:
-                    pass
-            if get_extra is not None:
-                try:
-                    vals.update(get_extra() or {})
-                except Exception:
-                    pass
-            ok = self.client.apply_and_persist(vals, persist=True)
+            ok = bool(vals) and self.client.apply_and_persist(vals, persist=True)
             if ok:
                 self._set_status(f'{label} SAVED', '#3366aa')
                 if label == 'Detection':
                     self._clear_model_dirty()
+            elif not vals:
+                messagebox.showinfo('Nothing to save',
+                                    f'No editable settings on the {label} tab.')
             else:
                 messagebox.showerror('Save failed',
                                      'apply_and_persist service rejected.')

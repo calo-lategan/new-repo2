@@ -495,10 +495,12 @@ patch_entry "tune_uiv5 = app.tune_uiv5:main"
 
 stage "seeding profiles in $PROFILES_DIR"
 mkdir -p "$PROFILES_DIR"
-# v5 ships default.yaml (boot fallback) + yolo.yaml (sample model config;
-# the Model-tab SAVE overwrites it). The vendor AprilTag calibration node
-# is pulled from package 'app' by the launch include - no extra install.
-for p in default.yaml yolo.yaml; do
+# v5 ships ONLY default.yaml - it is the single boot source of truth (the
+# tuner UI's per-tab Save & Apply + "Save ALL as default" merge into it).
+# yolo.yaml is NOT seeded any more: it used to be loaded on top of
+# default.yaml and a stale sample would revert the user's saved model knobs
+# on every relaunch. The node ignores yolo.yaml at boot now.
+for p in default.yaml; do
     src="$V4/profiles/$p"
     dst="$PROFILES_DIR/$p"
     if [ -f "$dst" ]; then

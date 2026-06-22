@@ -627,9 +627,11 @@ class ObjectSortingNodeV5(Node):
         # name, default, range_or_None
         # ---- Model config (BUFFERED in tuner UI - applied on SAVE only) ----
         ('engine_path', '/home/ubuntu/third_party_ros2/data/best_scaff2.engine', None),
-        ('yolo_conf_thresh', 0.25, (0.05, 0.95)),
-        ('yolo_iou_thresh',  0.7,  (0.10, 0.90)),
-        ('yolo_max_det',     100,  (1, 300)),
+        # Production sorting baseline (decently-high conf, few detections,
+        # moderate NMS since items don't overlap). default.yaml ships the same.
+        ('yolo_conf_thresh', 0.60, (0.05, 0.95)),
+        ('yolo_iou_thresh',  0.45, (0.10, 0.90)),
+        ('yolo_max_det',     5,    (1, 300)),
         # JSON list of YOLO class IDs to KEEP after NMS. Empty list = all
         # classes. Populated automatically from model.names after the
         # first engine load and surfaced as per-class checkboxes in the
@@ -701,8 +703,9 @@ class ObjectSortingNodeV5(Node):
         # default either, _do_place aborts (no random drops).
         # Example: '{"scaff": [-0.076, 0.16, 0.015], "cube_red": [0.064, 0.23, 0.015]}'
         ('place_positions', '{}', None),
-        # Frame-rate throttles. 0 = uncapped.
-        ('inference_max_hz', 0.0,  (0.0, 60.0)),
+        # Frame-rate throttles. 0 = uncapped. inference capped at 15 Hz by
+        # default - picks happen ~1-2 Hz so uncapped just pegs the GPU.
+        ('inference_max_hz', 15.0, (0.0, 60.0)),
         ('publish_max_hz',   0.0,  (0.0, 60.0)),
         ('publish_scale',    1.0,  (0.25, 1.0)),
         ('publish_jpeg_quality', 80, (30, 95)),
@@ -988,17 +991,16 @@ class ObjectSortingNodeV5(Node):
         so declare_parameter() picks them up as the seed. Returns the dict
         applied (or empty).
 
-        Persistence precedence (low -> high): hardcoded defaults < default.yaml
-        < yolo.yaml. yolo.yaml is merged on top so the model config saved from
-        the Detection tab (engine_path + conf/iou/max_det/classes) actually
-        survives a relaunch. Before this merge, yolo.yaml was written but NEVER
-        read at boot, so picking a model "didn't stick"."""
+        default.yaml is the SINGLE boot source of truth. Every tuner-UI save
+        (per-tab Save & Apply, Save ALL as default) merges into default.yaml,
+        so it always holds the latest engine + knobs + everything else. The
+        old yolo.yaml overlay was removed: the installer shipped a stale sample
+        yolo.yaml that overwrote the user's saved model keys on every relaunch
+        (conf/iou/max_det/engine reverting), which is the opposite of what we
+        want. yolo.yaml is now ignored at boot."""
         params = {}
         if DEFAULT_PROFILE_PATH.exists():
             params.update(load_profile_yaml(DEFAULT_PROFILE_PATH))
-        if YOLO_CONFIG_PATH.exists():
-            # Model keys win over default.yaml so a Detection-tab save persists.
-            params.update(load_profile_yaml(YOLO_CONFIG_PATH))
         if not params:
             return {}
         for k, v in params.items():
@@ -1834,24 +1836,16 @@ class ObjectSortingNodeV5(Node):
             except Exception as e:
                 _stage('svc', 'engine hot-swap from save failed', exc=e)
 
-        # 5. Persist if requested. We write BOTH yolo.yaml (the model-only
-        #    config file, read first at boot) AND merge the model keys into
-        #    default.yaml, so the saved model survives relaunch regardless of
-        #    which file the boot seed prefers.
+        # 5. Persist if requested. default.yaml is the single boot source, so
+        #    we merge the model keys there. (We no longer write yolo.yaml - it
+        #    is not read at boot; this service is legacy, the new UI uses
+        #    apply_and_persist.)
         model_keys = ('engine_path', 'yolo_conf_thresh', 'yolo_iou_thresh',
                       'yolo_max_det', 'inference_max_hz', 'yolo_enabled_classes')
         if request.data_bool:
-            try:
-                _ensure_profiles_dir()
-                payload = {k: self.p(k) for k in model_keys}
-                with open(YOLO_CONFIG_PATH, 'w') as f:
-                    yaml.safe_dump(payload, f, sort_keys=True)
-                _stage('svc', f'wrote {YOLO_CONFIG_PATH}')
-            except Exception as e:
-                _stage('svc', f'write {YOLO_CONFIG_PATH} failed', exc=e)
+            if not self._merge_into_default(model_keys):
                 response.success = False
                 return response
-            self._merge_into_default(model_keys)
 
         _stage('svc', f'save_yolo_config applied {applied}')
         response.success = True

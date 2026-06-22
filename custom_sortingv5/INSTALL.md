@@ -11,7 +11,7 @@ v5 is the single, current version of the custom sorting stack — **one YOLO mod
 | `image_view_chain.sh` | rqt → image_view → browser chain, IP autodetected. |
 | `re-enable-factory.sh` | Opt-in: put Hiwonder's factory app back. |
 | `install.sh` | One-paste idempotent installer. |
-| `profiles/` (created at install) | `~/jetarm_v5_profiles/{default,yolo}.yaml` (`yolo.yaml` is written by the Model-tab SAVE). |
+| `profiles/` (created at install) | `~/jetarm_v5_profiles/default.yaml` — the single boot source of truth (per-tab Save & Apply merges here). `yolo.yaml` is deprecated/ignored. |
 
 **v5 needs a YOLO model whose `model.names` include your objects** (e.g. cubes + scaff in one model). The class names drive the class filter, the per-class place targets, and per-class grip strength. Until you load such a model, v5 only detects whatever classes are in the currently-loaded engine.
 
@@ -31,7 +31,7 @@ This will:
 2. Symlink `custom_sortingv5.py` and `tune_uiv5.py` into `~/ros2_ws/src/app/app/`
 3. Symlink `custom_sorting_nodev5.launch.py` into `~/ros2_ws/src/app/launch/`
 4. Idempotently add the two `console_scripts` entries (`custom_sortingv5`, `tune_uiv5`) to `setup.py`
-5. Seed `~/jetarm_v5_profiles/` with `default.yaml` + `yolo.yaml` (the Model-tab SAVE overwrites `yolo.yaml`)
+5. Seed `~/jetarm_v5_profiles/` with `default.yaml` (the single boot source; tuner-UI saves merge into it)
 6. Install `~/jetarm_v5/launch_v5.sh` + `image_view_chain.sh` + `re-enable-factory.sh`
 7. Drop a **JetArm Sort v5** desktop shortcut on your Desktop and in the app menu
 8. Run `colcon build --packages-select app --symlink-install`
@@ -250,8 +250,8 @@ export; re-export from Ultralytics and pick the new `.engine` here.
   **persists them to `~/jetarm_v5_profiles/default.yaml`**, the file the node
   loads on every launch. The Detection tab's Save & Apply also persists the
   engine path + class filter, so **a model you pick + save is the one that
-  loads next launch.** (This fixes the old bug where picking a model "didn't
-  stick" — `yolo.yaml` was written but never read at boot.)
+  loads next launch.** (`default.yaml` is the single boot source; the old
+  `yolo.yaml` overlay that reverted saved knobs on relaunch was removed.)
 - **Custom presets** (Presets bar): type a name, **Save as preset** to snapshot
   *all* current settings to `~/jetarm_v5_profiles/<name>.yaml`; pick one from
   the dropdown and **Load preset** to apply everything (including the engine).
