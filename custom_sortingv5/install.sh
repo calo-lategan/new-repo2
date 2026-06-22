@@ -213,6 +213,19 @@ cleanup_old_version() {
         fi
     done
 
+    # 2b) Install-side launch symlinks. Previous colcon runs created these
+    #     pointing into $APP_PKG/launch/*; once we delete the src-side link
+    #     above, the install-side link is dangling and breaks the next
+    #     `colcon build`. Remove the symlinks (never real files - a real
+    #     file in install/ for an old version would only exist if someone
+    #     manually broke colcon, in which case we shouldn't touch it).
+    local install_launch="$WS_DIR/install/app/share/app/launch/$launch_file"
+    if [ -L "$install_launch" ]; then
+        _destructive "install-side symlink: $install_launch" \
+            rm -f "$install_launch"
+        touched=1
+    fi
+
     # 3) Launcher dir
     if [ -d "$HOME/$launcher" ]; then
         _destructive "launcher dir: $HOME/$launcher" rm -rf "$HOME/$launcher"
@@ -422,6 +435,14 @@ link_file() {
     # Otherwise replace whatever's there with a symlink.
     rm -f "$dst"
     ln -s "$src" "$dst"
+    # Verify the new symlink resolves to a real file. `readlink -e` follows
+    # the entire chain and only succeeds if every link in it exists. Without
+    # this check, a partial v5 checkout could leave a dangling symlink that
+    # blows up colcon build later with a confusing ENOENT.
+    if ! readlink -e "$dst" >/dev/null 2>&1; then
+        err "linked target does not resolve: $dst -> $src (symlink chain broken)"
+        return 1
+    fi
     stage "  linked: $dst -> $src"
 }
 
@@ -589,6 +610,15 @@ chmod +x "$APP_FILE"
 # --- 8. Build -----------------------------------------------------------
 
 if [ "$DO_BUILD" = "1" ]; then
+    # The device cleanup stage removes v2/v4/v4.1 src-side launch symlinks
+    # but cannot reach the matching install-side symlinks under
+    # $WS_DIR/install/app/share/app/launch/. Those would survive as dangling
+    # links and trip setuptools' develop step with a confusing ENOENT. Nuke
+    # the app package's build + install trees so colcon rebuilds them
+    # cleanly. Per-package only - other Hiwonder packages are untouched, and
+    # the rebuild cost for `app` alone is 3-5 seconds.
+    stage "wiping stale colcon artifacts for app (forces clean rebuild)"
+    rm -rf "$WS_DIR/build/app" "$WS_DIR/install/app"
     stage "building app package with --symlink-install"
     # --symlink-install makes the install/ tree contain symlinks back into
     # src/, so Python source edits don't need a rebuild. Combined with the
