@@ -1,13 +1,17 @@
 # Default profile loaded automatically by custom_sortingv5 on startup.
-# install.sh seeds this to ~/jetarm_v5_profiles/default.yaml (or click
-# "SAVE AS DEFAULT" in the tuner UI to overwrite it from current state).
+# install.sh seeds this to ~/jetarm_v5_profiles/default.yaml.
+#
+# This is the single boot source of truth. The tuner UI writes here:
+#   - every tab's "Save & Apply" MERGES that tab's keys into this file
+#   - "SAVE ALL AS DEFAULT" (top bar) rewrites every key from current state
+# At boot the node loads this file, then merges yolo.yaml on top (legacy
+# model-only saves), so a model/engine saved from the Detection tab persists.
 #
 # Format is the standard ROS2 params YAML so it can also be passed to the
 # launch file via parameters=[...] / --params-file.
 #
 # v5: single YOLO model only (no OpenCV/LAB). Model config (engine + YOLO
-# knobs + enabled classes) is normally managed in the tuner UI Model tab
-# and saved to yolo.yaml; the keys here are the boot fallback. Grasp is
+# knobs + enabled classes) is managed on the tuner UI Detection tab. Grasp is
 # standard close-to-pulse by default; the force-limited contact-stop is an
 # opt-in BETA (compliance_grasp_enabled) with per-class max strength.
 

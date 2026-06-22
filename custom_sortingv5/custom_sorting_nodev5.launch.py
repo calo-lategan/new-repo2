@@ -24,12 +24,18 @@ def launch_setup(context):
     display_arg = DeclareLaunchArgument('display', default_value=display)
     broadcast = LaunchConfiguration('broadcast', default='false')
     broadcast_arg = DeclareLaunchArgument('broadcast', default_value=broadcast)
+    # NOTE: this is only an INITIAL FALLBACK engine, used when no persisted
+    # config exists. At boot the node loads default.yaml then merges yolo.yaml
+    # on top (see _apply_default_profile_seed in custom_sortingv5.py) and those
+    # win over this launch arg, so an engine chosen + saved from the Detection
+    # tab is what actually loads on the next launch.
     engine_path = LaunchConfiguration(
         'engine_path',
         default='/home/ubuntu/third_party_ros2/data/best_scaff2.engine')
     engine_path_arg = DeclareLaunchArgument(
         'engine_path', default_value=engine_path,
-        description='Initial YOLO TensorRT engine. Hot-swap at runtime via UI.')
+        description='Initial fallback YOLO engine; default.yaml/yolo.yaml win. '
+                    'Hot-swap at runtime via the Detection tab.')
 
     # Optional named profile to load on launch (looks in ~/jetarm_v5_profiles).
     # The default profile (default.yaml) is auto-loaded by the node itself if

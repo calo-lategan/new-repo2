@@ -214,21 +214,16 @@ JETARM_V5_DEBUG=1 ~/jetarm_v5/launch_v5.sh
 
 ---
 
-## The Model tab (buffered — nothing applies until SAVE)
+## The Detection tab (detection + model)
 
-Everything that configures the YOLO model lives on one **Model** tab:
-the engine picker, the YOLO knobs, and the per-class enable checkboxes.
-**Edits stay local until you press SAVE MODEL CONFIG** — the tab shows
-`Model *` while you have unsaved changes and prompts if you switch away.
-
-SAVE writes `~/jetarm_v5_profiles/yolo.yaml` and **hot-applies atomically**:
-the engine swaps between inference frames (no app restart), and conf / iou /
-max_det / enabled-classes land together. On boot the node auto-loads
-`yolo.yaml`.
+All model controls live on the **Detection** tab alongside the detection-lock
+params: the engine picker, the YOLO knobs, and the per-class enable checkboxes.
+Unlike older builds there is **no separate "Model" tab and no buffered SAVE** —
+every slider applies **live on release**, exactly like the other tabs.
 
 | Knob | Default | Effect |
 |---|---|---|
-| `engine_path` | best_scaff2.engine | TensorRT `.engine` (or `.pt`). Pick from the list, Browse, or type a path. |
+| `engine_path` | best_scaff2.engine | TensorRT `.engine` (or `.pt`). Pick from the list, Browse, or type a path, then **Apply engine**. |
 | `yolo_conf_thresh` | 0.25 | Confidence threshold. Higher = stricter. |
 | `yolo_iou_thresh` | 0.7 | NMS IoU. |
 | `yolo_max_det` | 100 | Max detections per frame. |
@@ -238,20 +233,34 @@ max_det / enabled-classes land together. On boot the node auto-loads
 `yolo_imgsz` is **not** tunable — TensorRT engines bake the input size in at
 export; re-export from Ultralytics and pick the new `.engine` here.
 
-### Reset and reload
+### Switching the model
 
-The Model tab has two extra escape hatches:
+- **Apply engine** — commits the path in the entry and switches the running
+  model immediately (the engine swaps between inference frames, no restart).
+- **Reload engine** — commits the path *and* re-inits the model from it. Use
+  it after swapping the `.engine` file on disk, or if the engine wedged.
+  Inference pauses ~2–5s while it reloads. Refused while CALIBRATE is running
+  or a swap is already pending.
+- **Reset knobs to defaults** — restores conf / IoU / max-det / inference-Hz to
+  factory values and clears the class filter (engine path untouched).
 
-- **Reset knobs to defaults** (next to SAVE) — repopulates the conf / IoU /
-  max-det / inference-Hz sliders with the factory defaults shown above and
-  clears the class filter. **Engine path is left alone** (the model itself is
-  not a "setting"). The tab goes dirty (`Model *`); press SAVE to commit the
-  defaults into `yolo.yaml` and the live worker.
-- **Reload engine** (next to Browse) — re-initialises the YOLO model from the
-  *current* engine path without changing the path. Useful if the engine wedged
-  or you swapped the `.engine` file on disk. Inference pauses briefly (~2-5s)
-  while the engine reloads, then the warmup pass runs and detection resumes.
-  Refused while CALIBRATE is running or another engine swap is already pending.
+### Saving — per tab, presets, and boot defaults
+
+- **Save & Apply** (bottom-right of every tab) applies that tab's settings and
+  **persists them to `~/jetarm_v5_profiles/default.yaml`**, the file the node
+  loads on every launch. The Detection tab's Save & Apply also persists the
+  engine path + class filter, so **a model you pick + save is the one that
+  loads next launch.** (This fixes the old bug where picking a model "didn't
+  stick" — `yolo.yaml` was written but never read at boot.)
+- **Custom presets** (Presets bar): type a name, **Save as preset** to snapshot
+  *all* current settings to `~/jetarm_v5_profiles/<name>.yaml`; pick one from
+  the dropdown and **Load preset** to apply everything (including the engine).
+  Names that collide with a built-in quick preset (`Slow & safe`, `Default`,
+  `Fast & aggressive`, `Precision`) or the boot default are refused so a custom
+  save never clobbers them. The built-in quick-preset buttons stay as one-tap
+  motion/grip presets.
+- **SAVE ALL AS DEFAULT** (top bar) persists *every* tab plus the current engine
+  to `default.yaml` in one go.
 
 ## The Places tab (per-class targets)
 
