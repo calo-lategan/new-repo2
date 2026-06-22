@@ -838,6 +838,14 @@ class ObjectSortingNodeV5(Node):
         self.create_service(SetStringBool, '~/save_yolo_config',
                             self.save_yolo_config_srv_callback,
                             callback_group=self.svc_group)
+        # v5: generic "apply (and optionally persist) a dict of params". Backs
+        # every per-tab "Save & Apply" button in the tuner UI. data_str is a
+        # JSON {param: value} map; data_bool=true merges those keys into
+        # default.yaml so they survive relaunch. Applying via set_parameters
+        # reuses _on_param_change (engine swap + YOLO knob apply).
+        self.create_service(SetStringBool, '~/apply_and_persist',
+                            self.apply_and_persist_srv_callback,
+                            callback_group=self.svc_group)
         # v5 BETA: per-class grip-test orchestrator. UI Places tab calls
         # this. Drives the arm to a safe test pose, dwells so the operator
         # can place an object between the jaws, then runs compliance_grasp
@@ -978,10 +986,21 @@ class ObjectSortingNodeV5(Node):
     def _apply_default_profile_seed(self):
         """If a default profile YAML exists, push its values into ROS overrides
         so declare_parameter() picks them up as the seed. Returns the dict
-        applied (or empty)."""
-        if not DEFAULT_PROFILE_PATH.exists():
+        applied (or empty).
+
+        Persistence precedence (low -> high): hardcoded defaults < default.yaml
+        < yolo.yaml. yolo.yaml is merged on top so the model config saved from
+        the Detection tab (engine_path + conf/iou/max_det/classes) actually
+        survives a relaunch. Before this merge, yolo.yaml was written but NEVER
+        read at boot, so picking a model "didn't stick"."""
+        params = {}
+        if DEFAULT_PROFILE_PATH.exists():
+            params.update(load_profile_yaml(DEFAULT_PROFILE_PATH))
+        if YOLO_CONFIG_PATH.exists():
+            # Model keys win over default.yaml so a Detection-tab save persists.
+            params.update(load_profile_yaml(YOLO_CONFIG_PATH))
+        if not params:
             return {}
-        params = load_profile_yaml(DEFAULT_PROFILE_PATH)
         for k, v in params.items():
             try:
                 # Late-binding seed: set as override before declaration.
@@ -1086,6 +1105,18 @@ class ObjectSortingNodeV5(Node):
                 else:
                     self._apply_yolo_knob(p.name, p.value)
                     _stage('param', f'{p.name} -> {p.value} APPLIED')
+            # Class filter: apply the enabled-classes list to the worker the
+            # moment it changes (Detection-tab Save & Apply sets this param),
+            # so the filter takes effect without waiting for an engine reload.
+            if p.name == 'yolo_enabled_classes' \
+                    and hasattr(self, 'inference') and self.inference is not None:
+                try:
+                    classes = json.loads(p.value or '[]')
+                    if isinstance(classes, list):
+                        self.inference.set_yolo_knobs(classes=classes)
+                        _stage('param', f'yolo_enabled_classes -> {classes} APPLIED')
+                except Exception as e:
+                    _stage('param', 'yolo_enabled_classes parse failed', exc=e)
             # Independent stop/start of the orbbec subscription.
             if p.name == 'enable_camera_sub':
                 want = bool(p.value)
@@ -1123,6 +1154,28 @@ class ObjectSortingNodeV5(Node):
             except Exception:
                 pass
         return out
+
+    def _merge_into_default(self, keys):
+        """Merge the current values of `keys` into default.yaml without
+        disturbing the other persisted settings. This is what makes a per-tab
+        "Save & Apply" survive relaunch - the node loads default.yaml at boot,
+        so writing just the tab's keys here is enough. Returns True on success.
+        """
+        try:
+            _ensure_profiles_dir()
+            merged = load_profile_yaml(DEFAULT_PROFILE_PATH) if \
+                DEFAULT_PROFILE_PATH.exists() else {}
+            for k in keys:
+                try:
+                    merged[k] = self.p(k)
+                except Exception:
+                    pass
+            save_profile_yaml(DEFAULT_PROFILE_PATH, merged)
+            _stage('svc', f'merged {list(keys)} into {DEFAULT_PROFILE_PATH}')
+            return True
+        except Exception as e:
+            _stage('svc', f'merge into {DEFAULT_PROFILE_PATH} failed', exc=e)
+            return False
 
     # ------------------------------------------------------------------ misc state
 
@@ -1684,6 +1737,39 @@ class ObjectSortingNodeV5(Node):
         finally:
             self._test_grip_running = False
 
+    def apply_and_persist_srv_callback(self, request, response):
+        """Apply a JSON {param: value} map via set_parameters (which reuses
+        _on_param_change: engine swaps, YOLO knobs land, JSON-string params
+        like place_positions/grasp_strength/yolo_enabled_classes pass through)
+        and, if data_bool, merge those keys into default.yaml so they survive
+        relaunch. This single service backs every per-tab Save & Apply button.
+        """
+        _stage('svc', f'apply_and_persist (persist={request.data_bool})')
+        try:
+            cfg = json.loads(request.data_str or '{}')
+        except Exception as e:
+            _stage('svc', 'apply_and_persist: malformed JSON', exc=e)
+            response.success = False
+            return response
+        if not isinstance(cfg, dict):
+            _stage('svc', 'apply_and_persist: payload is not an object')
+            response.success = False
+            return response
+        applied = []
+        for k, v in cfg.items():
+            try:
+                self.set_parameters([rclpy.parameter.Parameter(k, value=v)])
+                applied.append(k)
+            except Exception as e:
+                _stage('svc', f'  {k}={v!r} rejected', exc=e)
+        if request.data_bool and applied:
+            if not self._merge_into_default(applied):
+                response.success = False
+                return response
+        _stage('svc', f'apply_and_persist applied {applied}')
+        response.success = True
+        return response
+
     def save_yolo_config_srv_callback(self, request, response):
         """Apply (and optionally persist) a buffered YOLO config from the
         tuner UI's Model tab. The UI buffers slider edits locally and only
@@ -1743,18 +1829,21 @@ class ObjectSortingNodeV5(Node):
         #    no-ops if the path matches the currently loaded engine).
         if 'engine_path' in cfg:
             try:
-                self.inference.request_engine_swap(cfg['engine_path'])
+                if self.inference.request_engine_swap(cfg['engine_path']):
+                    _stage('svc', f'engine swap requested -> {cfg["engine_path"]}')
             except Exception as e:
                 _stage('svc', 'engine hot-swap from save failed', exc=e)
 
-        # 5. Persist if requested.
+        # 5. Persist if requested. We write BOTH yolo.yaml (the model-only
+        #    config file, read first at boot) AND merge the model keys into
+        #    default.yaml, so the saved model survives relaunch regardless of
+        #    which file the boot seed prefers.
+        model_keys = ('engine_path', 'yolo_conf_thresh', 'yolo_iou_thresh',
+                      'yolo_max_det', 'inference_max_hz', 'yolo_enabled_classes')
         if request.data_bool:
             try:
                 _ensure_profiles_dir()
-                payload = {k: self.p(k) for k in ('engine_path', 'yolo_conf_thresh',
-                                                   'yolo_iou_thresh', 'yolo_max_det',
-                                                   'inference_max_hz',
-                                                   'yolo_enabled_classes')}
+                payload = {k: self.p(k) for k in model_keys}
                 with open(YOLO_CONFIG_PATH, 'w') as f:
                     yaml.safe_dump(payload, f, sort_keys=True)
                 _stage('svc', f'wrote {YOLO_CONFIG_PATH}')
@@ -1762,6 +1851,7 @@ class ObjectSortingNodeV5(Node):
                 _stage('svc', f'write {YOLO_CONFIG_PATH} failed', exc=e)
                 response.success = False
                 return response
+            self._merge_into_default(model_keys)
 
         _stage('svc', f'save_yolo_config applied {applied}')
         response.success = True
@@ -1842,6 +1932,11 @@ class ObjectSortingNodeV5(Node):
                 except Exception as e:
                     _stage('svc', f'  skipping param {k}={v!r}', exc=e)
             _stage('svc', f'  applied {applied}/{len(params)} params from {path}')
+            # If the preset carried an engine_path, _on_param_change above will
+            # have queued the swap. Surface it so the UI/log shows the model
+            # actually changing with the preset.
+            if 'engine_path' in params:
+                _stage('svc', f'  preset engine -> {params["engine_path"]}')
             self.get_logger().info(f'profile loaded <- {path} ({applied} params)')
             response.success = True
         except Exception as e:
