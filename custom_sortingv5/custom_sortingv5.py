@@ -2005,7 +2005,10 @@ class ObjectSortingNodeV5(Node):
         """
         target_info = []
         yolo_ops = []
-        roi_img = bgr_image[roi[0]:roi[1], roi[2]:roi[3]]
+        # NOTE: do not crop bgr_image to roi here - v5 runs YOLO on the FULL
+        # frame in InferenceWorker (see L368), so detection coords are
+        # already in full-frame pixel space. roi is used for ROI gating /
+        # workspace bounds only, not for shifting detection coords.
         # v5: ALL detection comes from YOLO. The model's class names
         # (model.names) are the source of truth - no hardcoded
         # red/green/blue/scaff list, no LAB color thresholding, no HED.
@@ -2018,13 +2021,11 @@ class ObjectSortingNodeV5(Node):
                     cx, cy, w, h, r = obb.xywhr[0].cpu().numpy()
                     cls_id = int(obb.cls.cpu().numpy()) if hasattr(obb, 'cls') else 0
                     label = names.get(cls_id, f'cls_{cls_id}')
-                    cx += roi[2]; cy += roi[0]
                     # ultralytics OBB r is in radians, ~[-pi/2, pi/2]. If the
                     # gripper rotates 90 off the intended grasp, try `90 - ...`.
                     angle = int(math.degrees(r))
                     corners = obb.xyxyxyxy[0].cpu().numpy()
-                    corners = [(int(x + roi[2]), int(y + roi[0]))
-                               for x, y in corners]
+                    corners = [(int(x), int(y)) for x, y in corners]
                     target_info.append([label, 1, (int(cx), int(cy)),
                                         (int(w), int(h)), angle])
                     yolo_ops.append(('obb', corners, label))
@@ -2033,14 +2034,14 @@ class ObjectSortingNodeV5(Node):
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                     cls_id = int(box.cls.cpu().numpy()) if hasattr(box, 'cls') else 0
                     label = names.get(cls_id, f'cls_{cls_id}')
-                    cx = (x1 + x2) / 2 + roi[2]
-                    cy = (y1 + y2) / 2 + roi[0]
+                    cx = (x1 + x2) / 2
+                    cy = (y1 + y2) / 2
                     w, h = x2 - x1, y2 - y1
                     target_info.append([label, 1, (int(cx), int(cy)),
                                         (int(w), int(h)), 0])
                     yolo_ops.append(('rect',
-                                     (int(x1 + roi[2]), int(y1 + roi[0])),
-                                     (int(x2 + roi[2]), int(y2 + roi[0])),
+                                     (int(x1), int(y1)),
+                                     (int(x2), int(y2)),
                                      label))
         primitives = {'yolo_ops': yolo_ops, 'color_corners': []}
         return target_info, primitives
