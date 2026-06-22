@@ -347,15 +347,21 @@ class TunerUI:
                     f"inf_age={st.get('inference_age_ms', '-')}ms{badge}")
                 engine = st.get('engine') or ''
                 task = st.get('task') or ''
+                override = (st.get('task_override') or 'auto').strip().lower()
                 if engine:
                     self.engine_var.set(engine)
                     # Keep the Detection-tab "Active:" label + list marker in
                     # sync with the actually-loaded engine.
-                    shown_key = (engine, task)
+                    shown_key = (engine, task, override)
                     if hasattr(self, 'active_engine_var') \
                             and shown_key != getattr(self, '_active_engine_shown', None):
                         self._active_engine_shown = shown_key
-                        suffix = f' (task={task})' if task else ''
+                        if task and override and override != 'auto':
+                            suffix = f' (task={task}, forced)'
+                        elif task:
+                            suffix = f' (task={task})'
+                        else:
+                            suffix = ''
                         self.active_engine_var.set(f'Active: {engine}{suffix}')
                         try:
                             self._refresh_engine_list(engine)
@@ -554,7 +560,8 @@ class TunerUI:
         all_names = ([n for n, *_ in FLOAT_PARAMS] + [n for n, *_ in INT_PARAMS]
                      + [n for n, *_ in MODEL_FLOAT_PARAMS]
                      + [n for n, *_ in MODEL_INT_PARAMS]
-                     + BOOL_PARAMS + ['engine_path', 'yolo_enabled_classes',
+                     + BOOL_PARAMS + ['engine_path', 'engine_task',
+                                       'yolo_enabled_classes',
                                        'place_positions'])
         current = self.client.get_values(all_names)
         self.engine_var.set(self._short_engine(current.get('engine_path', '-')))
@@ -887,10 +894,27 @@ class TunerUI:
         self._model_engine_entry = ttk.Entry(erow)
         self._model_engine_entry.pack(side='left', fill='x', expand=True, padx=4)
         self._model_engine_entry.insert(0, self._active_engine)
+        # Task override - lives next to the engine path so the user can mark
+        # each engine as obb/detect/segment/pose/classify. Persists via the
+        # Detection-tab Save & Apply alongside engine_path.
+        trow = ttk.Frame(eng_frame); trow.pack(fill='x', padx=4, pady=2)
+        ttk.Label(trow, text='task', width=6).pack(side='left')
+        self._engine_task_var = tk.StringVar(
+            value=str(current.get('engine_task', 'auto')))
+        ttk.OptionMenu(trow, self._engine_task_var,
+                       self._engine_task_var.get(),
+                       'auto', 'detect', 'obb', 'segment', 'pose', 'classify',
+                       command=lambda _v: self._mark_model_dirty()
+                       ).pack(side='left', padx=4)
+        ttk.Label(trow, foreground='#666',
+                  text='set this if the engine was exported without task '
+                       'metadata (e.g. ultralytics warned task=detect for '
+                       'an obb model)').pack(side='left', padx=6)
         ttk.Label(eng_frame, foreground='#666',
                   text='Pick/Browse fills the path. "Apply engine" switches the '
                        'running model now; "Reload engine" re-inits it. The tab '
-                       'Save & Apply persists the engine as the boot default.'
+                       'Save & Apply persists the engine + task as the boot '
+                       'defaults.'
                   ).pack(anchor='w', padx=6, pady=(0, 2))
 
         # --- Classes filter (plain frame; the whole Detection tab scrolls) ---
@@ -987,10 +1011,14 @@ class TunerUI:
         threading.Thread(target=go, daemon=True).start()
 
     def _detect_save_extra(self):
-        """Engine path + class filter for the Detection tab's Save & Apply."""
+        """Engine path + task + class filter for the Detection tab's Save & Apply."""
         extra = {}
         try:
             extra['engine_path'] = self._model_engine_entry.get().strip()
+        except Exception:
+            pass
+        try:
+            extra['engine_task'] = (self._engine_task_var.get() or 'auto').strip()
         except Exception:
             pass
         if self._model_class_vars:

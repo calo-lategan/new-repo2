@@ -19,6 +19,11 @@
   ros__parameters:
     # ---- Model (YOLO-only) ----
     engine_path: /home/ubuntu/third_party_ros2/data/best_scaff2.engine
+    # Task hint for ultralytics. 'auto' lets it read engine metadata (the
+    # normal path). Set to 'obb' for engines that were built without the task
+    # metadata field (ultralytics will warn "Unable to automatically guess
+    # model task" otherwise). Other valid values: detect | segment | pose | classify.
+    engine_task: auto
     # Production sorting baseline: decently-high confidence, few detections,
     # moderate NMS (items don't overlap), inference rate capped for efficiency.
     yolo_conf_thresh: 0.60

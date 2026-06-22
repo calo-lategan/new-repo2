@@ -149,12 +149,13 @@ class InferenceWorker(threading.Thread):
     image and never accumulates lag.
     """
 
-    def __init__(self, engine_path, logger, on_swap=None):
+    def __init__(self, engine_path, logger, on_swap=None, task_override='auto'):
         super().__init__(daemon=True, name='yolo-inference')
         self._logger = logger
         self._on_swap = on_swap or (lambda _: None)
         self._engine_path = engine_path
         self._task = None
+        self._task_override = task_override or 'auto'
         self._pending_engine_path = None
         self._pending_force_reload = False
         self._swap_lock = threading.Lock()
@@ -222,6 +223,11 @@ class InferenceWorker(threading.Thread):
         with self._frame_lock:
             return self._latest_result
 
+    def set_task_override(self, value):
+        """Set the per-engine task hint (auto|detect|obb|segment|pose|classify).
+        Caller is responsible for triggering an engine reload to pick it up."""
+        self._task_override = (value or 'auto').strip().lower() or 'auto'
+
     def request_engine_swap(self, path, force=False):
         """Queue an engine swap. With force=True, re-init even if the path
         matches the currently loaded engine (Reload-engine UI path)."""
@@ -274,10 +280,16 @@ class InferenceWorker(threading.Thread):
                     _stage('engine-load', 'torch.cuda.empty_cache() failed', exc=e)
         self._logger.info(f'loading YOLO engine: {path}')
         t0 = time.time()
-        m = YOLO(path)
-        self._task = getattr(m, 'task', None) or 'detect'
+        override = (self._task_override or '').strip().lower()
+        if override and override != 'auto':
+            m = YOLO(path, task=override)
+        else:
+            m = YOLO(path)
+        raw = getattr(m, 'task', None)
+        self._task = (raw or override or 'detect')
         _stage('engine-load', f'YOLO() constructed in {time.time()-t0:.2f}s '
-                              f'task={self._task}')
+                              f'task={self._task} (raw={raw!r}, '
+                              f'override={override!r})')
         # Warmup: first inference includes engine deserialization; do it on
         # a dummy frame so the first real frame is fast.
         try:
@@ -630,6 +642,10 @@ class ObjectSortingNodeV5(Node):
         # name, default, range_or_None
         # ---- Model config (BUFFERED in tuner UI - applied on SAVE only) ----
         ('engine_path', '/home/ubuntu/third_party_ros2/data/best_scaff2.engine', None),
+        # ultralytics infers task from engine metadata, but engines built via
+        # trtexec / custom export don't carry that field, so YOLO falls back
+        # to 'detect' silently. Set this per engine to force the task.
+        ('engine_task', 'auto', None),
         # Production sorting baseline (decently-high conf, few detections,
         # moderate NMS since items don't overlap). default.yaml ships the same.
         ('yolo_conf_thresh', 0.60, (0.05, 0.95)),
@@ -924,7 +940,8 @@ class ObjectSortingNodeV5(Node):
         # ---- Inference worker (one CUDA context, hot-swappable) ----
         try:
             self.inference = InferenceWorker(self.p('engine_path'), self.get_logger(),
-                                             on_swap=self._on_engine_loaded)
+                                             on_swap=self._on_engine_loaded,
+                                             task_override=self.p('engine_task'))
             # Push runtime YOLO knobs from ROS params into the worker.
             self.inference.set_yolo_knobs(
                 conf=self.p('yolo_conf_thresh'),
@@ -1090,6 +1107,13 @@ class ObjectSortingNodeV5(Node):
             if p.name == 'engine_path' and isinstance(p.value, str) and p.value:
                 if hasattr(self, 'inference') and self.inference is not None:
                     self.inference.request_engine_swap(p.value)
+            # Task override change: push to worker and force-reload so the
+            # next YOLO() call honours it.
+            if p.name == 'engine_task' and isinstance(p.value, str):
+                if hasattr(self, 'inference') and self.inference is not None:
+                    self.inference.set_task_override(p.value)
+                    self.inference.request_engine_swap(
+                        self.p('engine_path'), force=True)
             if p.name == 'debug':
                 _set_debug(bool(p.value))
                 _stage('param', f'debug mode -> {bool(p.value)}')
@@ -1292,6 +1316,7 @@ class ObjectSortingNodeV5(Node):
                 'sorting_thread_alive': bool(sorting_alive),
                 'engine': engine,
                 'task': task,
+                'task_override': self.p('engine_task'),
                 # v5: class names from model.names (id -> name). The tuner
                 # UI auto-populates the Classes filter + Places tab when
                 # this changes.
@@ -1794,8 +1819,8 @@ class ObjectSortingNodeV5(Node):
 
         # 1. Push every accepted field to the ROS param store so the
         #    rest of the system stays in sync with the saved config.
-        accepted = ('engine_path', 'yolo_conf_thresh', 'yolo_iou_thresh',
-                    'yolo_max_det', 'inference_max_hz')
+        accepted = ('engine_path', 'engine_task', 'yolo_conf_thresh',
+                    'yolo_iou_thresh', 'yolo_max_det', 'inference_max_hz')
         applied = []
         for k in accepted:
             if k not in cfg:
@@ -1846,7 +1871,8 @@ class ObjectSortingNodeV5(Node):
         #    we merge the model keys there. (We no longer write yolo.yaml - it
         #    is not read at boot; this service is legacy, the new UI uses
         #    apply_and_persist.)
-        model_keys = ('engine_path', 'yolo_conf_thresh', 'yolo_iou_thresh',
+        model_keys = ('engine_path', 'engine_task',
+                      'yolo_conf_thresh', 'yolo_iou_thresh',
                       'yolo_max_det', 'inference_max_hz', 'yolo_enabled_classes')
         if request.data_bool:
             if not self._merge_into_default(model_keys):
