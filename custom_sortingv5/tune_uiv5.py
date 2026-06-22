@@ -307,7 +307,14 @@ class TunerUI:
         self.client = client
         self.root = tk.Tk()
         self.root.title('JetArm v5 - live tuner')
-        self.root.geometry('760x1100')
+        # Fit the window to the screen so the bottom-pinned Save & Apply bars
+        # and the presets bar are never pushed off the bottom of a small
+        # Jetson display. Tab content itself scrolls (see _make_scrollable).
+        try:
+            sh = self.root.winfo_screenheight()
+        except Exception:
+            sh = 1100
+        self.root.geometry(f'760x{min(1100, max(600, sh - 80))}')
         # name -> callable(value) that updates that param's widget locally
         # (no ROS traffic). Used by presets to keep the UI in sync.
         self._param_setters = {}
@@ -338,6 +345,16 @@ class TunerUI:
                 engine = st.get('engine') or ''
                 if engine:
                     self.engine_var.set(engine)
+                    # Keep the Detection-tab "Active:" label + list marker in
+                    # sync with the actually-loaded engine.
+                    if hasattr(self, 'active_engine_var') \
+                            and engine != getattr(self, '_active_engine_shown', None):
+                        self._active_engine_shown = engine
+                        self.active_engine_var.set(f'Active: {engine}')
+                        try:
+                            self._refresh_engine_list(engine)
+                        except Exception:
+                            pass
                 # Populate the Model class filter + Places rows from the
                 # model's class names (this is the wiring that makes those
                 # tabs work at all). Guards inside skip rebuilds while the
@@ -501,7 +518,19 @@ class TunerUI:
         self._notebook = notebook
         speed_tab = ttk.Frame(notebook); notebook.add(speed_tab, text='Speed / motion')
         grip_tab = ttk.Frame(notebook); notebook.add(grip_tab, text='Grip')
-        # Live grip telemetry (updated by _poll_node_status from ~/status).
+        # v5 Round 2: the Model tab is gone — all model settings (engine
+        # picker, YOLO knobs, class filter) now live on the Detection tab,
+        # applied LIVE like every other slider and persisted by the tab's
+        # "Save & Apply" button.
+        detect_tab = ttk.Frame(notebook); notebook.add(detect_tab, text='Detection')
+        self._model_tab = detect_tab
+        self._model_tab_index = notebook.index('end') - 1
+        places_tab = ttk.Frame(notebook); notebook.add(places_tab, text='Places')
+        toggles_tab = ttk.Frame(notebook); notebook.add(toggles_tab, text='Toggles')
+        profiles_tab = ttk.Frame(notebook); notebook.add(profiles_tab, text='Profiles')
+
+        # Live grip telemetry pinned at the top of the Grip tab (stays visible
+        # while the rest of the tab scrolls).
         self.grip_status_var = tk.StringVar(value='last grip: --')
         ttk.Label(grip_tab, textvariable=self.grip_status_var,
                   foreground='#226666',
@@ -515,16 +544,6 @@ class TunerUI:
                        'grasp_max_temp. Use the "Test grip" buttons in Places '
                        'to tune each class’ strength without firing a full pick.'
                   ).pack(anchor='w', padx=8, pady=(0, 6))
-        # v5 Round 2: the Model tab is gone — all model settings (engine
-        # picker, YOLO knobs, class filter) now live on the Detection tab,
-        # applied LIVE like every other slider and persisted by the tab's
-        # "Save & Apply" button. No more buffered-until-SAVE model tab.
-        detect_tab = ttk.Frame(notebook); notebook.add(detect_tab, text='Detection')
-        self._model_tab = detect_tab
-        self._model_tab_index = notebook.index('end') - 1
-        places_tab = ttk.Frame(notebook); notebook.add(places_tab, text='Places')
-        toggles_tab = ttk.Frame(notebook); notebook.add(toggles_tab, text='Toggles')
-        profiles_tab = ttk.Frame(notebook); notebook.add(profiles_tab, text='Profiles')
 
         all_names = ([n for n, *_ in FLOAT_PARAMS] + [n for n, *_ in INT_PARAMS]
                      + [n for n, *_ in MODEL_FLOAT_PARAMS]
@@ -540,32 +559,15 @@ class TunerUI:
                       'gripper_settle', 'grab_depth',
                       'grasp_step_pulse', 'grasp_step_dwell',
                       'grasp_stall_pulse', 'grasp_timeout'}
-        # Everything not speed/grip lives on the Detection tab.
-        for name, lo, hi, res in FLOAT_PARAMS:
-            parent = (speed_tab if name in speed_names else
-                      grip_tab if name in grip_names else detect_tab)
-            self._add_float(parent, name, lo, hi, res, current.get(name, lo))
-        for name, lo, hi, res in INT_PARAMS:
-            parent = grip_tab if name in grip_names else detect_tab
-            self._add_int(parent, name, lo, hi, res, int(current.get(name, lo)))
-        for name in BOOL_PARAMS:
-            self._add_bool(toggles_tab, name, bool(current.get(name, False)))
-
-        # Detection tab now also owns the model: live YOLO knobs + engine
-        # picker + class filter (built into the same tab).
-        self._build_model_section(detect_tab, current)
-        # Places tab — per-class targets (place position + grip strength).
-        self._build_places_tab(places_tab, current.get('place_positions', '{}'))
-        self._build_profiles_tab(profiles_tab)
-
-        # Per-tab "Save & Apply" bars (apply now + persist to default.yaml so
-        # the settings survive relaunch). The Detection bar also persists the
-        # engine path + class filter via _detect_save_extra().
         detect_keys = ([n for n, *_ in FLOAT_PARAMS
                         if n not in speed_names and n not in grip_names]
                        + [n for n, *_ in INT_PARAMS if n not in grip_names]
                        + [n for n, *_ in MODEL_FLOAT_PARAMS]
                        + [n for n, *_ in MODEL_INT_PARAMS])
+
+        # Per-tab "Save & Apply" bars are pinned to the BOTTOM of each tab
+        # (outside the scroll region) so they're always reachable. Add them
+        # first so the scrollable body fills the space above them.
         self._add_tab_save_bar(speed_tab, sorted(speed_names), 'Speed')
         self._add_tab_save_bar(grip_tab, sorted(grip_names), 'Grip')
         self._add_tab_save_bar(detect_tab, detect_keys, 'Detection',
@@ -573,6 +575,34 @@ class TunerUI:
         self._add_tab_save_bar(toggles_tab, list(BOOL_PARAMS), 'Toggles')
         self._add_tab_save_bar(places_tab,
                                ['place_positions', 'grasp_strength'], 'Places')
+
+        # Scrollable content bodies so nothing is clipped on a small Jetson
+        # screen (this is the fix for "I can't scroll" / "can't reach the
+        # engine picker"). Content goes into the *body*, not the tab frame.
+        speed_body = self._make_scrollable(speed_tab)
+        grip_body = self._make_scrollable(grip_tab)
+        detect_body = self._make_scrollable(detect_tab)
+        toggles_body = self._make_scrollable(toggles_tab)
+        places_body = self._make_scrollable(places_tab)
+
+        # Everything not speed/grip lives on the Detection tab.
+        for name, lo, hi, res in FLOAT_PARAMS:
+            parent = (speed_body if name in speed_names else
+                      grip_body if name in grip_names else detect_body)
+            self._add_float(parent, name, lo, hi, res, current.get(name, lo))
+        for name, lo, hi, res in INT_PARAMS:
+            parent = grip_body if name in grip_names else detect_body
+            self._add_int(parent, name, lo, hi, res, int(current.get(name, lo)))
+        for name in BOOL_PARAMS:
+            self._add_bool(toggles_body, name, bool(current.get(name, False)))
+
+        # Detection tab also owns the model: live YOLO knobs + engine picker +
+        # class filter (built into the scrollable body).
+        self._build_model_section(detect_body, current)
+        # Places tab — per-class targets (place position + grip strength).
+        self._build_places_tab(places_body, current.get('place_positions', '{}'))
+        # Profiles tab is short and has its own listbox scroll - no body wrap.
+        self._build_profiles_tab(profiles_tab)
 
         # Presets bar: built-in quick presets + namable custom presets.
         preset = ttk.LabelFrame(self.root, text='Presets')
@@ -598,6 +628,52 @@ class TunerUI:
     def _short_engine(self, path):
         if not path or path == '-': return '-'
         return os.path.basename(path)
+
+    # ---- scrollable tab bodies ----
+
+    def _make_scrollable(self, parent):
+        """Return an inner ttk.Frame inside a vertically-scrollable canvas.
+        Pack your tab content into the returned frame. A draggable scrollbar
+        plus mousewheel/touch scrolling keep tall tabs reachable on the small
+        Jetson screen. The canvas fills the space ABOVE any bottom-pinned bar
+        already packed on `parent`."""
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        vsb = ttk.Scrollbar(parent, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True)
+        inner = ttk.Frame(canvas)
+        win = canvas.create_window((0, 0), window=inner, anchor='nw')
+        inner.bind('<Configure>',
+                   lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        # Keep the inner frame the same width as the canvas so sliders fill it.
+        canvas.bind('<Configure>',
+                    lambda e: canvas.itemconfigure(win, width=e.width))
+        # Register for the single global mousewheel handler (routes to the
+        # canvas under the pointer, so wheel works over child sliders too).
+        if not hasattr(self, '_scroll_canvases'):
+            self._scroll_canvases = []
+            self.root.bind_all('<MouseWheel>', self._on_global_wheel, add='+')
+            self.root.bind_all('<Button-4>', self._on_global_wheel, add='+')
+            self.root.bind_all('<Button-5>', self._on_global_wheel, add='+')
+        self._scroll_canvases.append(canvas)
+        return inner
+
+    def _on_global_wheel(self, e):
+        """Scroll whichever registered canvas is under the pointer. Handles
+        both <MouseWheel> (Win/Mac, e.delta) and <Button-4/5> (X11/Jetson)."""
+        try:
+            w = self.root.winfo_containing(e.x_root, e.y_root)
+        except Exception:
+            return
+        while w is not None:
+            if w in getattr(self, '_scroll_canvases', ()):
+                num = getattr(e, 'num', None)
+                delta = getattr(e, 'delta', 0)
+                step = -1 if (num == 4 or delta > 0) else 1
+                w.yview_scroll(step, 'units')
+                return
+            w = getattr(w, 'master', None)
 
     # ---- generic widgets ----
 
@@ -759,6 +835,13 @@ class TunerUI:
         eng_frame = ttk.LabelFrame(parent, text='Engine (.engine / .pt)')
         eng_frame.pack(fill='x', padx=8, pady=4)
         self._active_engine = str(current.get('engine_path', ''))
+        # ACTIVE engine, driven live from ~/status so you always see which
+        # model is actually loaded.
+        self.active_engine_var = tk.StringVar(
+            value=f'Active: {self._short_engine(self._active_engine)}')
+        ttk.Label(eng_frame, textvariable=self.active_engine_var,
+                  foreground='#2e8b57', font=('TkDefaultFont', 9, 'bold')
+                  ).pack(anchor='w', padx=6, pady=(4, 0))
         lb_frame = ttk.Frame(eng_frame); lb_frame.pack(fill='x', padx=4, pady=4)
         self.engine_listbox = tk.Listbox(lb_frame, height=5)
         self.engine_listbox.pack(side='left', fill='x', expand=True)
@@ -766,6 +849,9 @@ class TunerUI:
                            command=self.engine_listbox.yview)
         sb.pack(side='right', fill='y')
         self.engine_listbox.configure(yscrollcommand=sb.set)
+        # Double-click a model to swap to it immediately (like the old flow).
+        self.engine_listbox.bind('<Double-Button-1>',
+                                 lambda e: self._on_pick_and_apply_engine())
         self._refresh_engine_list(self._active_engine)
         ebtn = ttk.Frame(eng_frame); ebtn.pack(fill='x', padx=4, pady=2)
         ttk.Button(ebtn, text='Refresh',
@@ -790,10 +876,10 @@ class TunerUI:
                        'Save & Apply persists the engine as the boot default.'
                   ).pack(anchor='w', padx=6, pady=(0, 2))
 
-        # --- Classes filter (scrollable; scales to COCO-80) ---
+        # --- Classes filter (plain frame; the whole Detection tab scrolls) ---
         cls_frame = ttk.LabelFrame(parent, text='Enabled YOLO classes '
                                                  '(none ticked = all classes)')
-        cls_frame.pack(fill='both', expand=True, padx=8, pady=(8, 4))
+        cls_frame.pack(fill='x', padx=8, pady=(8, 4))
         ftop = ttk.Frame(cls_frame); ftop.pack(fill='x', padx=4, pady=2)
         ttk.Label(ftop, text='filter:').pack(side='left')
         self._class_filter_entry = ttk.Entry(ftop, width=18)
@@ -805,16 +891,10 @@ class TunerUI:
                    command=lambda: self._set_all_classes(False)).pack(side='left', padx=2)
         ttk.Button(ftop, text='Invert', width=6,
                    command=self._invert_classes).pack(side='left', padx=2)
-        canvas = tk.Canvas(cls_frame, height=150, highlightthickness=0)
-        cbar = ttk.Scrollbar(cls_frame, orient='vertical', command=canvas.yview)
-        self._model_classes_inner = ttk.Frame(canvas)
-        self._model_classes_inner.bind(
-            '<Configure>',
-            lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
-        canvas.create_window((0, 0), window=self._model_classes_inner, anchor='nw')
-        canvas.configure(yscrollcommand=cbar.set)
-        canvas.pack(side='left', fill='both', expand=True, padx=4, pady=2)
-        cbar.pack(side='right', fill='y')
+        # No inner canvas/scroll here - the outer tab scroll (see
+        # _make_scrollable) handles overflow; nesting scrolls is janky.
+        self._model_classes_inner = ttk.Frame(cls_frame)
+        self._model_classes_inner.pack(fill='x', padx=4, pady=2)
         ttk.Label(self._model_classes_inner, foreground='#888',
                   text='(waiting for engine load to read model.names...)'
                   ).pack(anchor='w', padx=4, pady=2)
@@ -1031,12 +1111,17 @@ class TunerUI:
         if not DEFAULT_ENGINES_DIR.exists():
             self.engine_listbox.insert(tk.END, f'(dir not found: {DEFAULT_ENGINES_DIR})')
             return
-        engines = sorted(DEFAULT_ENGINES_DIR.glob('*.engine'))
+        # List both TensorRT engines and PyTorch weights.
+        engines = sorted(DEFAULT_ENGINES_DIR.glob('*.engine')) + \
+            sorted(DEFAULT_ENGINES_DIR.glob('*.pt'))
         if not engines:
-            self.engine_listbox.insert(tk.END, '(no .engine files)')
+            self.engine_listbox.insert(tk.END, '(no .engine / .pt files)')
             return
+        # The node publishes the active engine as a basename, so match on that
+        # too - that way [active] is correct right after a swap.
+        active_base = os.path.basename(current_path or '')
         for p in engines:
-            marker = ' [active]' if str(p) == current_path else ''
+            marker = ' [active]' if p.name == active_base else ''
             self.engine_listbox.insert(tk.END, f'{p.name}{marker}')
 
     def _set_engine_buffer(self, path):
@@ -1046,11 +1131,25 @@ class TunerUI:
         self._model_engine_entry.delete(0, 'end')
         self._model_engine_entry.insert(0, path)
 
-    def _on_pick_selected_engine(self):
+    def _selected_engine_path(self):
         sel = self.engine_listbox.curselection()
-        if not sel: return
+        if not sel:
+            return None
         text = self.engine_listbox.get(sel[0]).split(' [active]')[0]
-        self._set_engine_buffer(str(DEFAULT_ENGINES_DIR / text))
+        return str(DEFAULT_ENGINES_DIR / text)
+
+    def _on_pick_selected_engine(self):
+        path = self._selected_engine_path()
+        if path:
+            self._set_engine_buffer(path)
+
+    def _on_pick_and_apply_engine(self):
+        """Double-click handler: fill the entry from the selection and swap
+        to it immediately (the old one-step model-switch flow)."""
+        path = self._selected_engine_path()
+        if path:
+            self._set_engine_buffer(path)
+            self._on_apply_engine()
 
     def _on_browse_engine(self):
         path = filedialog.askopenfilename(
