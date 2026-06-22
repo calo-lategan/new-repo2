@@ -24,10 +24,15 @@
 # have.
 #
 # Usage:
-#   ./install.sh                  # default install
+#   ./install.sh                  # default install (interactive prompt if
+#                                 #   prior v2/v4/v4.1 installs detected)
 #   ./install.sh --sudoers        # also install the NOPASSWD sudoers rule
 #   ./install.sh --no-build       # skip colcon build (do it yourself)
+#   ./install.sh --keep-others    # install v5 alongside v2/v4/v4.1 (no prompt)
+#   ./install.sh --clean-others   # remove every non-v5 install (no prompt)
 #   REPO=...  BRANCH=main  ./install.sh
+#   INSTALL_MODE=keep ./install.sh   # same as --keep-others (curl-pipe friendly)
+#   INSTALL_MODE=clean ./install.sh  # same as --clean-others
 #
 # Env overrides:
 #   REPO=https://github.com/calo-lategan/new-repo2.git
@@ -48,16 +53,25 @@ LAUNCHER_DIR="${LAUNCHER_DIR:-$HOME/jetarm_v5}"
 APP_PKG="${APP_PKG:-$WS_DIR/src/app}"
 DO_SUDOERS=0
 DO_BUILD=1
+KEEP_OTHERS=0
+CLEAN_OTHERS=0
 
 for arg in "$@"; do
     case "$arg" in
-        --sudoers)  DO_SUDOERS=1 ;;
-        --no-build) DO_BUILD=0 ;;
+        --sudoers)       DO_SUDOERS=1 ;;
+        --no-build)      DO_BUILD=0 ;;
+        --keep-others)   KEEP_OTHERS=1 ;;
+        --clean-others)  CLEAN_OTHERS=1 ;;
         --help|-h)
-            sed -n '2,30p' "$0"; exit 0 ;;
+            sed -n '2,36p' "$0"; exit 0 ;;
         *) echo "unknown arg: $arg"; exit 1 ;;
     esac
 done
+
+if [ "$KEEP_OTHERS" = "1" ] && [ "$CLEAN_OTHERS" = "1" ]; then
+    echo "--keep-others and --clean-others are mutually exclusive" >&2
+    exit 1
+fi
 
 stage() { printf "\033[1;36m[install]\033[0m %s\n" "$*"; }
 ok()    { printf "\033[1;32m[install]\033[0m %s\n" "$*"; }
@@ -103,13 +117,16 @@ if [ ! -d "$V4" ]; then
 fi
 ok "source ready"
 
-# --- 1b. Device cleanup: uninstall every non-v5 version ------------------
+# --- 1b. Device cleanup: helpers (uninstall every non-v5 version) -------
 #
 # v5 is the single, current version. If v2 / v4 / v4.1 ever got installed
 # on this Jetson, their symlinks + entry_points + launcher dirs + desktop
 # shortcuts + sudoers are still there and will fight v5 (or break colcon
 # build when we go to compile, since their entry_points reference module
-# files we never link in). Remove them now, before we touch anything v5.
+# files we never link in).
+#
+# These helpers are also sourced by uninstall_others.sh; keep them as
+# bare functions in this 1b section (the dispatch logic lives in 1c).
 #
 # Order matters: remove the setup.py entry_points BEFORE deleting the
 # source symlinks. Otherwise colcon build later fails because setup.py
@@ -117,12 +134,33 @@ ok "source ready"
 #
 # Idempotent: every step is "if it exists, remove it". Re-running prints
 # "nothing to remove".
+#
+# Dry-run: when DRY_RUN=1, every destructive call is replaced by a
+# "[would remove]" log line. Used to render the install-time preview
+# before asking the user whether to keep or clean prior versions.
+
+_destructive() {
+    # _destructive "<description>" cmd args...
+    # If DRY_RUN=1, log "[would remove] <description>" and skip the command.
+    # Otherwise run the command and log "removed <description>".
+    local desc="$1"; shift
+    if [ "${DRY_RUN:-0}" = "1" ]; then
+        stage "    [would remove] $desc"
+    else
+        "$@"
+        stage "    removed $desc"
+    fi
+}
 
 remove_entry_from_setup() {
     # $1 = setup.py path, $2 = entry-point string to remove
     local setup_path="$1" entry="$2"
     [ -f "$setup_path" ] || return 0
     if ! grep -qF "$entry" "$setup_path"; then
+        return 0
+    fi
+    if [ "${DRY_RUN:-0}" = "1" ]; then
+        stage "    [would remove] setup.py entry: $entry"
         return 0
     fi
     python3 - "$setup_path" "$entry" <<'PY'
@@ -171,29 +209,32 @@ cleanup_old_version() {
     for f in "$APP_PKG/app/$node_mod.py" "$APP_PKG/app/$ui_mod.py" \
              "$APP_PKG/launch/$launch_file"; do
         if [ -L "$f" ]; then
-            rm -f "$f"; stage "    removed symlink: $f"; touched=1
+            _destructive "symlink: $f" rm -f "$f"; touched=1
         fi
     done
 
     # 3) Launcher dir
     if [ -d "$HOME/$launcher" ]; then
-        rm -rf "$HOME/$launcher"
-        stage "    removed launcher dir: $HOME/$launcher"; touched=1
+        _destructive "launcher dir: $HOME/$launcher" rm -rf "$HOME/$launcher"
+        touched=1
     fi
 
     # 4) Desktop shortcuts (both locations)
     for f in "$HOME/Desktop/$desktop_stem.desktop" \
              "$HOME/.local/share/applications/$desktop_stem.desktop"; do
         if [ -f "$f" ]; then
-            rm -f "$f"; stage "    removed desktop: $f"; touched=1
+            _destructive "desktop: $f" rm -f "$f"; touched=1
         fi
     done
 
     # 5) Sudoers - needs sudo. Skip silently if not allowed.
     if [ -f "/etc/sudoers.d/$sudoers" ]; then
-        if sudo -n true 2>/dev/null; then
-            sudo rm -f "/etc/sudoers.d/$sudoers"
-            stage "    removed sudoers: /etc/sudoers.d/$sudoers"
+        if [ "${DRY_RUN:-0}" = "1" ]; then
+            stage "    [would remove] sudoers: /etc/sudoers.d/$sudoers"
+            touched=1
+        elif sudo -n true 2>/dev/null; then
+            _destructive "sudoers: /etc/sudoers.d/$sudoers" \
+                sudo rm -f "/etc/sudoers.d/$sudoers"
             touched=1
         else
             stage "    [skip] /etc/sudoers.d/$sudoers (need sudo - run with --sudoers)"
@@ -202,8 +243,8 @@ cleanup_old_version() {
 
     # 6) Env file
     if [ -f "$HOME/$envfile" ]; then
-        rm -f "$HOME/$envfile"
-        stage "    removed env file: $HOME/$envfile"; touched=1
+        _destructive "env file: $HOME/$envfile" rm -f "$HOME/$envfile"
+        touched=1
     fi
 
     # 7) Old source tree - FLAG ONLY (may contain user edits / profiles)
@@ -217,29 +258,146 @@ cleanup_old_version() {
     fi
 }
 
-stage "device cleanup: removing any non-v5 installs (v2 / v4 / v4.1) ..."
-stage "  v4.1 ..."
-cleanup_old_version "v4.1" \
-    "custom_sortingv4_1" "tune_uiv4_1" "custom_sorting_nodev4.1.launch.py" \
-    "jetarm_v4_1" "jetarm-sort-v4.1" "jetarm-v4.1" \
-    ".jetarm_v4_1.env" "jetarm_v4_1_src"
-stage "  v4 ..."
-cleanup_old_version "v4" \
-    "custom_sortingv4" "tune_uiv4" "custom_sorting_nodev4.launch.py" \
-    "jetarm_v4" "jetarm-sort-v4" "jetarm-v4" \
-    ".jetarm_v4.env" "jetarm_v4_src"
-stage "  v2 ..."
-cleanup_old_version "v2" \
-    "custom_sortingv2" "tune_ui" "custom_sorting_nodev2.launch.py" \
-    "jetarm" "jetarm-sort-v2" "jetarm-v2" \
-    ".jetarm_v2.env" "jetarm_v2_src"
+do_cleanup_all() {
+    # Run cleanup_old_version for v4.1, v4, v2 in order.
+    # Respects DRY_RUN. Used by both install.sh (when MODE=clean) and
+    # uninstall_others.sh (standalone wrapper).
+    local header_verb="removing"
+    [ "${DRY_RUN:-0}" = "1" ] && header_verb="would remove"
+    stage "device cleanup: $header_verb every non-v5 install (v2 / v4 / v4.1)"
+    stage "  v4.1 ..."
+    cleanup_old_version "v4.1" \
+        "custom_sortingv4_1" "tune_uiv4_1" "custom_sorting_nodev4.1.launch.py" \
+        "jetarm_v4_1" "jetarm-sort-v4.1" "jetarm-v4.1" \
+        ".jetarm_v4_1.env" "jetarm_v4_1_src"
+    stage "  v4 ..."
+    cleanup_old_version "v4" \
+        "custom_sortingv4" "tune_uiv4" "custom_sorting_nodev4.launch.py" \
+        "jetarm_v4" "jetarm-sort-v4" "jetarm-v4" \
+        ".jetarm_v4.env" "jetarm_v4_src"
+    stage "  v2 ..."
+    cleanup_old_version "v2" \
+        "custom_sortingv2" "tune_ui" "custom_sorting_nodev2.launch.py" \
+        "jetarm" "jetarm-sort-v2" "jetarm-v2" \
+        ".jetarm_v2.env" "jetarm_v2_src"
 
-# Shared resources: do NOT delete (v4 + v4.1 both used this dir).
-if [ -d "$HOME/jetarm_v4_profiles" ]; then
-    stage "  [kept] $HOME/jetarm_v4_profiles (shared by v4 + v4.1; may hold your tuned YAMLs)"
+    # Shared resources: do NOT delete (v4 + v4.1 both used this dir).
+    if [ -d "$HOME/jetarm_v4_profiles" ]; then
+        stage "  [kept] $HOME/jetarm_v4_profiles (shared by v4 + v4.1; may hold your tuned YAMLs)"
+    fi
+}
+
+detect_prior_versions() {
+    # Returns 0 (true) if any non-v5 install artefact is present on disk.
+    # Cheap probes only - matches what cleanup_old_version would remove.
+    local d f e
+    for d in "$HOME/jetarm_v4_1" "$HOME/jetarm_v4" "$HOME/jetarm"; do
+        [ -d "$d" ] || continue
+        # Only count it as an install if a launcher script is inside -
+        # an empty dir left by an aborted run shouldn't trigger the prompt.
+        if compgen -G "$d/launch_v*.sh" >/dev/null; then
+            return 0
+        fi
+    done
+    for f in "$HOME/.jetarm_v4_1.env" "$HOME/.jetarm_v4.env" "$HOME/.jetarm_v2.env"; do
+        [ -f "$f" ] && return 0
+    done
+    if [ -f "$APP_PKG/setup.py" ]; then
+        for e in "custom_sortingv4_1 = app." \
+                 "custom_sortingv4 = app." \
+                 "custom_sortingv2 = app."; do
+            grep -qF "$e" "$APP_PKG/setup.py" && return 0
+        done
+    fi
+    for f in "$HOME/Desktop/jetarm-sort-v4.1.desktop" \
+             "$HOME/Desktop/jetarm-sort-v4.desktop" \
+             "$HOME/Desktop/jetarm-sort-v2.desktop"; do
+        [ -f "$f" ] && return 0
+    done
+    return 1
+}
+
+prompt_cleanup_mode() {
+    # Print "keep" or "clean" on stdout. Tiered UI: zenity -> whiptail -> text.
+    # All tiers default to "keep" on cancel / empty input (safer default).
+    local choice=""
+    if command -v zenity >/dev/null 2>&1; then
+        choice=$(zenity --list --radiolist \
+            --title="JetArm Sort v5 installer" \
+            --width=560 --height=260 \
+            --text="Prior JetArm versions detected on this device.\nWhat should the v5 installer do with them?" \
+            --column="Pick" --column="Mode" --column="Description" \
+            TRUE  keep  "Keep old versions (install v5 alongside)" \
+            FALSE clean "Clean old versions (only v5 remains)" \
+            2>/dev/null) || choice="keep"
+    elif command -v whiptail >/dev/null 2>&1; then
+        choice=$(whiptail --title "JetArm Sort v5 installer" --menu \
+            "Prior JetArm versions detected.\nWhat should the v5 installer do with them?" \
+            15 72 2 \
+            "keep"  "Keep old versions (install v5 alongside)" \
+            "clean" "Clean old versions (only v5 remains)" \
+            3>&1 1>&2 2>&3) || choice="keep"
+    else
+        local ans=""
+        printf "[install] Prior JetArm versions detected.\n" >&2
+        printf "[install]   [K] Keep old versions (install v5 alongside) - default\n" >&2
+        printf "[install]   [C] Clean old versions (only v5 remains)\n" >&2
+        read -rp "[install] Choice [K/c]: " ans
+        case "${ans,,}" in
+            c|clean) choice="clean" ;;
+            *)       choice="keep"  ;;
+        esac
+    fi
+    [ "$choice" = "clean" ] || choice="keep"
+    printf '%s' "$choice"
+}
+
+# --- 1c. Device cleanup: resolve mode + dispatch ------------------------
+
+# Resolve MODE from (in priority order): CLI flags, INSTALL_MODE env,
+# disk detection (skip if no prior versions), then interactive prompt
+# (with TTY guard - unattended runs default to keep).
+MODE=""
+if [ "$KEEP_OTHERS" = "1" ];  then MODE=keep;  fi
+if [ "$CLEAN_OTHERS" = "1" ]; then MODE=clean; fi
+if [ -z "$MODE" ] && [ -n "${INSTALL_MODE:-}" ]; then
+    case "$INSTALL_MODE" in
+        keep|clean) MODE="$INSTALL_MODE" ;;
+        *) err "ignoring INSTALL_MODE='$INSTALL_MODE' (expected 'keep' or 'clean')" ;;
+    esac
 fi
 
-ok "device cleanup done"
+if ! detect_prior_versions; then
+    stage "device cleanup: no prior JetArm versions detected, skipping"
+    MODE=none
+elif [ -z "$MODE" ]; then
+    stage "device cleanup: prior JetArm versions detected. Preview of what would be cleaned:"
+    DRY_RUN=1 do_cleanup_all
+    if [ -t 0 ]; then
+        MODE=$(prompt_cleanup_mode)
+        stage "user chose: $MODE"
+    else
+        MODE=keep
+        stage "no TTY and no --keep-others/--clean-others/INSTALL_MODE - defaulting to keep"
+        stage "  to clean instead, re-run with:   bash install.sh --clean-others"
+        stage "  or set:                          INSTALL_MODE=clean bash install.sh"
+    fi
+fi
+
+case "$MODE" in
+    clean)
+        do_cleanup_all
+        ok "device cleanup done"
+        ;;
+    keep)
+        stage "device cleanup: keeping prior versions per user choice"
+        stage "  v5 will install alongside; v2/v4/v4.1 shortcuts and launchers remain"
+        stage "  to clean later:   bash $V4/uninstall_others.sh"
+        ;;
+    none)
+        : # already logged the skip message above
+        ;;
+esac
 
 # --- 2. Copy node + UI ---------------------------------------------------
 

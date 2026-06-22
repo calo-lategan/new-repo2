@@ -39,6 +39,37 @@ This will:
 
 Once it finishes, double-click **JetArm Sort v5** on your desktop.
 
+### Keep old versions, or clean them out?
+
+If the installer detects a prior v2 / v4 / v4.1 install on this JetArm, it shows a preview of what would be removed and asks you to choose:
+
+- **Keep old versions** — v5 installs alongside; v2/v4/v4.1 launchers, desktop shortcuts, and `setup.py` entries stay. You'll have multiple "JetArm Sort vX" icons on your desktop and can pick which one to run. The ROS 2 workspace is shared, so colcon will build all of them on the next `--symlink-install` rebuild.
+- **Clean old versions** — every non-v5 install artefact is removed (symlinks, launcher dirs, desktop shortcuts, `~/.jetarm_v*.env`, `setup.py` entry_points, `/etc/sudoers.d/jetarm-v*`). Old source trees under `~/jetarm_v{2,4,4_1}_src` and the shared `~/jetarm_v4_profiles/` directory are **kept** in case they hold tuned YAMLs / local edits — the installer prints the paths so you can `rm -rf` them yourself if you don't need them.
+
+The prompt uses `zenity` (GUI), `whiptail` (TUI), or a plain `read` prompt depending on what's available, and defaults to **Keep** on cancel or empty Enter.
+
+If you're piping the install through `curl` or running it unattended (no TTY), pre-pick a mode:
+
+```bash
+# keep old versions, no prompt
+bash <(curl -fsSL .../install.sh) --sudoers --keep-others
+
+# clean old versions, no prompt
+bash <(curl -fsSL .../install.sh) --sudoers --clean-others
+
+# same via env var (handy for unattended runs and CI)
+INSTALL_MODE=clean bash <(curl -fsSL .../install.sh) --sudoers
+```
+
+If stdin is not a TTY and no flag/env is set, the installer defaults to **Keep** and prints the flags so you can re-run differently.
+
+Changed your mind after a Keep install? Clean later without re-running the full installer:
+
+```bash
+bash ~/jetarm_v5_src/custom_sortingv5/uninstall_others.sh           # do it
+bash ~/jetarm_v5_src/custom_sortingv5/uninstall_others.sh --dry-run  # preview only
+```
+
 ---
 
 ## What launching does (in order)
