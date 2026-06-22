@@ -346,14 +346,17 @@ class TunerUI:
                     f"ai={st.get('ai', '?')} "
                     f"inf_age={st.get('inference_age_ms', '-')}ms{badge}")
                 engine = st.get('engine') or ''
+                task = st.get('task') or ''
                 if engine:
                     self.engine_var.set(engine)
                     # Keep the Detection-tab "Active:" label + list marker in
                     # sync with the actually-loaded engine.
+                    shown_key = (engine, task)
                     if hasattr(self, 'active_engine_var') \
-                            and engine != getattr(self, '_active_engine_shown', None):
-                        self._active_engine_shown = engine
-                        self.active_engine_var.set(f'Active: {engine}')
+                            and shown_key != getattr(self, '_active_engine_shown', None):
+                        self._active_engine_shown = shown_key
+                        suffix = f' (task={task})' if task else ''
+                        self.active_engine_var.set(f'Active: {engine}{suffix}')
                         try:
                             self._refresh_engine_list(engine)
                         except Exception:

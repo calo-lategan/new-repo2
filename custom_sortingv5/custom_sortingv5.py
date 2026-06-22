@@ -154,6 +154,7 @@ class InferenceWorker(threading.Thread):
         self._logger = logger
         self._on_swap = on_swap or (lambda _: None)
         self._engine_path = engine_path
+        self._task = None
         self._pending_engine_path = None
         self._pending_force_reload = False
         self._swap_lock = threading.Lock()
@@ -273,8 +274,10 @@ class InferenceWorker(threading.Thread):
                     _stage('engine-load', 'torch.cuda.empty_cache() failed', exc=e)
         self._logger.info(f'loading YOLO engine: {path}')
         t0 = time.time()
-        m = YOLO(path, task='detect')
-        _stage('engine-load', f'YOLO() constructed in {time.time()-t0:.2f}s')
+        m = YOLO(path)
+        self._task = getattr(m, 'task', None) or 'detect'
+        _stage('engine-load', f'YOLO() constructed in {time.time()-t0:.2f}s '
+                              f'task={self._task}')
         # Warmup: first inference includes engine deserialization; do it on
         # a dummy frame so the first real frame is fast.
         try:
@@ -1266,9 +1269,11 @@ class ObjectSortingNodeV5(Node):
         # Publish the same data as JSON for the tuner UI's live mirror.
         try:
             engine = ''
+            task = ''
             class_names = {}
             if hasattr(self, 'inference') and self.inference is not None:
                 engine = os.path.basename(self.inference._engine_path or '')
+                task = getattr(self.inference, '_task', None) or ''
                 class_names = self.inference.class_names()
             self.status_publisher.publish(String(data=json.dumps({
                 'ts': now,
@@ -1286,6 +1291,7 @@ class ObjectSortingNodeV5(Node):
                 'transport': bool(self.start_transport),
                 'sorting_thread_alive': bool(sorting_alive),
                 'engine': engine,
+                'task': task,
                 # v5: class names from model.names (id -> name). The tuner
                 # UI auto-populates the Classes filter + Places tab when
                 # this changes.
@@ -1987,10 +1993,15 @@ class ObjectSortingNodeV5(Node):
                     cls_id = int(obb.cls.cpu().numpy()) if hasattr(obb, 'cls') else 0
                     label = names.get(cls_id, f'cls_{cls_id}')
                     cx += roi[2]; cy += roi[0]
+                    # ultralytics OBB r is in radians, ~[-pi/2, pi/2]. If the
+                    # gripper rotates 90 off the intended grasp, try `90 - ...`.
                     angle = int(math.degrees(r))
+                    corners = obb.xyxyxyxy[0].cpu().numpy()
+                    corners = [(int(x + roi[2]), int(y + roi[0]))
+                               for x, y in corners]
                     target_info.append([label, 1, (int(cx), int(cy)),
                                         (int(w), int(h)), angle])
-                    yolo_ops.append(('circle', (int(cx), int(cy)), label))
+                    yolo_ops.append(('obb', corners, label))
             elif hasattr(result, 'boxes') and result.boxes is not None:
                 for box in result.boxes:
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
@@ -2540,6 +2551,10 @@ class ObjectSortingNodeV5(Node):
                 cv2.rectangle(bgr, op[1], op[2], (0, 0, 255), 2)
             elif kind == 'circle':
                 cv2.circle(bgr, op[1], 8, (0, 0, 255), -1)
+            elif kind == 'obb':
+                pts = np.array(op[1], dtype=np.int32).reshape(-1, 1, 2)
+                cv2.polylines(bgr, [pts], isClosed=True,
+                              color=(0, 0, 255), thickness=2)
         for corners in overlay.get('color_corners', ()):
             cv2.drawContours(bgr, [corners], -1, (0, 255, 255), 2, cv2.LINE_AA)
         for t in overlay.get('targets', ()):
