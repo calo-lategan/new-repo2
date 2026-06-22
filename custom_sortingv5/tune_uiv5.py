@@ -95,6 +95,16 @@ MODEL_FLOAT_PARAMS = [
 MODEL_INT_PARAMS = [
     ('yolo_max_det',             1, 300, 1),
 ]
+# Factory defaults for the Model tab "Reset knobs to defaults" button.
+# Keep in sync with the node's declared defaults in custom_sortingv5.py
+# (_v5_tunables block around L615 - yolo_conf_thresh / yolo_iou_thresh /
+# yolo_max_det / inference_max_hz).
+MODEL_DEFAULTS = {
+    'yolo_conf_thresh': 0.25,
+    'yolo_iou_thresh':  0.7,
+    'yolo_max_det':     100,
+    'inference_max_hz': 0.0,
+}
 
 BOOL_PARAMS = [
     'parallel_base_motion',
@@ -130,6 +140,9 @@ class TunerClient(Node):
             SetStringBool, f'/{target_node}/test_grip')
         self.save_yolo_cli = self.create_client(SetStringBool,
                                                 f'/{target_node}/save_yolo_config')
+        # v5: re-init the currently loaded engine in place (no path change).
+        self.reload_engine_cli = self.create_client(
+            Trigger, f'/{target_node}/reload_engine')
         # Live heartbeat mirror: the node publishes its 5s heartbeat as
         # JSON on ~/status. The background rclpy.spin thread services this
         # subscription; the UI polls latest_status via root.after().
@@ -224,6 +237,7 @@ class TunerClient(Node):
 
     def call_recalibrate(self): return self._trigger(self.recalibrate_cli)
     def call_run_calibration(self): return self._trigger(self.run_calibration_cli)
+    def call_reload_engine(self): return self._trigger(self.reload_engine_cli)
     def call_test_grip(self, class_name):
         return self._set_string_bool(self.test_grip_cli, str(class_name), True)
     def call_enter(self):       return self._trigger(self.enter_cli)
@@ -704,6 +718,8 @@ class TunerUI:
                    command=self._on_pick_selected_engine).pack(side='left', padx=4)
         ttk.Button(ebtn, text='Browse...',
                    command=self._on_browse_engine).pack(side='left', padx=4)
+        ttk.Button(ebtn, text='Reload engine',
+                   command=self._on_reload_engine).pack(side='left', padx=4)
         erow = ttk.Frame(eng_frame); erow.pack(fill='x', padx=4, pady=2)
         ttk.Label(erow, text='path', width=6).pack(side='left')
         self._model_engine_entry = ttk.Entry(erow)
@@ -753,8 +769,11 @@ class TunerUI:
         tk.Button(btn_row, text='SAVE MODEL CONFIG', bg='#2e8b57', fg='white',
                   font=('TkDefaultFont', 11, 'bold'), width=20, height=2,
                   command=self._on_save_model_config).pack(side='left', padx=4)
+        ttk.Button(btn_row, text='Reset knobs to defaults',
+                   command=self._on_reset_model_defaults).pack(side='left', padx=4)
         ttk.Label(btn_row, foreground='#666',
-                  text='Writes yolo.yaml + hot-applies engine/knobs/classes.'
+                  text='Writes yolo.yaml + hot-applies engine/knobs/classes. '
+                       'Reset = knobs + class filter only (engine unchanged).'
                   ).pack(side='left', padx=12)
 
     # ---- dirty tracking ----
@@ -831,6 +850,10 @@ class TunerUI:
         scale.bind('<ButtonRelease-1>', lambda e: buffer_value(var.get()))
         entry.bind('<Return>',   lambda e: buffer_value(entry.get()))
         entry.bind('<FocusOut>', lambda e: buffer_value(entry.get()))
+        # Exposed so Reset-to-defaults can re-populate this widget.
+        if not hasattr(self, '_model_setters'):
+            self._model_setters = {}
+        self._model_setters[name] = buffer_value
 
     def _set_all_classes(self, value):
         for var in self._model_class_vars.values():
@@ -894,6 +917,48 @@ class TunerUI:
             ttk.Checkbutton(row, text=f'{cid}: {name}', variable=var,
                             command=self._mark_model_dirty).pack(side='left')
             self._model_class_widgets.append((row, name))
+
+    def _on_reset_model_defaults(self):
+        """Populate the Model-tab buffer with factory-default YOLO knobs
+        and clear the class filter. Engine path is left alone (the model
+        itself isn't a 'setting'). User then presses SAVE to commit."""
+        if not messagebox.askyesno(
+                'Reset to defaults',
+                'Restore conf / IoU / max-det / inference-Hz to factory '
+                'defaults and clear the class filter? Engine path is '
+                'unchanged. You still need to press SAVE to commit.'):
+            return
+        setters = getattr(self, '_model_setters', {})
+        for name, val in MODEL_DEFAULTS.items():
+            fn = setters.get(name)
+            if fn is not None:
+                fn(val)
+        for var in self._model_class_vars.values():
+            var.set(False)
+        self._mark_model_dirty()
+        self._set_status('DEFAULTS LOADED - SAVE TO COMMIT', '#aa6633')
+
+    def _on_reload_engine(self):
+        """Tell the node to re-init the YOLO model from the current engine
+        path. Inference pauses briefly while the engine reloads. Not
+        buffered - the path isn't changing, so there's no edit to discard."""
+        if not messagebox.askyesno(
+                'Reload engine',
+                'Re-initialise the YOLO model from the current engine path? '
+                'Inference will pause briefly.'):
+            return
+        self._set_status('ENGINE RELOADING...', '#aa6633')
+        def go():
+            ok = self.client.call_reload_engine()
+            if ok:
+                self._set_status('ENGINE RELOADED', '#3366aa')
+            else:
+                messagebox.showerror(
+                    'Reload failed',
+                    'reload_engine service rejected (calibration in '
+                    'progress, or a swap is already pending).')
+                self._set_status('RELOAD FAILED', '#cc3333')
+        threading.Thread(target=go, daemon=True).start()
 
     def _on_save_model_config(self, persist=True):
         cfg = dict(self._model_buf)

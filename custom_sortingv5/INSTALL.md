@@ -238,6 +238,21 @@ max_det / enabled-classes land together. On boot the node auto-loads
 `yolo_imgsz` is **not** tunable — TensorRT engines bake the input size in at
 export; re-export from Ultralytics and pick the new `.engine` here.
 
+### Reset and reload
+
+The Model tab has two extra escape hatches:
+
+- **Reset knobs to defaults** (next to SAVE) — repopulates the conf / IoU /
+  max-det / inference-Hz sliders with the factory defaults shown above and
+  clears the class filter. **Engine path is left alone** (the model itself is
+  not a "setting"). The tab goes dirty (`Model *`); press SAVE to commit the
+  defaults into `yolo.yaml` and the live worker.
+- **Reload engine** (next to Browse) — re-initialises the YOLO model from the
+  *current* engine path without changing the path. Useful if the engine wedged
+  or you swapped the `.engine` file on disk. Inference pauses briefly (~2-5s)
+  while the engine reloads, then the warmup pass runs and detection resumes.
+  Refused while CALIBRATE is running or another engine swap is already pending.
+
 ## The Places tab (per-class targets)
 
 Rows auto-populate from the loaded model's class names. For each class set:

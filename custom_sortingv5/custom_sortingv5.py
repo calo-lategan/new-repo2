@@ -155,6 +155,7 @@ class InferenceWorker(threading.Thread):
         self._on_swap = on_swap or (lambda _: None)
         self._engine_path = engine_path
         self._pending_engine_path = None
+        self._pending_force_reload = False
         self._swap_lock = threading.Lock()
         self._frame_lock = threading.Lock()
         self._latest_frame = None     # numpy bgr image OR None
@@ -220,7 +221,9 @@ class InferenceWorker(threading.Thread):
         with self._frame_lock:
             return self._latest_result
 
-    def request_engine_swap(self, path):
+    def request_engine_swap(self, path, force=False):
+        """Queue an engine swap. With force=True, re-init even if the path
+        matches the currently loaded engine (Reload-engine UI path)."""
         if not path:
             _stage('engine-swap', 'rejected - empty path')
             return False
@@ -230,9 +233,17 @@ class InferenceWorker(threading.Thread):
             return False
         with self._swap_lock:
             self._pending_engine_path = path
-        _stage('engine-swap', f'queued -> {path}')
-        self._logger.info(f'engine swap queued -> {path}')
+            if force:
+                self._pending_force_reload = True
+        verb = 'reload' if force else 'swap'
+        _stage('engine-swap', f'queued {verb} -> {path}')
+        self._logger.info(f'engine {verb} queued -> {path}')
         return True
+
+    def swap_pending(self):
+        """True if an engine swap/reload is queued and not yet serviced."""
+        with self._swap_lock:
+            return self._pending_engine_path is not None
 
     def stop(self):
         self._stop.set()
@@ -304,8 +315,10 @@ class InferenceWorker(threading.Thread):
             # Service a queued hot-swap before pulling the next frame.
             with self._swap_lock:
                 pending = self._pending_engine_path
+                force = self._pending_force_reload
                 self._pending_engine_path = None
-            if pending and pending != self._engine_path:
+                self._pending_force_reload = False
+            if pending and (force or pending != self._engine_path):
                 try:
                     self._load(pending)
                 except Exception as e:
@@ -810,6 +823,12 @@ class ObjectSortingNodeV5(Node):
                             callback_group=self.svc_group)
         self.create_service(Trigger, '~/save_as_default',
                             self.save_as_default_srv_callback,
+                            callback_group=self.svc_group)
+        # v5: reload the CURRENT engine in place. Tuner UI "Reload engine"
+        # button. No path change - just re-init the YOLO model (releases the
+        # old CUDA context, reloads the .engine, re-runs the warmup pass).
+        self.create_service(Trigger, '~/reload_engine',
+                            self.reload_engine_srv_callback,
                             callback_group=self.svc_group)
         # v5: model-config save service. The tuner UI buffers
         # engine_path / yolo_conf / yolo_iou / yolo_max_det / classes
@@ -1758,6 +1777,29 @@ class ObjectSortingNodeV5(Node):
             except Exception as e:
                 _stage('svc', 'load_engine: setting engine_path param failed', exc=e)
         response.success = ok
+        return response
+
+    def reload_engine_srv_callback(self, request, response):
+        """Re-init the YOLO model from the currently configured engine_path
+        without changing the path. Refuses while CALIBRATE is in progress or
+        a swap is already pending (those bail out cleanly; the user can
+        retry). The worker services the reload between frames, same as a
+        normal hot-swap, so inference pauses briefly but never races."""
+        path = self.p('engine_path')
+        _stage('svc', f'reload_engine -> {path}')
+        if self._calibrating:
+            _stage('svc', 'reload_engine refused - calibration in progress')
+            response.success = False
+            response.message = 'calibration in progress'
+            return response
+        if self.inference.swap_pending():
+            _stage('svc', 'reload_engine refused - swap already pending')
+            response.success = False
+            response.message = 'engine swap already pending'
+            return response
+        ok = self.inference.request_engine_swap(path, force=True)
+        response.success = ok
+        response.message = f'reloading {path}' if ok else 'reload rejected'
         return response
 
     def save_profile_srv_callback(self, request, response):
