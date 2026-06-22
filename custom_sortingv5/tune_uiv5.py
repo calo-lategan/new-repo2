@@ -84,9 +84,8 @@ PARAM_LABELS = {
     'grab_depth':        ('Grab depth', 'm below detected z so jaws wrap the body'),
 }
 
-# v5: buffered until SAVE. The Model tab renders these but does NOT push
-# to ROS on slider release. The SAVE button calls ~/save_yolo_config which
-# writes the YAML and applies the buffered values atomically.
+# v5 Round 2: live YOLO knobs rendered on the Detection tab (apply on release
+# like every other slider). Persisted by the Detection tab's "Save & Apply".
 MODEL_FLOAT_PARAMS = [
     ('yolo_conf_thresh',      0.05, 0.95, 0.01),
     ('yolo_iou_thresh',       0.10, 0.90, 0.01),
@@ -95,7 +94,7 @@ MODEL_FLOAT_PARAMS = [
 MODEL_INT_PARAMS = [
     ('yolo_max_det',             1, 300, 1),
 ]
-# Factory defaults for the Model tab "Reset knobs to defaults" button.
+# Factory defaults for the Detection tab "Reset knobs to defaults" button.
 # Keep in sync with the node's declared defaults in custom_sortingv5.py
 # (_v5_tunables block around L615 - yolo_conf_thresh / yolo_iou_thresh /
 # yolo_max_det / inference_max_hz).
@@ -116,6 +115,41 @@ BOOL_PARAMS = [
     'enable_camera_sub',
     'enable_inference',
 ]
+
+# Built-in quick presets (code constants - applied live, never saved over).
+# Custom namable presets are saved as full profiles in PROFILES_DIR; their
+# names must not collide with a built-in slug or 'default'/'yolo'.
+BUILTIN_PRESETS = [
+    ('Slow & safe', {'motion_speed': 0.7, 'aggression': 0.7,
+                     'gripper_settle': 0.8, 'gripper_close_duration': 0.6}),
+    ('Default', {'motion_speed': 1.5, 'aggression': 1.3,
+                 'gripper_settle': 0.5, 'gripper_close_duration': 0.35}),
+    ('Fast & aggressive', {'motion_speed': 2.1, 'aggression': 1.7,
+                           'gripper_settle': 0.3, 'gripper_close_duration': 0.25}),
+    ('Precision', {'motion_speed': 0.9, 'aggression': 0.8,
+                   'count_still_threshold': 8, 'detection_avg_frames': 6,
+                   'gripper_settle': 0.8}),
+]
+
+
+def _slugify_preset(name):
+    """Lowercase, spaces/ampersands -> hyphen, strip the .yaml suffix."""
+    s = str(name or '').strip().lower()
+    if s.endswith('.yaml'):
+        s = s[:-5]
+    out = []
+    for ch in s:
+        out.append(ch if (ch.isalnum() or ch == '-') else '-')
+    slug = ''.join(out)
+    while '--' in slug:
+        slug = slug.replace('--', '-')
+    return slug.strip('-')
+
+
+# Names a custom preset may not take (would clobber a built-in or the boot file).
+RESERVED_PRESET_SLUGS = (
+    {_slugify_preset(lbl) for lbl, _ in BUILTIN_PRESETS} | {'default', 'yolo'}
+)
 
 
 class TunerClient(Node):
@@ -140,6 +174,9 @@ class TunerClient(Node):
             SetStringBool, f'/{target_node}/test_grip')
         self.save_yolo_cli = self.create_client(SetStringBool,
                                                 f'/{target_node}/save_yolo_config')
+        # v5 Round 2: generic per-tab "Save & Apply" (apply + persist to default).
+        self.apply_persist_cli = self.create_client(
+            SetStringBool, f'/{target_node}/apply_and_persist')
         # v5: re-init the currently loaded engine in place (no path change).
         self.reload_engine_cli = self.create_client(
             Trigger, f'/{target_node}/reload_engine')
@@ -247,6 +284,12 @@ class TunerClient(Node):
     def call_save_yolo_config(self, cfg_dict, persist=True):
         """Apply (and optionally persist) the buffered Model-tab config."""
         return self._set_string_bool(self.save_yolo_cli, json.dumps(cfg_dict),
+                                     bool(persist))
+
+    def apply_and_persist(self, params, persist=True):
+        """Apply a {param: value} dict and (default) persist it into
+        default.yaml so it survives relaunch. Backs every per-tab Save&Apply."""
+        return self._set_string_bool(self.apply_persist_cli, json.dumps(params),
                                      bool(persist))
 
     def call_load_engine(self, path):
@@ -371,9 +414,9 @@ class TunerUI:
                                  fg='white', font=('TkDefaultFont', 11, 'bold'),
                                  width=12, height=2, command=self._on_calibrate)
         self.cal_btn.pack(side='left', padx=4)
-        self.savedef_btn = tk.Button(btn_row, text='SAVE AS DEFAULT', bg='#666688',
+        self.savedef_btn = tk.Button(btn_row, text='SAVE ALL AS DEFAULT', bg='#666688',
                                      fg='white', font=('TkDefaultFont', 10, 'bold'),
-                                     width=16, height=2, command=self._on_save_default)
+                                     width=18, height=2, command=self._on_save_default)
         self.savedef_btn.pack(side='left', padx=4)
 
         # ---- Independent stop/start: camera subscription + YOLO inference ----
@@ -451,10 +494,10 @@ class TunerUI:
         notebook = ttk.Notebook(self.root)
         notebook.pack(fill='both', expand=True, padx=8, pady=8)
 
-        # v5 tab layout. The single "Model" tab owns the engine picker AND
-        # the buffered YOLO knobs + class checkboxes: edits stay local until
-        # the SAVE button calls ~/save_yolo_config (engine hot-swap + knobs
-        # applied atomically, no node reset). Places = per-class targets.
+        # v5 Round 2 tab layout. The Detection tab owns detection-lock params
+        # AND the model (engine picker + live YOLO knobs + class checkboxes).
+        # Each tab has a "Save & Apply" bar that applies live and persists to
+        # default.yaml. Places = per-class targets.
         self._notebook = notebook
         speed_tab = ttk.Frame(notebook); notebook.add(speed_tab, text='Speed / motion')
         grip_tab = ttk.Frame(notebook); notebook.add(grip_tab, text='Grip')
@@ -472,9 +515,12 @@ class TunerUI:
                        'grasp_max_temp. Use the "Test grip" buttons in Places '
                        'to tune each class’ strength without firing a full pick.'
                   ).pack(anchor='w', padx=8, pady=(0, 6))
+        # v5 Round 2: the Model tab is gone — all model settings (engine
+        # picker, YOLO knobs, class filter) now live on the Detection tab,
+        # applied LIVE like every other slider and persisted by the tab's
+        # "Save & Apply" button. No more buffered-until-SAVE model tab.
         detect_tab = ttk.Frame(notebook); notebook.add(detect_tab, text='Detection')
-        model_tab = ttk.Frame(notebook); notebook.add(model_tab, text='Model')
-        self._model_tab = model_tab
+        self._model_tab = detect_tab
         self._model_tab_index = notebook.index('end') - 1
         places_tab = ttk.Frame(notebook); notebook.add(places_tab, text='Places')
         toggles_tab = ttk.Frame(notebook); notebook.add(toggles_tab, text='Toggles')
@@ -505,43 +551,49 @@ class TunerUI:
         for name in BOOL_PARAMS:
             self._add_bool(toggles_tab, name, bool(current.get(name, False)))
 
-        # Model tab (BUFFERED): engine picker + YOLO knobs + class filter,
-        # all applied only on SAVE.
-        self._build_model_tab(model_tab, current)
+        # Detection tab now also owns the model: live YOLO knobs + engine
+        # picker + class filter (built into the same tab).
+        self._build_model_section(detect_tab, current)
         # Places tab — per-class targets (place position + grip strength).
         self._build_places_tab(places_tab, current.get('place_positions', '{}'))
         self._build_profiles_tab(profiles_tab)
-        # Prompt on leaving the Model tab with unsaved buffered edits.
-        notebook.bind('<<NotebookTabChanged>>', self._on_tab_changed)
 
-        # Presets bar
+        # Per-tab "Save & Apply" bars (apply now + persist to default.yaml so
+        # the settings survive relaunch). The Detection bar also persists the
+        # engine path + class filter via _detect_save_extra().
+        detect_keys = ([n for n, *_ in FLOAT_PARAMS
+                        if n not in speed_names and n not in grip_names]
+                       + [n for n, *_ in INT_PARAMS if n not in grip_names]
+                       + [n for n, *_ in MODEL_FLOAT_PARAMS]
+                       + [n for n, *_ in MODEL_INT_PARAMS])
+        self._add_tab_save_bar(speed_tab, sorted(speed_names), 'Speed')
+        self._add_tab_save_bar(grip_tab, sorted(grip_names), 'Grip')
+        self._add_tab_save_bar(detect_tab, detect_keys, 'Detection',
+                               get_extra=self._detect_save_extra)
+        self._add_tab_save_bar(toggles_tab, list(BOOL_PARAMS), 'Toggles')
+        self._add_tab_save_bar(places_tab,
+                               ['place_positions', 'grasp_strength'], 'Places')
+
+        # Presets bar: built-in quick presets + namable custom presets.
         preset = ttk.LabelFrame(self.root, text='Presets')
         preset.pack(fill='x', padx=8, pady=4)
-        ttk.Button(preset, text='Slow & safe',
-                   command=lambda: self._apply_preset({'motion_speed': 0.7,
-                                                        'aggression': 0.7,
-                                                        'gripper_settle': 0.8,
-                                                        'gripper_close_duration': 0.6})
-                   ).pack(side='left', padx=4, pady=4)
-        ttk.Button(preset, text='Default',
-                   command=lambda: self._apply_preset({'motion_speed': 1.5,
-                                                        'aggression': 1.3,
-                                                        'gripper_settle': 0.5,
-                                                        'gripper_close_duration': 0.35})
-                   ).pack(side='left', padx=4, pady=4)
-        ttk.Button(preset, text='Fast & aggressive',
-                   command=lambda: self._apply_preset({'motion_speed': 2.1,
-                                                        'aggression': 1.7,
-                                                        'gripper_settle': 0.3,
-                                                        'gripper_close_duration': 0.25})
-                   ).pack(side='left', padx=4, pady=4)
-        ttk.Button(preset, text='Precision',
-                   command=lambda: self._apply_preset({'motion_speed': 0.9,
-                                                        'aggression': 0.8,
-                                                        'count_still_threshold': 8,
-                                                        'detection_avg_frames': 6,
-                                                        'gripper_settle': 0.8})
-                   ).pack(side='left', padx=4, pady=4)
+        for label, mapping in BUILTIN_PRESETS:
+            ttk.Button(preset, text=label,
+                       command=lambda m=mapping: self._apply_preset(m)
+                       ).pack(side='left', padx=4, pady=4)
+        # Namable custom presets (saved as full profiles in PROFILES_DIR).
+        ttk.Separator(preset, orient='vertical').pack(side='left', fill='y',
+                                                      padx=8, pady=4)
+        ttk.Label(preset, text='custom:').pack(side='left', padx=(4, 2))
+        self._preset_name_entry = ttk.Entry(preset, width=14)
+        self._preset_name_entry.pack(side='left', padx=2)
+        ttk.Button(preset, text='Save as preset',
+                   command=self._on_save_preset).pack(side='left', padx=2)
+        self._preset_combo = ttk.Combobox(preset, width=14, state='readonly')
+        self._preset_combo.pack(side='left', padx=(8, 2))
+        ttk.Button(preset, text='Load preset',
+                   command=self._on_load_preset).pack(side='left', padx=2)
+        self._refresh_preset_combo()
 
     def _short_engine(self, path):
         if not path or path == '-': return '-'
@@ -676,29 +728,34 @@ class TunerUI:
                         ).pack(anchor='w', padx=12, pady=4)
         self._param_setters[name] = lambda v: var.set(bool(v))
 
-    # ---- Model tab (BUFFERED until SAVE) ----
+    # ---- Model section (built into the Detection tab; live + Save & Apply) ----
 
-    def _build_model_tab(self, parent, current):
-        """ONE place to manage the model: engine picker + buffered YOLO
-        knobs + per-class enable checkboxes. Edits stay LOCAL; nothing
-        reaches the node until SAVE (engine hot-swap + knobs + classes
-        applied atomically via ~/save_yolo_config, no node restart)."""
-        self._model_buf = {}
+    def _build_model_section(self, parent, current):
+        """Model controls folded into the Detection tab: LIVE YOLO knobs +
+        engine picker (Apply/Reload that actually switch) + per-class enable
+        checkboxes. Knobs apply on release like every other slider; the engine
+        and class filter apply on their buttons / the tab's Save & Apply.
+        Persistence is the tab Save & Apply (merges into default.yaml)."""
         self._model_dirty = False
         self._model_class_vars = {}       # class_name -> tk.BooleanVar
         self._model_class_id_map = {}     # class_name -> int id
         self._model_class_widgets = []    # (frame, name) for the filter
 
-        ttk.Label(parent, foreground='#226666', wraplength=720,
-                  justify='left',
-                  text='Everything here is BUFFERED. Pick an engine, set the '
-                       'YOLO knobs and enabled classes, then press SAVE. SAVE '
-                       'writes ~/jetarm_v5_profiles/yolo.yaml and hot-applies '
-                       '(engine swaps between frames, no app restart). The tab '
-                       'shows "Model *" while you have unsaved edits.'
-                  ).pack(anchor='w', padx=8, pady=(8, 4))
+        # --- Live YOLO knobs (conf / iou / max_det / inference_hz) ---
+        knob_frame = ttk.LabelFrame(parent, text='Model — YOLO detection knobs '
+                                                 '(apply live on release)')
+        knob_frame.pack(fill='x', padx=8, pady=(8, 4))
+        for name, lo, hi, res in MODEL_FLOAT_PARAMS:
+            self._add_float(knob_frame, name, lo, hi, res,
+                            float(current.get(name, lo)))
+        for name, lo, hi, res in MODEL_INT_PARAMS:
+            self._add_int(knob_frame, name, lo, hi, res,
+                          int(current.get(name, lo)))
+        ttk.Button(knob_frame, text='Reset knobs to defaults',
+                   command=self._on_reset_model_defaults).pack(anchor='w',
+                                                              padx=6, pady=4)
 
-        # --- Engine picker (buffered: populates the entry, no live swap) ---
+        # --- Engine picker (Apply/Reload commit + switch the running model) ---
         eng_frame = ttk.LabelFrame(parent, text='Engine (.engine / .pt)')
         eng_frame.pack(fill='x', padx=8, pady=4)
         self._active_engine = str(current.get('engine_path', ''))
@@ -718,6 +775,8 @@ class TunerUI:
                    command=self._on_pick_selected_engine).pack(side='left', padx=4)
         ttk.Button(ebtn, text='Browse...',
                    command=self._on_browse_engine).pack(side='left', padx=4)
+        ttk.Button(ebtn, text='Apply engine',
+                   command=self._on_apply_engine).pack(side='left', padx=4)
         ttk.Button(ebtn, text='Reload engine',
                    command=self._on_reload_engine).pack(side='left', padx=4)
         erow = ttk.Frame(eng_frame); erow.pack(fill='x', padx=4, pady=2)
@@ -725,15 +784,11 @@ class TunerUI:
         self._model_engine_entry = ttk.Entry(erow)
         self._model_engine_entry.pack(side='left', fill='x', expand=True, padx=4)
         self._model_engine_entry.insert(0, self._active_engine)
-        self._model_engine_entry.bind('<KeyRelease>', lambda e: self._mark_model_dirty())
-
-        # --- Buffered YOLO sliders ---
-        for name, lo, hi, res in MODEL_FLOAT_PARAMS:
-            self._add_buffered_numeric(parent, name, lo, hi, res,
-                                       float(current.get(name, lo)), 'float')
-        for name, lo, hi, res in MODEL_INT_PARAMS:
-            self._add_buffered_numeric(parent, name, lo, hi, res,
-                                       int(current.get(name, lo)), 'int')
+        ttk.Label(eng_frame, foreground='#666',
+                  text='Pick/Browse fills the path. "Apply engine" switches the '
+                       'running model now; "Reload engine" re-inits it. The tab '
+                       'Save & Apply persists the engine as the boot default.'
+                  ).pack(anchor='w', padx=6, pady=(0, 2))
 
         # --- Classes filter (scrollable; scales to COCO-80) ---
         cls_frame = ttk.LabelFrame(parent, text='Enabled YOLO classes '
@@ -750,7 +805,7 @@ class TunerUI:
                    command=lambda: self._set_all_classes(False)).pack(side='left', padx=2)
         ttk.Button(ftop, text='Invert', width=6,
                    command=self._invert_classes).pack(side='left', padx=2)
-        canvas = tk.Canvas(cls_frame, height=170, highlightthickness=0)
+        canvas = tk.Canvas(cls_frame, height=150, highlightthickness=0)
         cbar = ttk.Scrollbar(cls_frame, orient='vertical', command=canvas.yview)
         self._model_classes_inner = ttk.Frame(canvas)
         self._model_classes_inner.bind(
@@ -764,96 +819,98 @@ class TunerUI:
                   text='(waiting for engine load to read model.names...)'
                   ).pack(anchor='w', padx=4, pady=2)
 
-        # --- SAVE ---
-        btn_row = ttk.Frame(parent); btn_row.pack(fill='x', padx=8, pady=(10, 6))
-        tk.Button(btn_row, text='SAVE MODEL CONFIG', bg='#2e8b57', fg='white',
-                  font=('TkDefaultFont', 11, 'bold'), width=20, height=2,
-                  command=self._on_save_model_config).pack(side='left', padx=4)
-        ttk.Button(btn_row, text='Reset knobs to defaults',
-                   command=self._on_reset_model_defaults).pack(side='left', padx=4)
-        ttk.Label(btn_row, foreground='#666',
-                  text='Writes yolo.yaml + hot-applies engine/knobs/classes. '
-                       'Reset = knobs + class filter only (engine unchanged).'
-                  ).pack(side='left', padx=12)
-
-    # ---- dirty tracking ----
+    # ---- dirty tracking (Detection tab class-filter edits) ----
 
     def _mark_model_dirty(self):
         if getattr(self, '_building', False):
             return
         self._model_dirty = True
         try:
-            self._notebook.tab(self._model_tab_index, text='Model *')
+            self._notebook.tab(self._model_tab_index, text='Detection *')
         except Exception:
             pass
 
     def _clear_model_dirty(self):
         self._model_dirty = False
         try:
-            self._notebook.tab(self._model_tab_index, text='Model')
+            self._notebook.tab(self._model_tab_index, text='Detection')
         except Exception:
             pass
 
-    def _on_tab_changed(self, _event):
-        # If we LEFT the Model tab with unsaved edits, offer to discard.
-        if not getattr(self, '_model_dirty', False):
-            return
+    # ---- per-tab Save & Apply ----
+
+    def _add_tab_save_bar(self, parent, keys, label, get_extra=None):
+        """Right-aligned "Save & Apply" button at the bottom of a tab. Applies
+        the tab's params live AND persists them to default.yaml (boot
+        defaults). get_extra() optionally returns more {param: value} (used by
+        the Detection tab for engine_path + the class filter)."""
+        bar = ttk.Frame(parent)
+        bar.pack(side='bottom', fill='x', padx=8, pady=6)
+        tk.Button(bar, text='Save & Apply', bg='#2e8b57', fg='white',
+                  font=('TkDefaultFont', 10, 'bold'),
+                  command=lambda: self._on_tab_save(keys, label, get_extra)
+                  ).pack(side='right', padx=4)
+        ttk.Label(bar, foreground='#666',
+                  text='applies now + saves to boot defaults (default.yaml)'
+                  ).pack(side='right', padx=8)
+
+    def _on_tab_save(self, keys, label, get_extra=None):
+        def go():
+            vals = {}
+            if keys:
+                try:
+                    vals.update(self.client.get_values(list(keys)))
+                except Exception:
+                    pass
+            if get_extra is not None:
+                try:
+                    vals.update(get_extra() or {})
+                except Exception:
+                    pass
+            ok = self.client.apply_and_persist(vals, persist=True)
+            if ok:
+                self._set_status(f'{label} SAVED', '#3366aa')
+                if label == 'Detection':
+                    self._clear_model_dirty()
+            else:
+                messagebox.showerror('Save failed',
+                                     'apply_and_persist service rejected.')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _detect_save_extra(self):
+        """Engine path + class filter for the Detection tab's Save & Apply."""
+        extra = {}
         try:
-            cur = self._notebook.index(self._notebook.select())
+            extra['engine_path'] = self._model_engine_entry.get().strip()
         except Exception:
+            pass
+        if self._model_class_vars:
+            sel = [self._model_class_id_map[n]
+                   for n, v in self._model_class_vars.items() if v.get()]
+            all_sel = len(sel) == len(self._model_class_vars)
+            # Empty list = "all classes" (matches the node semantics).
+            extra['yolo_enabled_classes'] = json.dumps([] if all_sel else sel)
+        return extra
+
+    def _on_apply_engine(self):
+        """Commit the engine path in the entry and switch the running model
+        immediately (no full Save needed)."""
+        path = self._model_engine_entry.get().strip()
+        if not path:
+            messagebox.showerror('No engine', 'Pick or type an engine path first.')
             return
-        if cur == self._model_tab_index:
-            return  # still on Model tab
-        if not messagebox.askyesno(
-                'Unsaved model changes',
-                'You have unsaved model edits. Discard them?'):
-            self._notebook.select(self._model_tab_index)
-        else:
-            self._clear_model_dirty()
-            self._model_buf.clear()
-
-    def _add_buffered_numeric(self, parent, name, lo, hi, res, init, kind):
-        """Slider+entry that writes into self._model_buf (not ROS) and marks
-        the Model tab dirty. Applied only on SAVE."""
-        frame = ttk.Frame(parent); frame.pack(fill='x', padx=6, pady=3)
-        disp, help_txt = PARAM_LABELS.get(name, (name, ''))
-        lbl = ttk.Label(frame, text=disp, width=24); lbl.pack(side='left')
-        if help_txt:
-            try:
-                self._attach_tooltip(lbl, f'{name}\n{help_txt}')
-            except Exception:
-                pass
-        fmt = (lambda v: f'{float(v):.3f}') if kind == 'float' \
-              else (lambda v: f'{int(round(float(v)))}')
-        var = tk.DoubleVar(value=float(init)) if kind == 'float' \
-              else tk.IntVar(value=int(init))
-        entry = ttk.Entry(frame, width=8, justify='right')
-        entry.insert(0, fmt(init))
-        entry.pack(side='right')
-
-        def buffer_value(v):
-            try:
-                v = float(v) if kind == 'float' else int(round(float(v)))
-            except (TypeError, ValueError):
-                return
-            v = max(lo, min(hi, v))
-            var.set(v)
-            entry.delete(0, 'end'); entry.insert(0, fmt(v))
-            self._model_buf[name] = v
-            self._mark_model_dirty()
-
-        scale = ttk.Scale(frame, from_=lo, to=hi, variable=var,
-                          orient='horizontal',
-                          command=lambda value_str: entry.delete(0, 'end') or
-                                                     entry.insert(0, fmt(value_str)))
-        scale.pack(side='left', fill='x', expand=True, padx=8)
-        scale.bind('<ButtonRelease-1>', lambda e: buffer_value(var.get()))
-        entry.bind('<Return>',   lambda e: buffer_value(entry.get()))
-        entry.bind('<FocusOut>', lambda e: buffer_value(entry.get()))
-        # Exposed so Reset-to-defaults can re-populate this widget.
-        if not hasattr(self, '_model_setters'):
-            self._model_setters = {}
-        self._model_setters[name] = buffer_value
+        self._set_status('SWITCHING ENGINE...', '#aa6633')
+        def go():
+            ok = self.client.call_load_engine(path)
+            if ok:
+                self._active_engine = path
+                self._set_status('ENGINE SWITCHING', '#3366aa')
+            else:
+                messagebox.showerror(
+                    'Switch failed',
+                    'load_engine rejected (file missing on the Jetson?).')
+                self._set_status('ENGINE SWITCH FAILED', '#cc3333')
+        threading.Thread(target=go, daemon=True).start()
 
     def _set_all_classes(self, value):
         for var in self._model_class_vars.values():
@@ -919,36 +976,43 @@ class TunerUI:
             self._model_class_widgets.append((row, name))
 
     def _on_reset_model_defaults(self):
-        """Populate the Model-tab buffer with factory-default YOLO knobs
-        and clear the class filter. Engine path is left alone (the model
-        itself isn't a 'setting'). User then presses SAVE to commit."""
+        """Reset the live YOLO knobs (conf / IoU / max-det / inference-Hz) to
+        factory defaults and clear the class filter. Applies immediately;
+        engine path is left alone. Persist with the Detection Save & Apply."""
         if not messagebox.askyesno(
-                'Reset to defaults',
+                'Reset knobs to defaults',
                 'Restore conf / IoU / max-det / inference-Hz to factory '
                 'defaults and clear the class filter? Engine path is '
-                'unchanged. You still need to press SAVE to commit.'):
+                'unchanged. Press the Detection "Save & Apply" to persist.'):
             return
-        setters = getattr(self, '_model_setters', {})
+        setters = getattr(self, '_param_setters', {})
         for name, val in MODEL_DEFAULTS.items():
             fn = setters.get(name)
             if fn is not None:
-                fn(val)
+                fn(val)                       # update the slider/entry display
+            self.client.set_value(name, val)  # apply live
         for var in self._model_class_vars.values():
             var.set(False)
         self._mark_model_dirty()
-        self._set_status('DEFAULTS LOADED - SAVE TO COMMIT', '#aa6633')
+        self._set_status('KNOBS RESET (Save & Apply to persist)', '#aa6633')
 
     def _on_reload_engine(self):
-        """Tell the node to re-init the YOLO model from the current engine
-        path. Inference pauses briefly while the engine reloads. Not
-        buffered - the path isn't changing, so there's no edit to discard."""
+        """Commit the engine path currently in the entry (so the picker
+        selection actually takes effect) and re-init the model from it.
+        Fixes "select a new engine + reload doesn't switch"."""
         if not messagebox.askyesno(
                 'Reload engine',
-                'Re-initialise the YOLO model from the current engine path? '
+                'Re-initialise the YOLO model from the engine path shown? '
                 'Inference will pause briefly.'):
             return
+        path = self._model_engine_entry.get().strip()
         self._set_status('ENGINE RELOADING...', '#aa6633')
         def go():
+            # Commit the selected path first so reload targets the intended
+            # engine, not the previously-loaded one.
+            if path and path != self._active_engine:
+                if self.client.call_load_engine(path):
+                    self._active_engine = path
             ok = self.client.call_reload_engine()
             if ok:
                 self._set_status('ENGINE RELOADED', '#3366aa')
@@ -960,27 +1024,7 @@ class TunerUI:
                 self._set_status('RELOAD FAILED', '#cc3333')
         threading.Thread(target=go, daemon=True).start()
 
-    def _on_save_model_config(self, persist=True):
-        cfg = dict(self._model_buf)
-        cfg['engine_path'] = self._model_engine_entry.get().strip()
-        if self._model_class_vars:
-            sel = [self._model_class_id_map[n]
-                   for n, v in self._model_class_vars.items() if v.get()]
-            all_sel = len(sel) == len(self._model_class_vars)
-            cfg['classes'] = [] if all_sel else sel
-        def go():
-            ok = self.client.call_save_yolo_config(cfg, persist=persist)
-            if ok:
-                self._set_status('MODEL SAVED', '#3366aa')
-                self._active_engine = cfg['engine_path']
-                self._model_buf.clear()
-                self._clear_model_dirty()
-            else:
-                messagebox.showerror('Save failed',
-                                     'save_yolo_config service rejected.')
-        threading.Thread(target=go, daemon=True).start()
-
-    # ---- engine picker helpers (buffered: populate entry, no live swap) ----
+    # ---- engine picker helpers (fill the entry; Apply/Reload commit + swap) ----
 
     def _refresh_engine_list(self, current_path):
         self.engine_listbox.delete(0, tk.END)
@@ -996,9 +1040,11 @@ class TunerUI:
             self.engine_listbox.insert(tk.END, f'{p.name}{marker}')
 
     def _set_engine_buffer(self, path):
+        # Just fill the path entry; "Apply engine" / "Reload engine" / the tab
+        # Save & Apply are the explicit commit. (Don't mark the class-filter
+        # dirty flag here - that would block the class grid from refreshing.)
         self._model_engine_entry.delete(0, 'end')
         self._model_engine_entry.insert(0, path)
-        self._mark_model_dirty()
 
     def _on_pick_selected_engine(self):
         sel = self.engine_listbox.curselection()
@@ -1219,11 +1265,75 @@ class TunerUI:
         if not name:
             messagebox.showinfo('Name required', 'Enter a profile name first.')
             return
+        if _slugify_preset(name) in RESERVED_PRESET_SLUGS:
+            messagebox.showerror(
+                'Reserved name',
+                f'"{name}" is reserved (built-in preset or boot default). '
+                'Pick a different name.')
+            return
         def go():
             ok = self.client.call_save_profile(name)
             if ok:
                 self._refresh_profile_list()
+                self._refresh_preset_combo()
                 self._set_status('PROFILE SAVED', '#3366aa')
+        threading.Thread(target=go, daemon=True).start()
+
+    # ---- namable custom presets (presets bar) ----
+
+    def _custom_preset_names(self):
+        """User preset files in PROFILES_DIR, excluding the boot default.yaml."""
+        if not PROFILES_DIR.exists():
+            return []
+        return [p.name for p in sorted(PROFILES_DIR.glob('*.yaml'))
+                if p.name != 'default.yaml']
+
+    def _refresh_preset_combo(self):
+        try:
+            self._preset_combo['values'] = self._custom_preset_names()
+        except Exception:
+            pass
+
+    def _on_save_preset(self):
+        """Save ALL current settings as a namable custom preset. Never
+        overwrites a built-in quick preset or the boot default."""
+        name = self._preset_name_entry.get().strip()
+        if not name:
+            messagebox.showinfo('Name required', 'Type a preset name first.')
+            return
+        if _slugify_preset(name) in RESERVED_PRESET_SLUGS:
+            messagebox.showerror(
+                'Reserved name',
+                f'"{name}" is reserved (built-in preset or boot default). '
+                'Pick a different name for your custom preset.')
+            return
+        def go():
+            ok = self.client.call_save_profile(name)
+            if ok:
+                self._refresh_preset_combo()
+                self._refresh_profile_list()
+                self._set_status(f'PRESET {name} SAVED', '#3366aa')
+            else:
+                messagebox.showerror('Save failed',
+                                     f'Could not save preset {name}.')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_load_preset(self):
+        """Load a custom preset: applies every setting and swaps the engine
+        if the preset names a different one."""
+        name = self._preset_combo.get().strip()
+        if not name:
+            messagebox.showinfo('Pick a preset', 'Select a custom preset first.')
+            return
+        self._set_status(f'LOADING {name}...', '#aa6633')
+        def go():
+            ok = self.client.call_load_profile(name)
+            if ok:
+                self._set_status(f'PRESET {name} LOADED', '#3366aa')
+            else:
+                messagebox.showerror('Load failed',
+                                     f'Could not load preset {name}.')
+                self._set_status('LOAD FAILED', '#cc3333')
         threading.Thread(target=go, daemon=True).start()
 
     # ---- Control buttons ----
@@ -1295,6 +1405,12 @@ class TunerUI:
         threading.Thread(target=go, daemon=True).start()
 
     def _on_save_default(self):
+        if not messagebox.askyesno(
+                'Save ALL as default (boot)',
+                'Persist EVERY current setting — all tabs plus the current '
+                'engine — as the boot default (default.yaml)? The app will '
+                'load these on every launch.'):
+            return
         def go():
             ok = self.client.call_save_default()
             if ok:
