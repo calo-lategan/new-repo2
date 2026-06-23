@@ -20,9 +20,63 @@ import time
 import argparse
 import subprocess
 import threading
+import traceback
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
+
+# ---- Session log file (Round 12 commit Z) ----
+# Mirror UI events + errors into the same session log directory the node
+# writes to, so a single push_logs.sh run captures the full picture.
+_UI_LOG_DIR = os.environ.get(
+    'JETARM_V5_LOG_DIR',
+    os.path.expanduser('~/jetarm_v5/logs'))
+_UI_LOG_FILE = None
+_UI_LOG_LOCK = threading.Lock()
+_UI_TS = time.strftime('%Y-%m-%d_%H-%M-%S')
+
+
+def _ui_log(tag, msg, exc=None):
+    """Append a UI event to the session log. Also prints to stderr for the
+    launching terminal."""
+    line = f'[ui][{tag}] {msg}'
+    print(line, file=sys.stderr, flush=True)
+    global _UI_LOG_FILE
+    if _UI_LOG_FILE is None:
+        try:
+            os.makedirs(_UI_LOG_DIR, exist_ok=True)
+            path = os.path.join(_UI_LOG_DIR,
+                                f'v5_ui_{os.getpid()}_{_UI_TS}.log')
+            _UI_LOG_FILE = open(path, 'a', buffering=1)
+            _UI_LOG_FILE.write(f'# v5 ui session {_UI_TS} pid={os.getpid()}\n')
+        except Exception:
+            _UI_LOG_FILE = None
+    if _UI_LOG_FILE is None:
+        return
+    try:
+        with _UI_LOG_LOCK:
+            _UI_LOG_FILE.write(f'{time.strftime("%H:%M:%S")} {line}\n')
+            if exc is not None:
+                _UI_LOG_FILE.write(f'{time.strftime("%H:%M:%S")} '
+                                   f'EXCEPTION: {type(exc).__name__}: {exc}\n')
+                _UI_LOG_FILE.write(traceback.format_exc())
+    except Exception:
+        pass
+
+
+def _ui_excepthook(exc_type, exc_value, tb):
+    _ui_log('uncaught', f'{exc_type.__name__}: {exc_value}')
+    if _UI_LOG_FILE is not None:
+        try:
+            with _UI_LOG_LOCK:
+                _UI_LOG_FILE.write(''.join(
+                    traceback.format_exception(exc_type, exc_value, tb)))
+        except Exception:
+            pass
+    sys.__excepthook__(exc_type, exc_value, tb)
+
+
+sys.excepthook = _ui_excepthook
 
 import rclpy
 from rclpy.node import Node
@@ -104,16 +158,22 @@ MODEL_FLOAT_PARAMS = [
     # Aspect-ratio gate for the short-axis grasp preference. Below this
     # the OBB is "near square" and vendor min-yaw is used.
     ('grasp_short_axis_min_ratio', 0.02, 0.50, 0.01),
-    # Depth sanity-gate band (metres). Detections outside the band are
-    # dropped (filters hands above and reflections below the workspace).
-    ('depth_min_z_m',        -0.10, 0.20, 0.005),
-    ('depth_max_z_m',         0.05, 0.50, 0.005),
 ]
 MODEL_INT_PARAMS = [
     ('yolo_max_det',             1, 300, 1),
     # Pixel-space overlay nudge - shift boxes to sit on the objects.
     ('detection_offset_x',    -300, 300, 1),
     ('detection_offset_y',    -300, 300, 1),
+]
+# Round 12 Y6: ALL depth + camera + workspace controls live on the
+# Calibrate tab. Detection tab keeps YOLO + pixel-offset only.
+CALIB_DEPTH_FLOAT_PARAMS = [
+    # Depth sanity-gate band. Once a plane is fit, the gate uses
+    # height-above-plane and depth_min_z_m is largely unused.
+    ('depth_min_z_m',        -0.10, 0.20, 0.005),
+    ('depth_max_z_m',         0.05, 0.50, 0.005),
+]
+CALIB_DEPTH_INT_PARAMS = [
     # Half-size (in pixels) of the median window used for per-object depth.
     ('depth_window_px',          1, 30, 1),
 ]
@@ -202,6 +262,10 @@ class TunerClient(Node):
         self.enable_cli = self.create_client(SetBool, f'/{target_node}/enable_sorting')
         self.recalibrate_cli = self.create_client(Trigger, f'/{target_node}/recalibrate')
         self.run_calibration_cli = self.create_client(Trigger, f'/{target_node}/run_calibration')
+        # Round 12 Y6: refit just the depth-table plane without
+        # re-running the AprilTag step.
+        self.depth_plane_refit_cli = self.create_client(
+            Trigger, f'/{target_node}/depth_plane_refit')
         self.enter_cli = self.create_client(Trigger, f'/{target_node}/enter')
         self.exit_cli = self.create_client(Trigger, f'/{target_node}/exit')
         self.load_engine_cli = self.create_client(SetStringBool, f'/{target_node}/load_engine')
@@ -314,6 +378,13 @@ class TunerClient(Node):
 
     def call_recalibrate(self): return self._trigger(self.recalibrate_cli)
     def call_run_calibration(self): return self._trigger(self.run_calibration_cli)
+    def trigger_service(self, name):
+        """Generic Trigger-service call by short name. Used by tabs that
+        add buttons after the constructor (Round 12 Y6: depth_plane_refit)."""
+        cli = getattr(self, f'{name}_cli', None)
+        if cli is None:
+            return False
+        return self._trigger(cli)
     def call_reload_engine(self): return self._trigger(self.reload_engine_cli)
     def call_test_grip(self, class_name):
         return self._set_string_bool(self.test_grip_cli, str(class_name), True)
@@ -372,6 +443,7 @@ class TunerUI:
     def _poll_node_status(self):
         try:
             st = self.client.latest_status
+            self._last_status = st  # Round 12 X1: read in _on_calibrate
             age = time.time() - self.client.status_rx_t
             if st is None:
                 pass  # node hasn't published yet - keep the placeholder
@@ -397,6 +469,26 @@ class TunerUI:
                     f"ai={st.get('ai', '?')} "
                     f"inf_age={st.get('inference_age_ms', '-')}ms "
                     f"depth={d_str}{badge}")
+                # Round 12 Y6: populate the Calibrate-tab status panel.
+                if hasattr(self, 'calib_status_var'):
+                    tp = st.get('table_plane')
+                    plane_str = ('[{:.3f}, {:.3f}, {:.3f}, {:.3f}]'.format(*tp)
+                                 if tp and len(tp) == 4 else 'NOT FIT')
+                    tf_str = 'aligned' if st.get('depth_tf_ok') else 'unavailable'
+                    last = st.get('last_calibrate') or {}
+                    last_str = ('OK ({})'.format(last.get('source', '?'))
+                                if last.get('ok')
+                                else ('{}: {}'.format(
+                                        last.get('source', '?'),
+                                        last.get('error') or '-')
+                                      if last else '(never)'))
+                    self.calib_status_var.set(
+                        f"depth topic : {st.get('depth_topic', '') or 'OFF'}\n"
+                        f"depth status: {d_str} (age {d_age} ms)\n"
+                        f"depth->color TF: {tf_str}\n"
+                        f"table plane : {plane_str}\n"
+                        f"last cal    : {last_str}"
+                    )
                 engine = st.get('engine') or ''
                 task = st.get('task') or ''
                 override = (st.get('task_override') or 'auto').strip().lower()
@@ -499,6 +591,14 @@ class TunerUI:
                                      fg='white', font=('TkDefaultFont', 10, 'bold'),
                                      width=18, height=2, command=self._on_save_default)
         self.savedef_btn.pack(side='left', padx=4)
+        # Round 12 Z2: push the most recent session logs to the GitHub repo
+        # so subsequent Claude Code sessions have full diagnostic context.
+        self.pushlogs_btn = tk.Button(btn_row, text='PUSH LOGS', bg='#558855',
+                                      fg='white',
+                                      font=('TkDefaultFont', 10, 'bold'),
+                                      width=11, height=2,
+                                      command=self._on_push_logs)
+        self.pushlogs_btn.pack(side='left', padx=4)
 
         # ---- Independent stop/start: camera subscription + YOLO inference ----
         # These let the user A/B the load contributions on the Orin Nano:
@@ -1155,21 +1255,126 @@ class TunerUI:
             self._add_float(knob_frame, name, lo, hi, res,
                             float(current.get(name, lo)))
 
-        btn_frame = ttk.LabelFrame(parent, text='Overlay')
+        # Round 12 Y6: depth + camera controls all live here now.
+        depth_frame = ttk.LabelFrame(parent, text='Camera & depth (live)')
+        depth_frame.pack(fill='x', padx=8, pady=4)
+        ttk.Label(depth_frame, foreground='#666', wraplength=720,
+                  text='Depth-aware Z, sanity gate, and depth overlay. '
+                       'When a table plane is fit (run CALIBRATE), the '
+                       'gate becomes "above plane" so depth_min_z_m is '
+                       'effectively unused.',
+                  justify='left'
+                  ).pack(anchor='w', padx=8, pady=(2, 4))
+        # Boolean toggles inline (small row).
+        toggle_row = ttk.Frame(depth_frame); toggle_row.pack(fill='x', padx=4)
+        for bname in ('use_depth_for_z', 'overlay_depth_view',
+                      'prefer_inline_calibration'):
+            self._add_bool(toggle_row, bname,
+                           bool(current.get(bname, False)))
+        for name, lo, hi, res in CALIB_DEPTH_FLOAT_PARAMS:
+            self._add_float(depth_frame, name, lo, hi, res,
+                            float(current.get(name, lo)))
+        for name, lo, hi, res in CALIB_DEPTH_INT_PARAMS:
+            self._add_int(depth_frame, name, lo, hi, res,
+                          int(current.get(name, lo)))
+
+        # Live status panel (Round 12 Y6). Bound by _poll_node_status.
+        status_frame = ttk.LabelFrame(parent,
+                                      text='Camera & depth status (live)')
+        status_frame.pack(fill='x', padx=8, pady=4)
+        self.calib_status_var = tk.StringVar(
+            value='(awaiting heartbeat...)')
+        ttk.Label(status_frame, textvariable=self.calib_status_var,
+                  foreground='#222', wraplength=720, justify='left',
+                  font=('TkFixedFont', 9)
+                  ).pack(anchor='w', padx=8, pady=(4, 6))
+
+        btn_frame = ttk.LabelFrame(parent, text='Overlay & actions')
         btn_frame.pack(fill='x', padx=8, pady=4)
         ttk.Label(btn_frame, foreground='#666',
-                  text='Live workspace overlay - rectangle, axes, and '
-                       'per-object grab aim. Save & Close clears it.'
+                  text='Live workspace overlay - rectangle, axes, '
+                       'per-object grab aim, optional depth heatmap. '
+                       'Save & Close persists everything to default.yaml.'
                   ).pack(anchor='w', padx=8, pady=(2, 4))
         row = ttk.Frame(btn_frame); row.pack(fill='x', padx=4, pady=4)
         tk.Button(row, text='Enter manual mode', bg='#3366aa', fg='white',
                   font=('TkDefaultFont', 10, 'bold'),
                   command=self._on_enter_manual_calibrate
                   ).pack(side='left', padx=4)
+        tk.Button(row, text='Run AprilTag calibrate', bg='#226699',
+                  fg='white', font=('TkDefaultFont', 10, 'bold'),
+                  command=self._on_calibrate
+                  ).pack(side='left', padx=4)
+        tk.Button(row, text='Plane refit', bg='#226666', fg='white',
+                  font=('TkDefaultFont', 10, 'bold'),
+                  command=self._on_plane_refit
+                  ).pack(side='left', padx=4)
         tk.Button(row, text='Reset to 0', bg='#aa6633', fg='white',
                   font=('TkDefaultFont', 10, 'bold'),
                   command=self._on_calibrate_reset
                   ).pack(side='left', padx=4)
+
+    def _on_push_logs(self):
+        """Round 12 Z2: run tools/push_logs.sh in a worker thread so the
+        latest session logs land in the repo's logs/ folder + GitHub."""
+        def go():
+            try:
+                # Try a few standard repo locations on the Jetson.
+                candidates = [
+                    os.path.expanduser('~/new-repo2'),
+                    os.path.expanduser('~/jetarm-repo'),
+                    os.path.expanduser('~/repo'),
+                ]
+                repo = next((p for p in candidates
+                             if os.path.isdir(os.path.join(p, '.git'))),
+                            None)
+                if repo is None:
+                    self._set_status('PUSH LOGS: no repo found '
+                                     '(set REPO env)', '#aa6633')
+                    _ui_log('push_logs', 'no repo found')
+                    return
+                script = os.path.join(repo, 'tools', 'push_logs.sh')
+                if not os.path.isfile(script):
+                    self._set_status('PUSH LOGS: tools/push_logs.sh '
+                                     'missing', '#aa6633')
+                    _ui_log('push_logs', f'script missing in {repo}')
+                    return
+                self._set_status('PUSH LOGS: running...', '#3366aa')
+                _ui_log('push_logs', f'running {script} REPO={repo}')
+                env = os.environ.copy()
+                env['REPO'] = repo
+                res = subprocess.run(['bash', script], env=env,
+                                     capture_output=True, text=True,
+                                     timeout=120)
+                if res.returncode == 0:
+                    self._set_status('PUSH LOGS: pushed', '#3366aa')
+                    _ui_log('push_logs', 'OK')
+                else:
+                    self._set_status(
+                        f'PUSH LOGS: rc={res.returncode}', '#aa6633')
+                    _ui_log('push_logs', f'rc={res.returncode} '
+                                          f'stderr={res.stderr[-500:]}')
+            except Exception as e:
+                self._set_status('PUSH LOGS: error', '#aa6633')
+                _ui_log('push_logs', 'crashed', exc=e)
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_plane_refit(self):
+        """Round 12 Y6: call the node's depth_plane_refit service."""
+        def go():
+            try:
+                ok = self.client.trigger_service('depth_plane_refit')
+                if ok:
+                    self._set_status('Plane refit OK', '#3366aa')
+                    _ui_log('plane_refit', 'OK')
+                else:
+                    self._set_status('Plane refit failed (no depth?)',
+                                     '#aa6633')
+                    _ui_log('plane_refit', 'failed')
+            except Exception as e:
+                _ui_log('plane_refit', 'crashed', exc=e)
+                self._set_status('Plane refit error', '#aa6633')
+        threading.Thread(target=go, daemon=True).start()
 
     def _on_enter_manual_calibrate(self):
         def go():
@@ -1708,20 +1913,46 @@ class TunerUI:
         threading.Thread(target=go, daemon=True).start()
 
     def _on_calibrate(self):
-        # Vendor AprilTag calibration: STOPS sorting and MOVES the arm.
+        # AprilTag calibration: STOPS sorting and MOVES the arm.
+        # Round 12 X2: honest confirm text; X1: surface failure reason
+        # from heartbeat last_calibrate.error so the user sees WHY a run
+        # failed instead of a flat "CALIBRATE FAILED".
         if not messagebox.askyesno(
                 'Run calibration?',
-                'This STOPS sorting and MOVES the arm to the calibration '
-                'pose, then runs AprilTag calibration.\n\n'
-                'Requires AprilTags (IDs 1/2/3, fallback 100; 2.5 cm) flat '
-                'and fully in the camera view.\n\nContinue?'):
+                'AprilTag calibration.\n\n'
+                'Requires:\n'
+                '  - ONE AprilTag (ID 1/2/3/100, 2.5 cm, tag36h11).\n'
+                '  - Tag flat on the mat and fully in camera view.\n'
+                '  - Workspace clear (the arm moves to its calibration pose).\n\n'
+                'On vendor-node failure, v5 falls back to inline solvePnP.\n\n'
+                'Continue?'):
             return
         def go():
+            _ui_log('calibrate', 'CALIBRATE button pressed')
             self.client.call_enable_sorting(False)
             self._set_status('CALIBRATING...', '#3366aa')
-            ok = self.client.call_run_calibration()
-            self._set_status('STOPPED (calibrated)' if ok else 'CALIBRATE FAILED',
-                             '#aa3333' if ok else '#aa6633')
+            self.client.call_run_calibration()
+            # Wait briefly for the heartbeat to refresh, then read the
+            # most recent last_calibrate to determine real status + reason.
+            time.sleep(2.0)
+            for _ in range(20):
+                st = getattr(self, '_last_status', None) or {}
+                last = st.get('last_calibrate')
+                if last and last.get('ts'):
+                    if last.get('ok'):
+                        src = last.get('source', '?')
+                        self._set_status(f'CALIBRATED ({src})', '#aa3333')
+                        _ui_log('calibrate', f'OK source={src}')
+                    else:
+                        reason = last.get('error') or 'unknown'
+                        src = last.get('source', '?')
+                        self._set_status(
+                            f'CALIBRATE FAILED ({src}): {reason}', '#aa6633')
+                        _ui_log('calibrate', f'FAILED source={src} reason={reason}')
+                    return
+                time.sleep(0.5)
+            self._set_status('CALIBRATE TIMED OUT', '#aa6633')
+            _ui_log('calibrate', 'timed out waiting for heartbeat')
         threading.Thread(target=go, daemon=True).start()
 
     def _on_toggle_camera_sub(self):

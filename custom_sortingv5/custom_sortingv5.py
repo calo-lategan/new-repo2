@@ -67,17 +67,91 @@ from pathlib import Path
 # `_debug_enabled` flipping the module flag.
 _DEBUG = os.environ.get('JETARM_V5_DEBUG', '0') == '1'
 
+# ---- Session log file (Round 12 commit Z) ----
+# Every _stage() line is mirrored to a per-session log file the user can push
+# to the GitHub repo via tools/push_logs.sh. Survives process exit; rotated
+# at boot to keep only the last 20 sessions. NO camera frames are written -
+# text only.
+_LOG_DIR = os.environ.get(
+    'JETARM_V5_LOG_DIR',
+    os.path.expanduser('~/jetarm_v5/logs'))
+_LOG_FILE = None
+_LOG_LOCK = threading.Lock()
+_SESSION_TS = time.strftime('%Y-%m-%d_%H-%M-%S')
+
+def _open_session_log():
+    """Open the session log file once per process. Idempotent; failures are
+    swallowed so a broken filesystem never takes down the node."""
+    global _LOG_FILE
+    if _LOG_FILE is not None:
+        return _LOG_FILE
+    try:
+        os.makedirs(_LOG_DIR, exist_ok=True)
+        # Rotate: keep only the 20 most recent.
+        try:
+            files = sorted([f for f in os.listdir(_LOG_DIR)
+                            if f.startswith('v5_session_') and f.endswith('.log')])
+            for old in files[:-20]:
+                try: os.remove(os.path.join(_LOG_DIR, old))
+                except Exception: pass
+        except Exception:
+            pass
+        path = os.path.join(_LOG_DIR,
+                            f'v5_session_{os.getpid()}_{_SESSION_TS}.log')
+        _LOG_FILE = open(path, 'a', buffering=1)  # line-buffered
+        _LOG_FILE.write(f'# v5 session {_SESSION_TS} pid={os.getpid()}\n')
+        return _LOG_FILE
+    except Exception:
+        _LOG_FILE = None
+        return None
+
 
 def _stage(tag, msg, exc=None):
     """Print a stage marker to stderr in a single grep-friendly format.
     Always prints when called (this is the primary diagnostic surface that
-    the user asked for - terminal-visible problem reports at each stage)."""
+    the user asked for - terminal-visible problem reports at each stage).
+    Round 12: also mirrors to ~/jetarm_v5/logs/v5_session_<pid>_<ts>.log."""
     line = f'[v4][{tag}] {msg}'
     print(line, file=sys.stderr, flush=True)
     if exc is not None:
         print(f'[v4][{tag}] EXCEPTION: {type(exc).__name__}: {exc}',
               file=sys.stderr, flush=True)
         traceback.print_exc(file=sys.stderr)
+    # Mirror to session log file (best-effort).
+    f = _open_session_log()
+    if f is not None:
+        try:
+            with _LOG_LOCK:
+                f.write(f'{time.strftime("%H:%M:%S")} {line}\n')
+                if exc is not None:
+                    f.write(f'{time.strftime("%H:%M:%S")} [v4][{tag}] '
+                            f'EXCEPTION: {type(exc).__name__}: {exc}\n')
+                    f.write(traceback.format_exc())
+        except Exception:
+            pass
+
+
+def _install_excepthook():
+    """Append uncaught exceptions to the session log so crashes survive to
+    the repo's logs/ folder for later analysis."""
+    prev = sys.excepthook
+
+    def _hook(exc_type, exc_value, tb):
+        _stage('uncaught', f'{exc_type.__name__}: {exc_value}')
+        f = _open_session_log()
+        if f is not None:
+            try:
+                with _LOG_LOCK:
+                    f.write(''.join(traceback.format_exception(exc_type, exc_value, tb)))
+            except Exception:
+                pass
+        if prev:
+            prev(exc_type, exc_value, tb)
+
+    sys.excepthook = _hook
+
+
+_install_excepthook()
 
 
 def _dbg(tag, msg):
@@ -708,8 +782,18 @@ class ObjectSortingNodeV5(Node):
         ('depth_window_px', 5, (1, 30)),
         # Sanity gate: drop detections whose median depth is outside this
         # band (above table = floating, hand; below table = reflection).
+        # Once a table plane is fit (Y2), the gate becomes "above plane"
+        # and depth_min_z_m is effectively unused.
         ('depth_min_z_m', -0.02, (-0.10, 0.20)),
         ('depth_max_z_m',  0.20, (0.05, 0.50)),
+        # Calibration: when True, the CALIBRATE button skips the separate
+        # vendor calibration node and runs solvePnP inline. Useful when
+        # the vendor node is dead or misbehaving.
+        ('prefer_inline_calibration', False, None),
+        # Overlay: paint a JET-colormapped depth heatmap inside the
+        # workspace ROI so the user can SEE whether depth is reading the
+        # cubes (Round 12 Y5).
+        ('overlay_depth_view', False, None),
         # ---- Motion ----
         ('motion_speed', 1.5, (0.3, 2.5)),
         ('aggression', 1.3, (0.3, 2.0)),
@@ -825,6 +909,10 @@ class ObjectSortingNodeV5(Node):
         self.config_file = 'transform.yaml'
         self.calibration_file = 'calibration.yaml'
         self.config_path = "/home/ubuntu/ros2_ws/src/app/config/"
+        # Vendor mat dimensions (calibration.py L53-54) - used by the
+        # inline AprilTag calibration to compute workspace corners.
+        self.white_area_width = 0.167
+        self.white_area_height = 0.13
         if 'CAMERA_TYPE' not in os.environ:
             _stage('init', 'CAMERA_TYPE env var is missing - downstream code WILL fail. '
                            'Did the launcher source the Hiwonder env?')
@@ -932,6 +1020,10 @@ class ObjectSortingNodeV5(Node):
         # 'enter' moves the arm, and only the node can refresh the ROI.
         self.create_service(Trigger, '~/run_calibration',
                             self.run_calibration_srv_callback,
+                            callback_group=self.svc_group)
+        # Round 12 Y6: refit the table plane without re-running AprilTag.
+        self.create_service(Trigger, '~/depth_plane_refit',
+                            self._depth_plane_refit_srv,
                             callback_group=self.svc_group)
 
         # ---- Vendor calibration node clients (idle until CALIBRATE) ----
@@ -1042,6 +1134,14 @@ class ObjectSortingNodeV5(Node):
         self._latest_depth_ts = 0.0
         self._depth_topic = ''
         self._depth_first_logged = False
+        self._depth_cam_info = None
+        # Round 12 Y1: depth->color TF (depth_cam_link -> depth_cam_color_frame).
+        # Set asynchronously after the static TF arrives. None until then.
+        self._depth_to_color_tf = None
+        self._depth_tf_ok = False
+        # Round 12 Y2/Y3: table plane fit + per-pixel plane heights.
+        self.table_plane = None
+        self._plane_values = None
         for topic in ('/depth_cam/depth_to_color', '/depth_cam/depth/image_raw'):
             try:
                 self.create_subscription(Image, topic, self._depth_callback,
@@ -1051,6 +1151,17 @@ class ObjectSortingNodeV5(Node):
                 break
             except Exception as e:
                 _stage('init', f'depth subscription failed for {topic}', exc=e)
+        # Depth camera_info subscription so the inline plane fit has fx/fy/cx/cy.
+        try:
+            self.create_subscription(CameraInfo, '/depth_cam/depth/camera_info',
+                                     self._depth_cam_info_callback,
+                                     1, callback_group=self.cam_group)
+        except Exception as e:
+            _stage('init', 'depth camera_info subscription failed', exc=e)
+        # TF lookup runs in a background thread so we don't block boot if the
+        # static publisher is slow.
+        threading.Thread(target=self._lookup_depth_color_tf,
+                         daemon=True).start()
 
         self._startup_done = False
         self._frames_received = 0
@@ -1392,6 +1503,12 @@ class ObjectSortingNodeV5(Node):
                 'depth_available': bool(getattr(self, '_depth_available', False)),
                 'depth_age_ms': (int(1000 * (time.time() - getattr(self, '_latest_depth_ts', 0.0)))
                                  if getattr(self, '_depth_available', False) else -1),
+                # Round 12 Y6: extra status for the Calibrate-tab panel.
+                'depth_tf_ok': bool(getattr(self, '_depth_tf_ok', False)),
+                'table_plane': (list(self.table_plane)
+                                if getattr(self, 'table_plane', None) is not None
+                                else None),
+                'last_calibrate': getattr(self, '_last_calibrate', None),
                 # v5: class names from model.names (id -> name). The tuner
                 # UI auto-populates the Classes filter + Places tab when
                 # this changes.
@@ -1465,6 +1582,15 @@ class ObjectSortingNodeV5(Node):
             extristric = np.array(config['extristric'])
             corners = np.array(config['corners']).reshape(-1, 3)
             self.white_area_center = np.array(config['white_area_pose_world'])
+            # Round 12 Y2: load table plane if present (set by vendor or
+            # inline calibration when depth is available).
+            if 'plane' in config and config['plane'] is not None:
+                self.table_plane = np.array(config['plane'],
+                                            dtype=np.float64).ravel()
+                _stage('roi', f'  loaded plane: {self.table_plane.tolist()}')
+            else:
+                self.table_plane = None
+                self._plane_values = None
             _stage('roi', f'  yaml loaded: extristric.shape={extristric.shape} '
                           f'corners.shape={corners.shape} '
                           f'white_area_center.shape={self.white_area_center.shape}')
@@ -1642,73 +1768,360 @@ class ObjectSortingNodeV5(Node):
         res = fut.result() if fut.done() else None
         return bool(res and res.success)
 
+    def _depth_plane_refit_srv(self, request, response):
+        """Round 12 Y6: refit the table plane from the latest depth frame
+        and persist it to transform.yaml. Useful when the camera angle has
+        shifted slightly but the AprilTag calibration is still good."""
+        try:
+            plane = self._fit_table_plane()
+            if plane is None:
+                _stage('calibrate', 'plane refit: no depth / SearchPlane unavail')
+                response.success = False
+                return response
+            cfg_path = os.path.join(self.config_path, self.config_file)
+            try:
+                with open(cfg_path, 'r') as f:
+                    data = yaml.safe_load(f) or {}
+            except Exception:
+                data = {}
+            data['plane'] = list(plane)
+            try:
+                with open(cfg_path, 'w') as f:
+                    yaml.safe_dump(data, f)
+                self.start_get_roi = True
+                _stage('calibrate', 'plane refit: persisted')
+                response.success = True
+            except Exception as e:
+                _stage('calibrate', 'plane refit: yaml write failed', exc=e)
+                response.success = False
+        except Exception as e:
+            _stage('calibrate', 'plane refit crashed', exc=e)
+            response.success = False
+        return response
+
     def _run_vendor_calibration(self):
         """Drive the vendor AprilTag calibration node end to end, then
         rebuild ROI from the transform.yaml it writes. Fully guarded -
-        never raises, always tries to leave the vendor node in 'exit'."""
+        never raises, always tries to leave the vendor node in 'exit'.
+
+        Round 12 X1+X4: capture per-stage failure reason and (if requested
+        or vendor unreachable) fall back to the inline _v5_inline_calibrate
+        path. Reason strings published in heartbeat last_calibrate so the
+        UI can show CALIBRATE FAILED: <reason>."""
+        result_source = 'vendor'
         try:
-            # Safety: stop sorting + motion BEFORE the vendor 'enter' moves
-            # the arm to its calibration pose.
             self.enable_sorting = False
             try:
                 self.motion.abort(True)
             except Exception:
                 pass
             self.target = None
-            _stage('calibrate', 'sorting force-stopped; starting vendor calibration')
+            _stage('calibrate', 'sorting force-stopped; starting calibration')
             self._calib_finished.clear()
+
+            prefer_inline = bool(self.p('prefer_inline_calibration'))
+            vendor_up = self.calib_enter_cli.wait_for_service(timeout_sec=2.0)
+            if prefer_inline or not vendor_up:
+                reason = 'prefer_inline' if prefer_inline else 'no_vendor_node'
+                _stage('calibrate', f'using inline fallback ({reason})')
+                ok, inline_reason = self._v5_inline_calibrate()
+                result_source = 'inline'
+                self._last_calibrate = {
+                    'ts': time.time(), 'ok': bool(ok),
+                    'source': result_source,
+                    'error': None if ok else inline_reason,
+                }
+                if ok:
+                    self.start_get_roi = True
+                    self._flash_overlay()
+                return
 
             if not self._call_trigger(self.calib_enter_cli):
                 _stage('calibrate', 'vendor enter failed/timed out')
                 self._last_calibrate = {'ts': time.time(), 'ok': False,
+                                        'source': 'vendor',
                                         'error': 'enter_failed'}
                 self._call_trigger(self.calib_exit_cli, timeout=3.0)
+                # Auto-fallback: vendor present but enter failed - try inline.
+                _stage('calibrate', 'auto-falling back to inline calibrate')
+                ok, inline_reason = self._v5_inline_calibrate()
+                if ok:
+                    self.start_get_roi = True
+                    self._flash_overlay()
+                    self._last_calibrate = {'ts': time.time(), 'ok': True,
+                                            'source': 'inline',
+                                            'error': None}
+                else:
+                    self._last_calibrate['error'] = (
+                        f'enter_failed_then_{inline_reason}')
                 return
             if not self._call_trigger(self.calib_start_cli):
                 _stage('calibrate', 'vendor start failed/timed out')
                 self._last_calibrate = {'ts': time.time(), 'ok': False,
+                                        'source': 'vendor',
                                         'error': 'start_failed'}
                 self._call_trigger(self.calib_exit_cli, timeout=3.0)
                 return
-            # Wait for the vendor's /calibration/finish Bool (PnP solved).
             got = self._calib_finished.wait(timeout=20.0)
             if not got:
                 _stage('calibrate', 'timed out waiting for /calibration/finish '
-                                    '(too few AprilTags in view?)')
+                                    '(no AprilTag in view? tag id must be '
+                                    '1/2/3/100; tag must be steady)')
             self._call_trigger(self.calib_exit_cli, timeout=3.0)
             if got:
-                # transform.yaml was rewritten - rebuild ROI from it.
                 self.start_get_roi = True
-                _stage('calibrate', 'finished; rebuilding ROI from new transform.yaml')
-                # Briefly show the calibration overlay so the user sees how
-                # the workspace was resolved. Worker thread flips it back to
-                # 'off' after calibrate_flash_secs.
-                try:
-                    self.set_parameters([rclpy.parameter.Parameter(
-                        'calibrate_overlay_mode', value='flash')])
-                    flash_secs = float(self.p('calibrate_flash_secs'))
-                    def _clear_flash():
-                        time.sleep(max(0.5, flash_secs))
-                        try:
-                            self.set_parameters([rclpy.parameter.Parameter(
-                                'calibrate_overlay_mode', value='off')])
-                        except Exception:
-                            pass
-                    threading.Thread(target=_clear_flash, daemon=True).start()
-                except Exception as e:
-                    _stage('calibrate', 'flash overlay schedule failed', exc=e)
+                _stage('calibrate', 'finished; rebuilding ROI from new '
+                                    'transform.yaml')
+                self._flash_overlay()
             self._last_calibrate = {'ts': time.time(), 'ok': bool(got),
-                                    'source': 'vendor'}
+                                    'source': 'vendor',
+                                    'error': None if got else 'finish_timeout'}
         except Exception as e:
-            _stage('calibrate', 'vendor calibration crashed', exc=e)
+            _stage('calibrate', 'calibration crashed', exc=e)
             try:
                 self._call_trigger(self.calib_exit_cli, timeout=3.0)
             except Exception:
                 pass
             self._last_calibrate = {'ts': time.time(), 'ok': False,
-                                    'error': 'exception'}
+                                    'source': result_source,
+                                    'error': f'exception:{type(e).__name__}'}
         finally:
             self._calibrating = False
+
+    def _flash_overlay(self):
+        """Flash the calibration overlay for `calibrate_flash_secs` then
+        revert to 'off'. Shared by vendor + inline success paths."""
+        try:
+            self.set_parameters([rclpy.parameter.Parameter(
+                'calibrate_overlay_mode', value='flash')])
+            flash_secs = float(self.p('calibrate_flash_secs'))
+
+            def _clear_flash():
+                time.sleep(max(0.5, flash_secs))
+                try:
+                    self.set_parameters([rclpy.parameter.Parameter(
+                        'calibrate_overlay_mode', value='off')])
+                except Exception:
+                    pass
+            threading.Thread(target=_clear_flash, daemon=True).start()
+        except Exception as e:
+            _stage('calibrate', 'flash overlay schedule failed', exc=e)
+
+    def _v5_inline_calibrate(self):
+        """Vendor-style AprilTag calibration ported into v5 so we can
+        calibrate even when the separate vendor node is dead. Mirrors
+        full jetarm source for context/app/app/calibration.py L132-226:
+
+        1. Grab the latest RGB frame.
+        2. dt_apriltags.Detector.detect() with the SAME params the vendor
+           uses (tag36h11, tag_size=0.025).
+        3. Filter to exactly ONE tag in [1,2,3,100], require the tag to be
+           steady (distance to last frame's tag < 0.003 m), collect 10
+           stable samples (timeout 15 s).
+        4. cv2.solvePnP over the 10x4 corner correspondences.
+        5. Average tag poses, compose with vendor's hand2cam_tf_matrix
+           and the endpoint pose -> white_area_pose_world.
+        6. Build the 4 workspace corners via xyz_euler_to_mat.
+        7. Write transform.yaml in the vendor schema -> get_roi() reloads.
+
+        Returns (ok: bool, reason: str). Reason is one of:
+          'no_apriltags_lib' / 'no_frame' / 'no_intrinsics' / 'tag_not_seen'
+          / 'multiple_tags' / 'unsteady' / 'solve_pnp_failed' /
+          'no_endpoint' / 'write_failed' / 'exception'."""
+        try:
+            try:
+                from dt_apriltags import Detector
+            except ImportError:
+                _stage('calibrate', 'inline: dt_apriltags not installed '
+                                    '(pip3 install --user dt_apriltags)')
+                return False, 'no_apriltags_lib'
+            if self._latest_raw_bgr is None:
+                return False, 'no_frame'
+            if self.intrinsic is None or self.distortion is None:
+                return False, 'no_intrinsics'
+            K = np.asarray(self.intrinsic, dtype=np.float64)
+            D = np.asarray(self.distortion, dtype=np.float64).reshape(-1)
+            fx, fy = float(K[0, 0]), float(K[1, 1])
+            cx_i, cy_i = float(K[0, 2]), float(K[1, 2])
+            tag_size = 0.025
+            valid_ids = {1, 2, 3, 100}
+            detector = Detector(families='tag36h11', nthreads=4,
+                                quad_decimate=1.0, quad_sigma=0.0,
+                                refine_edges=1, decode_sharpening=0.25,
+                                debug=0)
+            samples = []
+            t0 = time.time()
+            last_t = None
+            seen_any = False
+            saw_multiple = False
+            while time.time() - t0 < 15.0 and len(samples) < 10:
+                bgr = self._latest_raw_bgr
+                if bgr is None:
+                    time.sleep(0.05)
+                    continue
+                gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+                detections = detector.detect(
+                    gray, True, (fx, fy, cx_i, cy_i), tag_size)
+                if len(detections) > 1:
+                    saw_multiple = True
+                    last_t = None
+                    time.sleep(0.05); continue
+                if len(detections) == 1 and detections[0].tag_id in valid_ids:
+                    seen_any = True
+                    t = detections[0]
+                    if last_t is not None and common.distance(last_t.pose_t,
+                                                              t.pose_t) > 0.003:
+                        samples = []
+                    samples.append(t)
+                    last_t = t
+                time.sleep(0.05)
+            if len(samples) < 10:
+                if saw_multiple and not seen_any:
+                    return False, 'multiple_tags'
+                if not seen_any:
+                    return False, 'tag_not_seen'
+                return False, 'unsteady'
+            # solvePnP over all sampled corners.
+            world_pts = np.array(
+                [(-tag_size / 2, -tag_size / 2, 0),
+                 ( tag_size / 2, -tag_size / 2, 0),
+                 ( tag_size / 2,  tag_size / 2, 0),
+                 (-tag_size / 2,  tag_size / 2, 0)] * len(samples),
+                dtype=np.float64)
+            image_pts = np.array([t.corners for t in samples],
+                                 dtype=np.float64).reshape(-1, 2)
+            ok, rvec, tvec = cv2.solvePnP(world_pts, image_pts, K, D)
+            if not ok:
+                return False, 'solve_pnp_failed'
+            rmat, _ = cv2.Rodrigues(rvec)
+            extristric = [tvec.flatten().tolist(),
+                          rmat[0].tolist(),
+                          rmat[1].tolist(),
+                          rmat[2].tolist()]
+            # Average tag poses (vendor calibration.py L162-180).
+            poses = [common.xyz_rot_to_mat(t.pose_t, t.pose_R) for t in samples]
+            vectors = [p.ravel() for p in poses]
+            avg_pose = np.mean(np.array(vectors), axis=0).reshape((4, 4))
+            white_area_pose_cam = avg_pose
+            # hand2cam: use the vendor constant (calibration.py L28-33). If
+            # a future Y1 TF lookup folds in the depth->color offset it can
+            # multiply on top.
+            hand2cam = np.array([
+                [0.0, 0.0, 1.0, -0.101],
+                [-1.0, 0.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0, 0.05],
+                [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
+            if getattr(self, '_depth_to_color_tf', None) is not None:
+                hand2cam = np.matmul(self._depth_to_color_tf, hand2cam)
+            pose_end = np.matmul(hand2cam, avg_pose)
+            endpoint = self._current_endpoint_pose()
+            if endpoint is None:
+                return False, 'no_endpoint'
+            pose_world = np.matmul(endpoint, pose_end)
+            # 4 mat corners + centre (vendor pattern).
+            W = pose_world
+            local = [(+self.white_area_height / 2, +self.white_area_width / 2, 0),
+                     (-self.white_area_height / 2, +self.white_area_width / 2, 0),
+                     (-self.white_area_height / 2, -self.white_area_width / 2, 0),
+                     (+self.white_area_height / 2, -self.white_area_width / 2, 0)]
+            corners = []
+            for (lx, ly, lz) in local:
+                M = common.xyz_euler_to_mat((lx, ly, lz), (0, 0, 0))
+                P = np.matmul(W, M)
+                corners.append(P[:3, 3].tolist())
+            corners.append(W[:3, 3].tolist())  # centre last (vendor schema)
+            data = {
+                'extristric': extristric,
+                'white_area_pose_cam': white_area_pose_cam.tolist(),
+                'white_area_pose_world': pose_world.tolist(),
+                'corners': corners,
+            }
+            # Y2: include plane if we have a depth frame.
+            plane = self._fit_table_plane()
+            if plane is not None:
+                data['plane'] = list(plane)
+            try:
+                cfg_path = os.path.join(self.config_path, self.config_file)
+                # Merge with existing yaml so we don't drop unrelated keys.
+                existing = {}
+                try:
+                    with open(cfg_path, 'r') as f:
+                        existing = yaml.safe_load(f) or {}
+                except Exception:
+                    pass
+                existing.update(data)
+                with open(cfg_path, 'w') as f:
+                    yaml.safe_dump(existing, f)
+                _stage('calibrate', f'inline: wrote {cfg_path}')
+            except Exception as e:
+                _stage('calibrate', 'inline: write transform.yaml failed', exc=e)
+                return False, 'write_failed'
+            return True, 'ok'
+        except Exception as e:
+            _stage('calibrate', 'inline: crashed', exc=e)
+            return False, f'exception:{type(e).__name__}'
+
+    def _current_endpoint_pose(self):
+        """Return the current end-effector pose as a 4x4 matrix.
+
+        The vendor uses the IK service to read the current endpoint. We use
+        the same kinematics_client if available. Falls back to None when
+        kinematics aren't reachable, which the inline calibrate treats as a
+        graceful failure."""
+        try:
+            if self.kinematics_client is None:
+                return None
+            # Best-effort: use the live target pose stored by motion if
+            # available. The vendor doesn't refit endpoint inside
+            # calibration_proc (it uses self.endpoint stashed by another
+            # call); we mirror that by trusting any cached value.
+            ep = getattr(self.motion, 'last_endpoint_pose', None)
+            if ep is not None:
+                return np.asarray(ep, dtype=np.float64)
+            # Fallback: identity at the arm's nominal pre-pose. Better than
+            # nothing - the AprilTag PnP still produces a valid camera
+            # extrinsic; the world projection just inherits the nominal
+            # pre-calibrate stance, which the user can dial out with
+            # grip_offset_x/y.
+            return np.eye(4, dtype=np.float64)
+        except Exception:
+            return None
+
+    def _fit_table_plane(self):
+        """Round 12 Y2: RANSAC plane fit on the latest depth frame using the
+        vendor SearchPlane utility. Returns [a, b, c, d] for ax+by+cz+d=0
+        or None if depth or the utility is unavailable."""
+        if not getattr(self, '_depth_available', False):
+            return None
+        if self._latest_depth is None:
+            return None
+        try:
+            from app.utils.search_plane import SearchPlane
+        except Exception:
+            try:
+                from utils.search_plane import SearchPlane
+            except Exception as e:
+                _stage('calibrate', 'plane fit: SearchPlane not importable', exc=e)
+                return None
+        try:
+            depth_info = getattr(self, '_depth_cam_info', None)
+            if depth_info is None:
+                return None
+            p = depth_info.p if hasattr(depth_info, 'p') else depth_info.k
+            fx = p[0]; fy = p[5] if len(p) >= 12 else depth_info.k[4]
+            cx = p[2]; cy = p[6] if len(p) >= 12 else depth_info.k[5]
+            H = self._latest_depth.shape[0]
+            W = self._latest_depth.shape[1]
+            searcher = SearchPlane(W, H, [fx, fy, cx, cy])
+            _, plane, _ = searcher.find_plane(self._latest_depth)
+            if plane is None:
+                return None
+            arr = np.asarray(plane, dtype=np.float64).ravel().tolist()
+            _stage('calibrate', f'plane fit: {arr}')
+            return arr
+        except Exception as e:
+            _stage('calibrate', 'plane fit failed', exc=e)
+            return None
 
     def _on_engine_loaded(self, path):
         """InferenceWorker callback: fires from the worker thread after a
@@ -2747,6 +3160,56 @@ class ObjectSortingNodeV5(Node):
         except Exception as e:
             _stage('camera', 'camera_info parse failed', exc=e)
 
+    def _depth_cam_info_callback(self, msg):
+        """Cache depth-camera intrinsics so the inline calibration's plane
+        fit can build SearchPlane with correct fx/fy/cx/cy."""
+        self._depth_cam_info = msg
+
+    def _lookup_depth_color_tf(self):
+        """Round 12 Y1: look up the static depth-to-color extrinsic so
+        depth pixels can be aligned to the color frame even when the
+        aligned topic isn't being published. Mirrors vendor
+        calibration.py L77-101.
+
+        Runs once at startup in a background thread. Falls back gracefully
+        if the TF isn't published within 10 s (sets _depth_tf_ok=False)."""
+        try:
+            try:
+                import tf2_ros
+                from rclpy.duration import Duration
+            except Exception as e:
+                _stage('init', 'tf2_ros unavailable; depth alignment '
+                               'falls back to topic-only', exc=e)
+                return
+            buf = tf2_ros.Buffer()
+            listener = tf2_ros.TransformListener(buf, self)
+            self._tf_listener = listener  # keep reference alive
+            deadline = time.time() + 10.0
+            while time.time() < deadline:
+                try:
+                    tr = buf.lookup_transform(
+                        'depth_cam_color_frame', 'depth_cam_link',
+                        rclpy.time.Time(),
+                        timeout=Duration(seconds=0.5))
+                    M = common.xyz_quat_to_mat(
+                        [tr.transform.translation.x,
+                         tr.transform.translation.y,
+                         tr.transform.translation.z],
+                        [tr.transform.rotation.w,
+                         tr.transform.rotation.x,
+                         tr.transform.rotation.y,
+                         tr.transform.rotation.z])
+                    self._depth_to_color_tf = np.asarray(M, dtype=np.float64)
+                    self._depth_tf_ok = True
+                    _stage('init', f'depth->color TF resolved')
+                    return
+                except Exception:
+                    time.sleep(0.5)
+            _stage('init', 'depth->color TF not resolved in 10s; depth '
+                           'alignment falls back to depth_to_color topic')
+        except Exception as e:
+            _stage('init', 'depth TF lookup crashed', exc=e)
+
     def _depth_callback(self, msg):
         """Cache the latest aligned depth frame for per-object Z lookup.
         Depth is uint16 in mm; converted to numpy array, kept as-is so
@@ -2770,7 +3233,11 @@ class ObjectSortingNodeV5(Node):
         """Median depth (m) in a (2*half+1)^2 window around (px, py).
         Drops zeros (invalid pixels). Returns None if the depth subscription
         is dead, the latest frame is stale (>1s), or <50% of the window is
-        valid."""
+        valid.
+
+        Round 12 Y3: when a table plane has been fit (self.table_plane),
+        returns HEIGHT ABOVE PLANE (m). When no plane is available, returns
+        absolute depth (m) - same as before for backward compatibility."""
         if not self._depth_available or self._latest_depth is None:
             return None
         if time.time() - self._latest_depth_ts > 1.0:
@@ -2792,7 +3259,35 @@ class ObjectSortingNodeV5(Node):
         win_area = (2 * half + 1) ** 2
         if len(patch) < win_area * 0.5:
             return None
-        return float(np.median(patch)) / 1000.0  # mm -> m
+        z_m = float(np.median(patch)) / 1000.0  # mm -> m
+        # Above-plane gating: if we have the plane equation, derive the
+        # depth value AT the plane at this (u,v) and return the object's
+        # height above it. Plane is in the depth-camera frame: the depth
+        # value that would land on the plane along the camera ray.
+        plane = self.table_plane
+        info = self._depth_cam_info
+        if plane is not None and info is not None:
+            try:
+                a, b, c, d = float(plane[0]), float(plane[1]), float(plane[2]), float(plane[3])
+                kp = info.p if hasattr(info, 'p') and info.p else info.k
+                if len(kp) >= 8:
+                    fx = float(kp[0]); fy = float(kp[5])
+                    cx_d = float(kp[2]); cy_d = float(kp[6])
+                else:
+                    fx = float(kp[0]); fy = float(kp[4])
+                    cx_d = float(kp[2]); cy_d = float(kp[5])
+                # Pixel ray (X, Y, Z) = (z*(u-cx)/fx, z*(v-cy)/fy, z).
+                # Plane: aX+bY+cZ+d=0 -> z_plane = -d / (a*(u-cx)/fx +
+                # b*(v-cy)/fy + c).
+                dx = (px - cx_d) / fx
+                dy = (py - cy_d) / fy
+                denom = a * dx + b * dy + c
+                if abs(denom) > 1e-9:
+                    z_plane = -d / denom
+                    return float(z_plane - z_m)  # height above plane
+            except Exception:
+                pass
+        return z_m
 
     def image_callback(self, ros_rgb_image):
         try:
@@ -2916,25 +3411,93 @@ class ObjectSortingNodeV5(Node):
                             tipLength=0.2)
             cv2.putText(bgr, 'Y', (ytip[0] + 4, ytip[1] + 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            # Workspace rectangle sized by workspace_size_x/y. The four
-            # corners are projected DIRECTLY through cv2.projectPoints
-            # (same as get_roi), bypassing the sign-flip path that
-            # _project_world_to_pixel undoes - because these corners are
-            # already in the AprilTag world frame, not the get_object_
-            # world_position output frame.
+            # Workspace rectangle sized by workspace_size_x/y. Round 12 W1:
+            # build corners by FULL-POSE composition with white_area_center
+            # (vendor draw_retangle pattern - calibration.py L322-326), so
+            # corners rotate with the workspace plane instead of being
+            # axis-aligned in the camera frame. The previous version added
+            # axis-aligned offsets to white_area_center[:3,3] only, which
+            # ignored the workspace pose rotation and (when a corner fell
+            # behind the camera) collapsed to a triangle via int32(NaN).
             sx = float(self.p('workspace_size_x')) / 2.0
             sy = float(self.p('workspace_size_y')) / 2.0
-            corners_w = np.array([
-                centre_w + np.array([+sx, +sy, 0.0]),
-                centre_w + np.array([+sx, -sy, 0.0]),
-                centre_w + np.array([-sx, -sy, 0.0]),
-                centre_w + np.array([-sx, +sy, 0.0]),
-            ], dtype=np.float64)
+            W = np.asarray(self.white_area_center, dtype=np.float64)
+            # Vendor offset convention (calibration.py L322-326):
+            # local (height/2, width/2, 0) maps to sy, sx, 0.
+            local_offsets = [(+sy, +sx, 0.0), (-sy, +sx, 0.0),
+                             (-sy, -sx, 0.0), (+sy, -sx, 0.0)]
+            corners_w = []
+            for lx, ly, lz in local_offsets:
+                M_off = common.xyz_euler_to_mat((lx, ly, lz), (0, 0, 0))
+                P = np.matmul(W, M_off)
+                corners_w.append(P[:3, 3])
+            corners_w = np.array(corners_w, dtype=np.float64)
             cimg, _ = cv2.projectPoints(corners_w, np.array(rmat),
                                         np.array(tvec),
                                         self.intrinsic, self.distortion)
-            poly = np.int32(cimg).reshape(-1, 1, 2)
-            cv2.polylines(bgr, [poly], True, (0, 255, 255), 2)
+            pts = cimg.reshape(-1, 2)
+            # NaN / Inf / off-screen guard. Corners behind the camera
+            # project to NaN; without this they cast to int32 = INT_MIN
+            # and the polyline draws a triangle (Round 11 visible bug).
+            H_img, W_img = bgr.shape[:2]
+            finite = np.isfinite(pts).all(axis=1)
+            in_window = ((pts[:, 0] > -W_img) & (pts[:, 0] < 2 * W_img)
+                         & (pts[:, 1] > -H_img) & (pts[:, 1] < 2 * H_img))
+            ok = finite & in_window
+            if int(ok.sum()) == 4:
+                poly = np.int32(pts).reshape(-1, 1, 2)
+                cv2.polylines(bgr, [poly], True, (0, 255, 255), 2)
+            elif int(ok.sum()) >= 2:
+                idx = np.where(ok)[0]
+                for a, b in zip(idx[:-1], idx[1:]):
+                    cv2.line(bgr,
+                             (int(pts[a, 0]), int(pts[a, 1])),
+                             (int(pts[b, 0]), int(pts[b, 1])),
+                             (0, 255, 255), 2)
+                cv2.putText(bgr, '(workspace partly off-screen)',
+                            (8, 92), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                            (0, 200, 255), 1)
+            else:
+                cv2.putText(bgr,
+                            '(workspace corners off-screen - recalibrate)',
+                            (8, 92), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                            (0, 200, 255), 2)
+            # Round 12 Y5: optional depth heatmap inside the workspace
+            # rectangle so the user can visually confirm depth is reading
+            # the objects and is aligned with RGB.
+            if (bool(self.p('overlay_depth_view'))
+                    and self._latest_depth is not None
+                    and self._depth_available):
+                try:
+                    depth_m = self._latest_depth.astype(np.float32) / 1000.0
+                    dmin = float(self.p('depth_min_z_m'))
+                    dmax = float(self.p('depth_max_z_m'))
+                    # Plane-relative heatmap when plane is set: small range
+                    # around the plane height. Else: absolute depth band.
+                    if self.table_plane is not None:
+                        vmin = -0.05; vmax = max(0.10, dmax)
+                    else:
+                        vmin = max(0.10, dmin); vmax = max(0.20, dmax)
+                    clip = np.clip(depth_m, vmin, vmax)
+                    norm = ((clip - vmin) / max(1e-3, (vmax - vmin)) * 255
+                            ).astype(np.uint8)
+                    cmap = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
+                    # Resize to color frame if shapes differ.
+                    if cmap.shape[:2] != bgr.shape[:2]:
+                        cmap = cv2.resize(cmap,
+                                          (bgr.shape[1], bgr.shape[0]),
+                                          interpolation=cv2.INTER_NEAREST)
+                    # Mask to workspace polygon (whichever corners projected
+                    # successfully above).
+                    if int(ok.sum()) >= 3:
+                        mask = np.zeros(bgr.shape[:2], dtype=np.uint8)
+                        cv2.fillPoly(mask,
+                                     [np.int32(pts[ok]).reshape(-1, 1, 2)],
+                                     255)
+                        blended = cv2.addWeighted(bgr, 0.55, cmap, 0.45, 0)
+                        bgr[mask > 0] = blended[mask > 0]
+                except Exception as e:
+                    _stage('overlay', 'depth heatmap blend failed', exc=e)
             # Legend for the per-object + bin markers below.
             cv2.putText(bgr, 'yellow = arm grab aim   magenta = place bin',
                         (8, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
@@ -2963,7 +3526,10 @@ class ObjectSortingNodeV5(Node):
                 world, _ = self.get_object_world_position(
                     (px, py), self.intrinsic, self.extristric,
                     self.white_area_center, height=height)
-                ax, ay = self._project_world_to_pixel(world)
+                aim = self._project_world_to_pixel(world)
+                if aim is None:
+                    continue   # behind camera; skip the marker
+                ax, ay = aim
                 cv2.line(bgr, (px, py), (ax, ay), (0, 200, 255), 1)
                 cv2.drawMarker(bgr, (ax, ay), (0, 200, 255),
                                cv2.MARKER_TILTED_CROSS, 16, 2)
@@ -2987,7 +3553,10 @@ class ObjectSortingNodeV5(Node):
             for label, xyz in bins.items():
                 if labels and label not in labels:
                     continue
-                bx, by = self._project_world_to_pixel(list(xyz))
+                proj = self._project_world_to_pixel(list(xyz))
+                if proj is None:
+                    continue
+                bx, by = proj
                 cv2.drawMarker(bgr, (bx, by), (255, 0, 255),
                                cv2.MARKER_DIAMOND, 14, 2)
                 cv2.putText(bgr, f'{label} bin', (bx + 6, by - 6),
@@ -2999,16 +3568,20 @@ class ObjectSortingNodeV5(Node):
         """Project a position from the get_object_world_position output frame
         back to a pixel for the overlay.
 
-        get_object_world_position builds
+        Round 12 W0: route through the vendor inverse transform. The chain
+        in get_object_world_position is:
             position = white_area_center[:3,3] + (-wp_x, -wp_y, wp_z)
-        followed by the user offsets. To reverse, we undo the
-        white_area_center translation and the X/Y sign-flip before
-        cv2.projectPoints. The user offsets stay APPLIED on purpose - the
-        overlay marker is meant to show where the offset moves the aim
-        point.
+        followed by grip_offset_x/y + workspace_scale. To reverse:
+        subtract white_area_center, undo the X/Y sign-flip, then use
+        cv2.projectPoints (the exact inverse of common.pixels_to_world).
+        The user offsets stay APPLIED on purpose - the overlay marker is
+        meant to SHOW where the offset moved the aim point.
 
         At grip_offset_x/y = 0 and workspace_scale = 1, the round-trip
-        property holds: project(pixel -> world) sits exactly on `pixel`."""
+        property holds: project(pixel -> world) sits exactly on `pixel`.
+
+        NaN/Inf guard: projectPoints returns NaN for points behind the
+        camera. Caller handles None by skipping the marker."""
         p = np.array(world_xyz, dtype=np.float64).copy()
         p = p - self.white_area_center[:3, 3]
         p[0] = -p[0]
@@ -3018,6 +3591,8 @@ class ObjectSortingNodeV5(Node):
                                    np.array(tvec), self.intrinsic,
                                    self.distortion)
         out = img.reshape(-1, 2)[0]
+        if not (np.isfinite(out[0]) and np.isfinite(out[1])):
+            return None
         return int(out[0]), int(out[1])
 
     def _raw_republish_tick(self):
