@@ -833,10 +833,15 @@ class TunerUI:
         self._add_tab_save_bar(toggles_tab, list(BOOL_PARAMS), 'Toggles')
         self._add_tab_save_bar(places_tab,
                                ['place_positions', 'grasp_strength'], 'Places')
-        # Calibrate tab gets its own Save & Close bar (also clears the live
-        # overlay mode on save). Body is added below to the scrollable area.
-        calib_keys = [n for n, *_ in CALIB_FLOAT_PARAMS]
-        self._add_calibrate_save_bar(calibrate_tab, calib_keys)
+        # Round 15: Position + Depth tabs each get their own Save & Close
+        # bar. Position persists the world XY offset + workspace size;
+        # Depth persists the depth tunables. Bodies added below.
+        position_keys = [n for n, *_ in CALIB_FLOAT_PARAMS]
+        self._add_calibrate_save_bar(position_tab, position_keys)
+        depth_keys = ([n for n, *_ in CALIB_DEPTH_FLOAT_PARAMS]
+                      + [n for n, *_ in CALIB_DEPTH_INT_PARAMS]
+                      + ['use_depth_for_z', 'overlay_depth_view'])
+        self._add_calibrate_save_bar(depth_tab, depth_keys)
 
         # Scrollable content bodies so nothing is clipped on a small Jetson
         # screen (this is the fix for "I can't scroll" / "can't reach the
