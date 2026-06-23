@@ -72,6 +72,56 @@ The three calibration tabs in the tuner UI:
 
 Each tab's CALIBRATE button only touches its own YAML.
 
+Each calibration tab also shows a **live preview** (the same image the
+Hiwonder web tool streamed): the Position tab shows the AprilTag
+detection + projected workspace rectangle (`/calibration/image_result`),
+and the Color tab shows the live LAB mask (`/lab_manager/image_result`,
+after you press ENTER). If a preview is blank, install Pillow's Tk
+bindings: `sudo apt install -y python3-pil.imagetk`.
+
+## Calibration in a separate window
+
+Two ways to pop the calibration tabs into their own window on the same
+ROS domain (so you can calibrate while watching the main app):
+
+1. In the app: each calibration tab has an **"Open in separate window"**
+   button.
+2. From a terminal:
+   ```bash
+   bash ~/jetarm_v5_src/tools/calibration_tools.sh           # Position
+   bash ~/jetarm_v5_src/tools/calibration_tools.sh color     # Color
+   bash ~/jetarm_v5_src/tools/calibration_tools.sh depth     # Depth
+   ```
+   It builds only the Position/Color/Depth tabs and acts as a service
+   client of the running nodes - no second camera, no second sorting
+   node. Domain defaults to 0 (override with `ROS_DOMAIN_ID=`).
+
+## Pushing logs
+
+The **PUSH LOGS** button (and `tools/push_logs.sh`) publishes the most
+recent session logs to a DEDICATED `jetarm-logs` branch on GitHub - NOT
+`main` - so it never conflicts with a moving main and never pollutes the
+main history. View them at the repo's `jetarm-logs` branch under
+`logs/`.
+
+If the button reports `git push failed`, the device clone almost
+certainly has no push credentials (it can pull over HTTPS but can't
+push). One-time fix, either:
+
+- Configure a credential helper / Personal Access Token:
+  ```bash
+  git -C ~/jetarm_v5_src config credential.helper store
+  # next push will prompt once for username + PAT, then remembers it
+  ```
+- Or switch the remote to SSH (if the device has a key on GitHub):
+  ```bash
+  git -C ~/jetarm_v5_src remote set-url origin git@github.com:calo-lategan/new-repo2.git
+  ```
+
+The working-tree copy under `~/jetarm_v5_src/logs/` survives until the
+next `reset --hard`, so even a failed push leaves the files retrievable
+on the device.
+
 ## Troubleshooting
 
 ### "depth topic NOT publishing"

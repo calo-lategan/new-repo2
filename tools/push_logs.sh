@@ -25,7 +25,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="${REPO:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 LOG_DIR="${LOG_DIR:-$HOME/jetarm_v5/logs}"
 KEEP="${KEEP:-5}"
-BRANCH="${BRANCH:-main}"
+# Round 16 MM.1: push logs to a DEDICATED branch, never main. This avoids
+# non-fast-forward rejections against a moving main, and keeps log noise
+# out of the main history. The device's update flow (reset --hard
+# origin/main) cleans the local log commit; the logs live on this branch.
+BRANCH="${BRANCH:-jetarm-logs}"
 MAX_BYTES="${MAX_BYTES:-1048576}"
 
 ts=$(date '+%Y-%m-%d_%H-%M-%S')
@@ -43,9 +47,10 @@ fi
 cd "$REPO" || exit 1
 mkdir -p "$REPO/logs"
 
-echo "[push_logs] pulling latest..."
-git pull --rebase --autostash origin "$BRANCH" || \
-  echo "[push_logs] git pull failed (continuing)"
+# NOTE: we deliberately do NOT pull here. Logs go to a dedicated branch
+# via `git push HEAD:$BRANCH`, so the local checkout (usually on main) is
+# left undisturbed. The working-tree copy under logs/ survives until the
+# next `reset --hard`, and the pushed copy lives on origin/$BRANCH.
 
 # Copy the KEEP most-recent session files. Truncate any single file above
 # MAX_BYTES (keep first half + last half so head and tail context survive).
@@ -83,26 +88,32 @@ if git diff --cached --quiet; then
 fi
 
 git commit -m "logs: session $ts ($copied file(s))" \
-  -m "Auto-published by tools/push_logs.sh from the JetArm."
+  -m "Auto-published by tools/push_logs.sh from the JetArm." >/dev/null
+
+# Push the current commit to the dedicated logs branch (HEAD:$BRANCH), so
+# the local checkout's branch (main) is irrelevant and never conflicts.
+# Round 16 MM.2: capture stderr and echo the last line so the UI can show
+# WHY a push failed (auth vs rejected vs network).
 push_ok=0
-if git push -u origin "$BRANCH" 2>&1; then
-  push_ok=1
-else
-  for sleep_for in 2 4 8 16; do
-    sleep "$sleep_for"
-    if git push -u origin "$BRANCH" 2>&1; then
-      push_ok=1
-      break
-    fi
-  done
-fi
+push_err=""
+for attempt in 1 2 3 4 5; do
+  push_err="$(git push origin "HEAD:$BRANCH" 2>&1)"
+  if [ $? -eq 0 ]; then
+    push_ok=1
+    break
+  fi
+  echo "[push_logs] push attempt $attempt failed: $push_err" >&2
+  sleep $((attempt * 2))
+done
 
 # Round 14 DD.3: surface real rc so the UI doesn't claim success on a
 # silent failure. Previously the script exited 0 even when every push
 # attempt failed, so the UI lied.
 if [ "$push_ok" -ne 1 ]; then
-  echo "[push_logs] git push failed after retries (auth/network?)" >&2
+  echo "[push_logs] git push failed after retries. Last error:" >&2
+  echo "$push_err" | tail -n 1 >&2
+  echo "[push_logs] (likely the device has no push credentials - see UPDATE_JETARM.md)" >&2
   exit 4
 fi
 
-echo "[push_logs] done."
+echo "[push_logs] done - pushed to origin/$BRANCH"

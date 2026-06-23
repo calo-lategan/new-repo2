@@ -718,13 +718,21 @@ def save_profile_yaml(path, params):
 class ObjectSortingNodeV5(Node):
 
     DEFAULT_PLACE_POSITIONS = {
+        # Round 16 JJ: the loaded YOLO engine reports these EXACT class
+        # names, so the place map must key on them or _do_place refuses
+        # the drop. Each class gets a distinct zone on the drop grid.
+        'scaff':           [-0.076, 0.16, 0.015],  # hazardous-waste zone
+        'red cube':        [ 0.064, 0.23, 0.015],
+        'green cube':      [-0.006, 0.23, 0.015],
+        'light blue cube': [-0.076, 0.23, 0.015],
+        'dark blue cube':  [-0.006, 0.16, 0.015],
+        # Legacy keys kept for back-compat with older engines / tags.
         'green': [-0.006, 0.23, 0.015],
         'red':   [ 0.064, 0.23, 0.015],
         'blue':  [-0.076, 0.23, 0.015],
         'tag1':  [-0.076, 0.16, 0.015],
         'tag2':  [-0.006, 0.16, 0.015],
         'tag3':  [ 0.064, 0.16, 0.015],
-        'scaff': [-0.076, 0.16, 0.015],
     }
 
     TUNABLE_PARAMS = (
@@ -746,10 +754,18 @@ class ObjectSortingNodeV5(Node):
         # tuner UI's Model tab.
         ('yolo_enabled_classes', '[]', None),
         # ---- Detection lock/movement gating ----
-        ('lock_distance_thresh', 0.005, (0.001, 0.05)),
-        ('count_still_threshold', 4, (1, 30)),
+        # Round 16 KK: vendor uses 5 mm / 10-frame stillness on stable
+        # LAB colour-blob centroids. YOLO box centres jitter more, so the
+        # same gate rarely converges -> "blue line but never grabs". Looser
+        # band + fewer still-frames make it trigger while staying tunable.
+        ('lock_distance_thresh', 0.012, (0.001, 0.05)),
+        ('count_still_threshold', 3, (1, 30)),
         ('count_move_threshold', 8, (1, 30)),
         ('detection_avg_frames', 3, (1, 10)),
+        # Staleness escape: if a target stays locked this many frames
+        # without firing a pick (e.g. position_reorder index drift keeps
+        # skipping it), drop the lock so the loop can re-acquire cleanly.
+        ('lock_timeout_frames', 45, (5, 200)),
         # ---- Manual offsets (calibration-free nudge) ----
         # Pixel-space: shifts detection coords so the overlay boxes sit on
         # the objects (also corrects the pixel fed to the world projection).
@@ -920,10 +936,6 @@ class ObjectSortingNodeV5(Node):
         self.config_file = 'transform.yaml'
         self.calibration_file = 'calibration.yaml'
         self.config_path = "/home/ubuntu/ros2_ws/src/app/config/"
-        # Vendor mat dimensions (calibration.py L53-54) - used by the
-        # inline AprilTag calibration to compute workspace corners.
-        self.white_area_width = 0.167
-        self.white_area_height = 0.13
         if 'CAMERA_TYPE' not in os.environ:
             _stage('init', 'CAMERA_TYPE env var is missing - downstream code WILL fail. '
                            'Did the launcher source the Hiwonder env?')
@@ -1179,7 +1191,7 @@ class ObjectSortingNodeV5(Node):
                 break
             except Exception as e:
                 _stage('init', f'depth subscription failed for {topic}', exc=e)
-        # Depth camera_info subscription so the inline plane fit has fx/fy/cx/cy.
+        # Depth camera_info subscription so the plane fit has fx/fy/cx/cy.
         try:
             self.create_subscription(CameraInfo, '/depth_cam/depth/camera_info',
                                      self._depth_cam_info_callback,
@@ -1614,7 +1626,7 @@ class ObjectSortingNodeV5(Node):
             corners = np.array(config['corners']).reshape(-1, 3)
             self.white_area_center = np.array(config['white_area_pose_world'])
             # Round 12 Y2: load table plane if present (set by vendor or
-            # inline calibration when depth is available).
+            # the depth plane refit when depth is available).
             if 'plane' in config and config['plane'] is not None:
                 self.table_plane = np.array(config['plane'],
                                             dtype=np.float64).ravel()
@@ -1901,7 +1913,7 @@ class ObjectSortingNodeV5(Node):
 
     def _flash_overlay(self):
         """Flash the calibration overlay for `calibrate_flash_secs` then
-        revert to 'off'. Shared by vendor + inline success paths."""
+        revert to 'off'. Shown after a successful vendor calibrate."""
         try:
             self.set_parameters([rclpy.parameter.Parameter(
                 'calibrate_overlay_mode', value='flash')])
@@ -2915,6 +2927,7 @@ class ObjectSortingNodeV5(Node):
                 still_thresh = int(self.p('count_still_threshold'))
                 move_thresh = int(self.p('count_move_threshold'))
                 lock_thresh = float(self.p('lock_distance_thresh'))
+                lock_timeout = int(self.p('lock_timeout_frames'))
                 lock_line = None
                 primitives = {'yolo_ops': [], 'color_corners': []}
                 if len(roi) > 0 and not self.start_transport and intrinsic is not None:
@@ -2928,6 +2941,23 @@ class ObjectSortingNodeV5(Node):
                     # appear in the viewer for YOLO tuning) but no pick runs.
                     if self.enable_sorting:
                         target_miss = True
+                        # Round 16 KK.3: staleness escape. If we've held a
+                        # target lock for too many frames without firing a
+                        # pick (position_reorder index drift keeps skipping
+                        # it), drop the lock so we can re-acquire.
+                        if self.target is not None:
+                            self._lock_frames = getattr(self, '_lock_frames', 0) + 1
+                            if self._lock_frames > lock_timeout:
+                                _stage('sorting-loop',
+                                       f'lock STALE on {self.target[0]} after '
+                                       f'{self._lock_frames} frames - releasing '
+                                       f'to re-acquire')
+                                self.target = None
+                                self._lock_frames = 0
+                                self.count_still = 0
+                                self.count_move = 0
+                        else:
+                            self._lock_frames = 0
                         for t in target_info:
                             if not self.target_labels.get(t[0], False):
                                 continue
@@ -2959,6 +2989,16 @@ class ObjectSortingNodeV5(Node):
                                 else:
                                     self.count_move += 1
                                     self.count_still = 0
+                                # Round 16 KK.1: throttled trigger diagnostics
+                                # (~1 Hz) so the pushed logs show WHY a pick
+                                # does/doesn't fire.
+                                if ticks % 30 == 0:
+                                    _stage('sorting-loop',
+                                           f'TRACK {t[0]} e_dist={e_distance:.4f} '
+                                           f'(thresh={lock_thresh:.3f}) '
+                                           f'still={self.count_still}/{still_thresh} '
+                                           f'move={self.count_move}/{move_thresh} '
+                                           f'lock_frames={getattr(self, "_lock_frames", 0)}')
                                 if self.count_move > move_thresh:
                                     self.target = None
                                 if self.count_still > still_thresh:
@@ -2976,6 +3016,7 @@ class ObjectSortingNodeV5(Node):
                                            f'(avg over {len(hist)} frame{"" if len(hist)==1 else "s"})')
                                     self.transport_info = [avg_pos, yaw_pulse, t]
                                     self.target = t
+                                    self._lock_frames = 0
                                     self.start_transport = True
                             self.last_position = position
                         if target_miss:
@@ -3077,7 +3118,7 @@ class ObjectSortingNodeV5(Node):
             _stage('camera', 'camera_info parse failed', exc=e)
 
     def _depth_cam_info_callback(self, msg):
-        """Cache depth-camera intrinsics so the inline calibration's plane
+        """Cache depth-camera intrinsics so the depth plane refit's plane
         fit can build SearchPlane with correct fx/fy/cx/cy."""
         self._depth_cam_info = msg
 

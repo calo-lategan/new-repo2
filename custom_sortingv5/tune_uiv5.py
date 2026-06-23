@@ -18,6 +18,7 @@ import sys
 import json
 import time
 import argparse
+import shutil
 import subprocess
 import threading
 import traceback
@@ -253,8 +254,8 @@ RESERVED_PRESET_SLUGS = (
 
 
 class TunerClient(Node):
-    def __init__(self, target_node):
-        super().__init__('custom_sortingv5_tuner')
+    def __init__(self, target_node, client_name=None):
+        super().__init__(client_name or 'custom_sortingv5_tuner')
         self.target = target_node
         self.set_cli = self.create_client(SetParameters, f'/{target_node}/set_parameters')
         self.get_cli = self.create_client(GetParameters, f'/{target_node}/get_parameters')
@@ -492,10 +493,15 @@ class TunerClient(Node):
 
 
 class TunerUI:
-    def __init__(self, client):
+    def __init__(self, client, calib_only=None):
         self.client = client
+        # Round 16 LL.4: when calib_only is 'position'/'color'/'depth' the
+        # window shows ONLY the three calibration tabs (pop-out mode).
+        self.calib_only = calib_only
+        self._img_previews = []  # keep PhotoImage refs alive
         self.root = tk.Tk()
-        self.root.title('JetArm v5 - live tuner')
+        self.root.title('JetArm v5 - calibration'
+                        if calib_only else 'JetArm v5 - live tuner')
         # Fit the window to the screen so the bottom-pinned Save & Apply bars
         # and the presets bar are never pushed off the bottom of a small
         # Jetson display. Tab content itself scrolls (see _make_scrollable).
@@ -526,7 +532,8 @@ class TunerUI:
             if st is None:
                 pass  # node hasn't published yet - keep the placeholder
             elif age > 12.0:
-                self.perf_var.set(f'perf: NO HEARTBEAT for {age:.0f}s - node down?')
+                if hasattr(self, 'perf_var'):
+                    self.perf_var.set(f'perf: NO HEARTBEAT for {age:.0f}s - node down?')
             else:
                 unmapped = int(st.get('unmapped_count', 0) or 0)
                 badge = f"  unmapped={unmapped}" if unmapped else ''
@@ -541,12 +548,13 @@ class TunerUI:
                     d_str = 'STALE'
                 else:
                     d_str = 'ON'
-                self.perf_var.set(
-                    f"perf: cam={st.get('cam_fps', '-')}fps "
-                    f"pub={st.get('pub_fps', '-')}fps "
-                    f"ai={st.get('ai', '?')} "
-                    f"inf_age={st.get('inference_age_ms', '-')}ms "
-                    f"depth={d_str}{badge}")
+                if hasattr(self, 'perf_var'):
+                    self.perf_var.set(
+                        f"perf: cam={st.get('cam_fps', '-')}fps "
+                        f"pub={st.get('pub_fps', '-')}fps "
+                        f"ai={st.get('ai', '?')} "
+                        f"inf_age={st.get('inference_age_ms', '-')}ms "
+                        f"depth={d_str}{badge}")
                 # Round 15: split per-tab status panels.
                 tp = st.get('table_plane')
                 plane_str = ('[{:.3f}, {:.3f}, {:.3f}, {:.3f}]'.format(*tp)
@@ -576,7 +584,7 @@ class TunerUI:
                 engine = st.get('engine') or ''
                 task = st.get('task') or ''
                 override = (st.get('task_override') or 'auto').strip().lower()
-                if engine:
+                if engine and hasattr(self, 'engine_var'):
                     self.engine_var.set(engine)
                     # Keep the Detection-tab "Active:" label + list marker in
                     # sync with the actually-loaded engine.
@@ -630,7 +638,7 @@ class TunerUI:
                 # corrected on the next poll, which is the point.
                 node_running = bool(st.get('enter')) and bool(st.get('sorting'))
                 cur = self.status_var.get()
-                if cur != 'CALIBRATING...':
+                if not self.calib_only and cur != 'CALIBRATING...':
                     if node_running and not cur.startswith('RUNNING'):
                         self._set_status('RUNNING (node)', '#2e8b57')
                     elif not node_running and cur.startswith('RUNNING'):
@@ -640,6 +648,9 @@ class TunerUI:
         self.root.after(1000, self._poll_node_status)
 
     def _build(self):
+        if self.calib_only:
+            self._build_calib_only()
+            return
         # ---- Top control bar ----
         ctrl = ttk.LabelFrame(self.root, text='Robot control')
         ctrl.pack(fill='x', padx=8, pady=(8, 4))
@@ -898,6 +909,54 @@ class TunerUI:
         ttk.Button(preset, text='Load preset',
                    command=self._on_load_preset).pack(side='left', padx=2)
         self._refresh_preset_combo()
+
+    def _build_calib_only(self):
+        """Round 16 LL.4: pop-out window showing ONLY the Position / Color /
+        Depth calibration tabs. A normal service client of the running
+        nodes on the same domain - no sorting, no camera open."""
+        bar = ttk.Frame(self.root); bar.pack(fill='x', padx=8, pady=(8, 0))
+        ttk.Label(bar, text='Calibration tools (separate window, '
+                            'same domain)',
+                  font=('TkDefaultFont', 10, 'bold')).pack(side='left')
+        self.status_var = tk.StringVar(value='ready')
+        self.status_label = tk.Label(self.root, textvariable=self.status_var,
+                                     bg='#dddddd', anchor='w')
+        self.status_label.pack(fill='x', padx=8, pady=(2, 4))
+
+        notebook = ttk.Notebook(self.root)
+        notebook.pack(fill='both', expand=True, padx=8, pady=8)
+        self._notebook = notebook
+        position_tab = ttk.Frame(notebook); notebook.add(position_tab, text='Position')
+        color_tab = ttk.Frame(notebook); notebook.add(color_tab, text='Color')
+        depth_tab = ttk.Frame(notebook); notebook.add(depth_tab, text='Depth')
+
+        all_names = ([n for n, *_ in CALIB_FLOAT_PARAMS]
+                     + [n for n, *_ in CALIB_DEPTH_FLOAT_PARAMS]
+                     + [n for n, *_ in CALIB_DEPTH_INT_PARAMS]
+                     + ['use_depth_for_z', 'overlay_depth_view'])
+        current = self.client.get_values(all_names)
+
+        position_keys = [n for n, *_ in CALIB_FLOAT_PARAMS]
+        self._add_calibrate_save_bar(position_tab, position_keys)
+        depth_keys = ([n for n, *_ in CALIB_DEPTH_FLOAT_PARAMS]
+                      + [n for n, *_ in CALIB_DEPTH_INT_PARAMS]
+                      + ['use_depth_for_z', 'overlay_depth_view'])
+        self._add_calibrate_save_bar(depth_tab, depth_keys)
+
+        position_body = self._make_scrollable(position_tab)
+        color_body = self._make_scrollable(color_tab)
+        depth_body = self._make_scrollable(depth_tab)
+        self._build_position_tab(position_body, current)
+        self._build_color_tab(color_body, current)
+        self._build_depth_tab(depth_body, current)
+
+        # Raise the requested tab.
+        idx = {'position': 0, 'color': 1, 'depth': 2}.get(self.calib_only, 0)
+        try:
+            notebook.select(idx)
+        except Exception:
+            pass
+        self.root.after(1000, self._poll_node_status)
 
     def _short_engine(self, path):
         if not path or path == '-': return '-'
@@ -1308,6 +1367,107 @@ class TunerUI:
                                      'apply_and_persist service rejected.')
         threading.Thread(target=go, daemon=True).start()
 
+    def _make_image_preview(self, parent, topic, label_text, mono=False,
+                            size=(320, 240)):
+        """Round 16 LL.1: live ROS image preview, reproducing the vendor
+        web tool's video panel by subscribing to the same image topic the
+        web_video_server streamed. Cheap: depth=1 QoS, <=10 Hz blit,
+        bounded queue drops stale frames. Degrades to a text label if
+        Pillow isn't installed."""
+        frame = ttk.LabelFrame(parent, text=label_text)
+        frame.pack(fill='x', padx=8, pady=4)
+        try:
+            from PIL import Image, ImageTk  # noqa: F401
+        except Exception:
+            ttk.Label(frame, foreground='#aa6633',
+                      text='(install python3-pil.imagetk for the live '
+                           'preview: sudo apt install python3-pil.imagetk)'
+                      ).pack(anchor='w', padx=8, pady=6)
+            return
+        lbl = tk.Label(frame, width=size[0], height=size[1], bg='#222')
+        lbl.pack(padx=6, pady=6)
+        state = {'latest': None, 'last_blit': 0.0}
+
+        try:
+            from sensor_msgs.msg import Image as RosImage
+        except Exception:
+            ttk.Label(frame, text='(sensor_msgs unavailable)').pack()
+            return
+
+        def _on_img(msg):
+            state['latest'] = msg  # background spin thread; just stash
+
+        self.client.create_subscription(RosImage, topic, _on_img, 1)
+
+        def _poll():
+            import numpy as np
+            from PIL import Image, ImageTk
+            msg = state['latest']
+            now = time.time()
+            if msg is not None and (now - state['last_blit']) >= 0.1:
+                state['last_blit'] = now
+                try:
+                    h, w = msg.height, msg.width
+                    buf = np.frombuffer(bytes(msg.data), dtype=np.uint8)
+                    enc = (msg.encoding or '').lower()
+                    if mono or enc in ('mono8', '8uc1'):
+                        arr = buf.reshape(h, w)
+                        im = Image.fromarray(arr, 'L')
+                    elif enc in ('rgb8',):
+                        im = Image.fromarray(buf.reshape(h, w, 3), 'RGB')
+                    else:  # bgr8 default
+                        arr = buf.reshape(h, w, 3)[:, :, ::-1]
+                        im = Image.fromarray(arr, 'RGB')
+                    im = im.resize(size)
+                    photo = ImageTk.PhotoImage(im)
+                    lbl.configure(image=photo)
+                    lbl.image = photo
+                except Exception:
+                    pass
+            self.root.after(100, _poll)
+
+        self.root.after(200, _poll)
+
+    def _spawn_calibration_window(self, focus_tab):
+        """Round 16 LL.4: open the calibration tabs in a SEPARATE terminal
+        + window on the same ROS_DOMAIN_ID. It's a normal service client of
+        the already-running nodes - no second camera open, no second
+        sorting node."""
+        def go():
+            node = getattr(self.client, 'target', 'custom_sortingv5')
+            inner = (f"ROS_DOMAIN_ID=0 ros2 run app tune_uiv5 "
+                     f"--node-name {node} --calib-window={focus_tab}")
+            for term in ('gnome-terminal', 'x-terminal-emulator',
+                         'lxterminal', 'xfce4-terminal', 'xterm'):
+                if shutil.which(term):
+                    try:
+                        if term == 'gnome-terminal':
+                            subprocess.Popen([term, '--', 'bash', '-lc',
+                                              inner + '; exec bash'])
+                        else:
+                            subprocess.Popen([term, '-e',
+                                              f"bash -lc '{inner}; exec bash'"])
+                        self._set_status(
+                            f'Opened calibration window ({focus_tab})',
+                            '#3366aa')
+                        _ui_log('calib_window', f'spawned {term} -> {focus_tab}')
+                        return
+                    except Exception as e:
+                        _ui_log('calib_window', f'{term} failed', exc=e)
+                        continue
+            # No terminal emulator: fall back to a detached window (no term).
+            try:
+                subprocess.Popen(['ros2', 'run', 'app', 'tune_uiv5',
+                                  '--node-name', node,
+                                  f'--calib-window={focus_tab}'],
+                                 env={**os.environ, 'ROS_DOMAIN_ID': '0'})
+                self._set_status(f'Opened calibration window ({focus_tab})',
+                                 '#3366aa')
+            except Exception as e:
+                self._set_status('Could not open calibration window', '#aa6633')
+                _ui_log('calib_window', 'all spawn methods failed', exc=e)
+        threading.Thread(target=go, daemon=True).start()
+
     def _build_position_tab(self, parent, current):
         """Round 15: Position calibration tab - AprilTag → workspace
         world frame, drives the vendor calibration_node ONLY. The big
@@ -1379,6 +1539,16 @@ class TunerUI:
                   font=('TkDefaultFont', 10, 'bold'),
                   command=self._on_calibrate_reset
                   ).pack(side='left', padx=4)
+        # Pop-out the calibration tabs in a separate window (same domain).
+        if not self.calib_only:
+            tk.Button(row, text='Open in separate window', bg='#555577',
+                      fg='white', font=('TkDefaultFont', 10, 'bold'),
+                      command=lambda: self._spawn_calibration_window('position')
+                      ).pack(side='left', padx=4)
+        # Live calibration preview (vendor parity): the tag detection +
+        # projected workspace rectangle, exactly what the web tool showed.
+        self._make_image_preview(parent, '/calibration/image_result',
+                                 'Calibration view (live)')
 
     def _build_depth_tab(self, parent, current):
         """Round 15: Depth tab - alignment status + plane fit + depth
@@ -1439,6 +1609,11 @@ class TunerUI:
                   width=28, height=2,
                   command=self._on_plane_refit
                   ).pack(side='left', padx=4)
+        if not self.calib_only:
+            tk.Button(row, text='Open in separate window', bg='#555577',
+                      fg='white', font=('TkDefaultFont', 10, 'bold'),
+                      command=lambda: self._spawn_calibration_window('depth')
+                      ).pack(side='left', padx=4)
 
     def _on_push_logs(self):
         """Round 12 Z2 / Round 13 R13.1: run tools/push_logs.sh in a
@@ -1490,7 +1665,8 @@ class TunerUI:
                 # commit, 4 = git push failed (auth/network).
                 rc = res.returncode
                 if rc == 0:
-                    self._set_status('PUSH LOGS: pushed', '#3366aa')
+                    self._set_status('PUSH LOGS: pushed to jetarm-logs branch',
+                                     '#3366aa')
                     _ui_log('push_logs', 'OK')
                 elif rc == 2:
                     self._set_status('PUSH LOGS: no logs found yet '
@@ -1635,6 +1811,17 @@ class TunerUI:
                   fg='white', font=('TkDefaultFont', 10, 'bold'),
                   command=self._on_color_reset
                   ).pack(side='left', padx=4)
+        if not self.calib_only:
+            tk.Button(b_row, text='Open in separate window', bg='#555577',
+                      fg='white', font=('TkDefaultFont', 10, 'bold'),
+                      command=lambda: self._spawn_calibration_window('color')
+                      ).pack(side='left', padx=4)
+
+        # Live LAB mask preview (vendor parity): the exact mono8 mask the
+        # vendor web tool showed, straight from /lab_manager/image_result.
+        self._make_image_preview(parent, '/lab_manager/image_result',
+                                 'LAB mask (live - press ENTER first)',
+                                 mono=True)
 
         # Pull starting values for the dropdown's default color.
         self.root.after(500, self._on_color_dropdown_change)
@@ -2262,8 +2449,11 @@ class TunerUI:
     # ---- Control buttons ----
 
     def _set_status(self, text, color):
-        self.status_var.set(text)
-        self.status_label.configure(bg=color)
+        try:
+            self.status_var.set(text)
+            self.status_label.configure(bg=color)
+        except Exception:
+            pass
 
     def _on_start(self):
         def go():
@@ -2570,14 +2760,24 @@ def main():
     # the UI process on startup. Use parse_known_args and discard the rest.
     ap = argparse.ArgumentParser()
     ap.add_argument('--node-name', default='custom_sortingv5')
+    # Round 16 LL.4: pop-out calibration window. When set to a tab name
+    # (position/color/depth) the UI builds ONLY the calibration notebook
+    # and raises that tab. Used by the "Open calibration in separate
+    # window" button, which spawns a fresh process on the same domain.
+    ap.add_argument('--calib-window', default='', choices=['', 'position',
+                                                           'color', 'depth'])
     args, _ros_args = ap.parse_known_args()
     rclpy.init()
-    client = TunerClient(args.node_name)
+    # Unique client node name for pop-out windows so a second UI process
+    # doesn't clash with the main tuner's rclpy node name.
+    client = TunerClient(args.node_name,
+                         client_name=('tuner_calib_%d' % os.getpid()
+                                      if args.calib_window else None))
     if not client.wait_ready(timeout=10.0):
         print(f'No parameter services for /{args.node_name}', file=sys.stderr)
         rclpy.shutdown(); sys.exit(1)
     threading.Thread(target=rclpy.spin, args=(client,), daemon=True).start()
-    ui = TunerUI(client)
+    ui = TunerUI(client, calib_only=args.calib_window or None)
     threading.Thread(target=client.call_enable_sorting, args=(False,),
                      daemon=True).start()
     try:

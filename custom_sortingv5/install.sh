@@ -567,23 +567,6 @@ if [ $((need_rqt + need_iv + need_wvs + need_zenity + need_whiptail)) -gt 0 ]; t
     fi
 fi
 
-# --- 6b. dt_apriltags (Round 12: inline AprilTag calibration fallback) ---
-# The vendor calibration node already pulls this in via the system package
-# layer, but the v5 INLINE fallback (used when the vendor node is dead or
-# the user sets prefer_inline_calibration=true) imports it directly. If
-# pip fails (e.g. offline build), the vendor path still works - we never
-# require this to succeed.
-stage "ensuring dt_apriltags is installed (for inline calibration)"
-if python3 -c 'import dt_apriltags' >/dev/null 2>&1; then
-    stage "  dt_apriltags already present"
-else
-    if pip3 install --user dt_apriltags >/dev/null 2>&1; then
-        stage "  dt_apriltags installed via pip"
-    else
-        err "  pip install dt_apriltags failed (offline?). Inline calibration fallback will be unavailable; vendor path still works."
-    fi
-fi
-
 # --- 7. Desktop shortcut -------------------------------------------------
 
 stage "installing desktop shortcut"
