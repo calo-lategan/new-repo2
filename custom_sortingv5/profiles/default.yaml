@@ -44,9 +44,22 @@
     # the pixel fed to the world projection used for picking).
     detection_offset_x: 0
     detection_offset_y: 0
-    # World-space (metres): shift where the arm actually lands.
+    # World-space (metres): shift where the arm actually lands. Sliders live
+    # on the Calibrate tab alongside Workspace scale.
     grip_offset_x: 0.0
     grip_offset_y: 0.0
+    # Workspace scale (Z): how big/small the world-map is. 1.0 = no change.
+    workspace_scale: 1.0
+    # Calibration overlay state: off | manual | flash. Set by the UI and the
+    # vendor calibration flow; safe to leave 'off' as the boot default.
+    calibrate_overlay_mode: 'off'
+    calibrate_flash_secs: 6.0
+
+    # ---- Grasp orientation ----
+    # Prefer clamping on the SHORT OBB axis (narrow waist) for elongated
+    # objects; vendor min-yaw for near-square objects.
+    grasp_prefer_short_axis: true
+    grasp_short_axis_min_ratio: 0.10
 
     # ---- Motion ----
     motion_speed: 1.5

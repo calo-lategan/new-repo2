@@ -670,6 +670,28 @@ class ObjectSortingNodeV5(Node):
         # lands on the object, compensating calibration without the AprilTag.
         ('grip_offset_x', 0.0, (-0.1, 0.1)),
         ('grip_offset_y', 0.0, (-0.1, 0.1)),
+        # Workspace XY scale (the user's "Z" - how big the world-map appears).
+        # Multiplies the projected world XY around (0,0) AFTER grip_offset,
+        # so 1.05 stretches the workspace 5% outward from centre. 1.0 = no
+        # change.
+        ('workspace_scale', 1.0, (0.5, 1.5)),
+        # Calibration overlay state machine. UI sets this:
+        #   'off'    no extra overlay (default)
+        #   'manual' persistent overlay while the user nudges the sliders
+        #   'flash'  one-shot overlay set by _run_vendor_calibration on
+        #            success; a worker flips it back to 'off' after
+        #            calibrate_flash_secs so the user sees the result briefly.
+        ('calibrate_overlay_mode', 'off', None),
+        ('calibrate_flash_secs', 6.0, (1.0, 30.0)),
+        # ---- Grasp orientation ----
+        # Vendor `calculate_gripper_yaw_angle` picks min |yaw| - fine for
+        # square cubes, wrong for elongated objects (scaff) where the gripper
+        # ends up wrapping the LONG axis. When True, prefer the orientation
+        # that puts jaws clamping on the SHORT OBB axis (narrow waist);
+        # tiebreak by min |yaw|. Only kicks in for aspect ratio
+        # |w-h|/max(w,h) >= grasp_short_axis_min_ratio (squares stay vendor).
+        ('grasp_prefer_short_axis', True, None),
+        ('grasp_short_axis_min_ratio', 0.10, (0.02, 0.5)),
         # ---- Motion ----
         ('motion_speed', 1.5, (0.3, 2.5)),
         ('aggression', 1.3, (0.3, 2.0)),
@@ -1614,6 +1636,23 @@ class ObjectSortingNodeV5(Node):
                 # transform.yaml was rewritten - rebuild ROI from it.
                 self.start_get_roi = True
                 _stage('calibrate', 'finished; rebuilding ROI from new transform.yaml')
+                # Briefly show the calibration overlay so the user sees how
+                # the workspace was resolved. Worker thread flips it back to
+                # 'off' after calibrate_flash_secs.
+                try:
+                    self.set_parameters([rclpy.parameter.Parameter(
+                        'calibrate_overlay_mode', value='flash')])
+                    flash_secs = float(self.p('calibrate_flash_secs'))
+                    def _clear_flash():
+                        time.sleep(max(0.5, flash_secs))
+                        try:
+                            self.set_parameters([rclpy.parameter.Parameter(
+                                'calibrate_overlay_mode', value='off')])
+                        except Exception:
+                            pass
+                    threading.Thread(target=_clear_flash, daemon=True).start()
+                except Exception as e:
+                    _stage('calibrate', 'flash overlay schedule failed', exc=e)
             self._last_calibrate = {'ts': time.time(), 'ok': bool(got),
                                     'source': 'vendor'}
         except Exception as e:
@@ -2083,6 +2122,12 @@ class ObjectSortingNodeV5(Node):
         # the next pick.
         position[0] += float(self.p('grip_offset_x'))
         position[1] += float(self.p('grip_offset_y'))
+        # Workspace scale: stretch/shrink around world origin AFTER the
+        # offset so "shift by N m" means a fixed distance regardless of
+        # scale. 1.0 = no change.
+        ws = float(self.p('workspace_scale'))
+        position[0] *= ws
+        position[1] *= ws
         return position, projection_matrix
 
     def calculate_pick_grasp_yaw(self, position, target, target_info,
@@ -2094,8 +2139,56 @@ class ObjectSortingNodeV5(Node):
             yaw -= 180
         gripper_size = [common.calculate_pixel_length(0.09, intrinsic, projection_matrix),
                         common.calculate_pixel_length(0.015, intrinsic, projection_matrix)]
-        return calculate_grasp_yaw.calculate_gripper_yaw_angle(target, target_info,
-                                                               gripper_size, yaw)
+        return self._select_gripper_yaw(target, target_info, gripper_size, yaw)
+
+    def _select_gripper_yaw(self, target_points, points, gripper_size, yaw):
+        """v5 fork of calculate_grasp_yaw.calculate_gripper_yaw_angle that
+        prefers the orientation putting jaws across the SHORT OBB axis (more
+        stable grip on elongated objects), tiebreaking by min |yaw|. Falls
+        back to vendor min-yaw behaviour for square objects and when the
+        `grasp_prefer_short_axis` toggle is off. Collision detection is
+        unchanged - reuses the vendor `detect_collision` helper."""
+        center_x, center_y = target_points[2][0], target_points[2][1]
+        angle = target_points[-1]
+        w, h = target_points[3]
+        gripper_width, gripper_height = gripper_size
+        half_w = gripper_width // 2
+        half_h = gripper_height // 2
+        collision_radius = math.sqrt(half_w ** 2 + half_h ** 2)
+
+        angle1 = angle
+        angle2 = angle - 90
+        rect1 = ((center_x, center_y), (gripper_width, gripper_height), angle1)
+        rect2 = ((center_x, center_y), (gripper_width, gripper_height), angle2)
+        collisions = calculate_grasp_yaw.detect_collision(
+            target_points, points, rect1, rect2, collision_radius)
+        line1 = calculate_grasp_yaw.get_parallel_line(rect1)
+        line2 = calculate_grasp_yaw.get_parallel_line(rect2)
+
+        yaw1 = yaw + angle1
+        yaw2 = yaw1 + 90 if yaw1 < 0 else yaw1 - 90
+
+        # Short-axis preference: long axis at `angle` if w > h, so rect1
+        # (oriented at `angle`) has gripper open direction along the long
+        # axis = jaws clamp on the short axis. Mirror for h > w.
+        prefer = None
+        if bool(self.p('grasp_prefer_short_axis')) and max(w, h) > 0:
+            ratio = abs(w - h) / max(w, h)
+            if ratio >= float(self.p('grasp_short_axis_min_ratio')):
+                prefer = 'yaw1' if w > h else 'yaw2'
+
+        if len(collisions) == 0:
+            if prefer == 'yaw1':
+                return yaw1, line1, rect1
+            if prefer == 'yaw2':
+                return yaw2, line2, rect2
+            return ((yaw1, line1, rect1) if abs(yaw1) < abs(yaw2)
+                    else (yaw2, line2, rect2))
+        elif len(collisions) == 1:
+            if collisions[0] == 1:
+                return yaw2, line2, rect2
+            return yaw1, line1, rect1
+        return None
 
     def calculate_place_grasp_yaw(self, position, angle=0):
         yaw = math.degrees(math.atan2(position[1], position[0]))
@@ -2621,6 +2714,96 @@ class ObjectSortingNodeV5(Node):
             cv2.putText(bgr, f'inf {inf_ms:.0f}ms', (8, 22),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 200, 255), 2)
 
+    def _draw_calibration_overlay(self, bgr):
+        """Draw the workspace-calibration overlay: ROI rectangle, world axes,
+        and a centre crosshair showing how the manual offset + scale move the
+        arm's belief vs the true workspace centre.
+
+        Drawn on top of any detection overlay. Active when
+        calibrate_overlay_mode is 'manual' (persistent) or 'flash' (one-shot
+        from _run_vendor_calibration; cleared by a worker thread after
+        calibrate_flash_secs)."""
+        mode = self.p('calibrate_overlay_mode')
+        if mode == 'off':
+            return
+        # Status line top-left so the user can read live values.
+        gx = float(self.p('grip_offset_x'))
+        gy = float(self.p('grip_offset_y'))
+        ws = float(self.p('workspace_scale'))
+        header = ('MANUAL CALIBRATE' if mode == 'manual' else
+                  'CALIBRATED (auto)')
+        cv2.putText(bgr,
+                    f'{header}  X={gx:+.3f}m  Y={gy:+.3f}m  scale={ws:.3f}',
+                    (8, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                    (0, 255, 255), 2)
+        # Workspace ROI rectangle (from the AprilTag projection in get_roi).
+        if hasattr(self.roi, '__len__') and len(self.roi) >= 4:
+            y_min, y_max, x_min, x_max = (int(self.roi[0]), int(self.roi[1]),
+                                          int(self.roi[2]), int(self.roi[3]))
+            cv2.rectangle(bgr, (x_min, y_min), (x_max, y_max),
+                          (0, 255, 255), 2)
+        # Need camera intrinsics + extrinsics + workspace centre to project.
+        if (self.intrinsic is None or self.distortion is None
+                or not hasattr(self, 'extristric') or self.extristric is None
+                or self.white_area_center is None):
+            cv2.putText(bgr, '(awaiting calibration - press CALIBRATE)',
+                        (8, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                        (0, 200, 255), 1)
+            return
+        try:
+            tvec, rmat = self.extristric
+            centre_w = np.array(self.white_area_center[:3, 3],
+                                dtype=np.float64)
+            # Project workspace centre + axis tips. World axes drawn 5 cm
+            # in +X (red) and +Y (green) from the centre, lifted to the
+            # picking plane (z=0.03).
+            pts_w = np.array([
+                centre_w,
+                centre_w + np.array([0.05, 0.0, 0.0]),
+                centre_w + np.array([0.0, 0.05, 0.0]),
+                centre_w + np.array([0.10, 0.0, 0.0]),  # for ppm
+            ], dtype=np.float64)
+            imgpts, _ = cv2.projectPoints(pts_w, np.array(rmat),
+                                          np.array(tvec),
+                                          self.intrinsic, self.distortion)
+            imgpts = np.int32(imgpts).reshape(-1, 2)
+            cx, cy = int(imgpts[0][0]), int(imgpts[0][1])
+            xtip = (int(imgpts[1][0]), int(imgpts[1][1]))
+            ytip = (int(imgpts[2][0]), int(imgpts[2][1]))
+            # pixels-per-metre from the 10 cm reference line in X.
+            ppm_x = abs(int(imgpts[3][0]) - cx) / 0.10
+            ppm_y = ppm_x  # camera is roughly square; X scale is good enough
+            # True workspace centre (cyan +).
+            cv2.drawMarker(bgr, (cx, cy), (255, 255, 0),
+                           cv2.MARKER_CROSS, 18, 2)
+            cv2.putText(bgr, '0,0', (cx + 8, cy - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+            # World axes from centre.
+            cv2.arrowedLine(bgr, (cx, cy), xtip, (0, 0, 255), 2,
+                            tipLength=0.2)
+            cv2.putText(bgr, 'X', (xtip[0] + 4, xtip[1] + 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            cv2.arrowedLine(bgr, (cx, cy), ytip, (0, 255, 0), 2,
+                            tipLength=0.2)
+            cv2.putText(bgr, 'Y', (ytip[0] + 4, ytip[1] + 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            # Arm's belief of the workspace centre after the user's offsets.
+            # Pixel translation per metre of offset is ppm_*.
+            sx = cx + int(round(gx * ppm_x))
+            sy = cy + int(round(gy * ppm_y))
+            if (sx, sy) != (cx, cy):
+                cv2.drawMarker(bgr, (sx, sy), (0, 200, 255),
+                               cv2.MARKER_TILTED_CROSS, 18, 2)
+                cv2.arrowedLine(bgr, (cx, cy), (sx, sy),
+                                (0, 200, 255), 1, tipLength=0.3)
+                cv2.putText(bgr, 'arm thinks', (sx + 8, sy + 12),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                            (0, 200, 255), 1)
+        except Exception:
+            # Overlay must never break the publisher; swallow projection
+            # failures silently and skip the markers.
+            pass
+
     def _raw_republish_tick(self):
         """30 Hz publisher: always grabs the latest raw camera frame and
         composites the latest detection overlay onto it. The live background
@@ -2662,6 +2845,14 @@ class ObjectSortingNodeV5(Node):
                     if not getattr(self, '_overlay_err_warned', False):
                         _stage('camera', 'overlay draw failed (one-time warn)', exc=e)
                         self._overlay_err_warned = True
+        # Calibration overlay sits on top of the detection overlay; cheap
+        # no-op when mode == 'off' (the default).
+        try:
+            self._draw_calibration_overlay(bgr)
+        except Exception as e:
+            if not getattr(self, '_cal_overlay_warned', False):
+                _stage('camera', 'cal overlay draw failed (one-time warn)', exc=e)
+                self._cal_overlay_warned = True
         try:
             self._publish_image(bgr)
         except Exception as e:

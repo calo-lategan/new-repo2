@@ -84,8 +84,10 @@ PARAM_LABELS = {
     'grab_depth':        ('Grab depth', 'm below detected z so jaws wrap the body'),
     'detection_offset_x': ('Overlay offset X', 'px - nudge boxes +right/-left onto objects'),
     'detection_offset_y': ('Overlay offset Y', 'px - nudge boxes +down/-up onto objects'),
-    'grip_offset_x':     ('Grip offset X', 'm - shift where the arm lands (after calibration)'),
-    'grip_offset_y':     ('Grip offset Y', 'm - shift where the arm lands (after calibration)'),
+    'grip_offset_x':     ('Offset X', 'm - shift the arm landing left/right'),
+    'grip_offset_y':     ('Offset Y', 'm - shift the arm landing forward/back'),
+    'workspace_scale':   ('Workspace scale (Z)', 'how big/small the world map is (1.0 = no change)'),
+    'grasp_short_axis_min_ratio': ('Short-axis gate', '|w-h|/max(w,h) above which short-axis preference applies (cubes: stay vendor)'),
 }
 
 # v5 Round 2: live YOLO knobs rendered on the Detection tab (apply on release
@@ -94,15 +96,23 @@ MODEL_FLOAT_PARAMS = [
     ('yolo_conf_thresh',      0.05, 0.95, 0.01),
     ('yolo_iou_thresh',       0.10, 0.90, 0.01),
     ('inference_max_hz',      0.0,  60.0, 1.0),
-    # World-space grip nudge (metres) - shift where the arm lands.
-    ('grip_offset_x',        -0.1,  0.1, 0.005),
-    ('grip_offset_y',        -0.1,  0.1, 0.005),
+    # Aspect-ratio gate for the short-axis grasp preference. Below this
+    # the OBB is "near square" and vendor min-yaw is used.
+    ('grasp_short_axis_min_ratio', 0.02, 0.50, 0.01),
 ]
 MODEL_INT_PARAMS = [
     ('yolo_max_det',             1, 300, 1),
     # Pixel-space overlay nudge - shift boxes to sit on the objects.
     ('detection_offset_x',    -300, 300, 1),
     ('detection_offset_y',    -300, 300, 1),
+]
+# Calibrate tab: manual world-XY offset + workspace scale.
+# grip_offset_x/y were on Detection in commit Q; commit R moves them here
+# (their proper home) alongside workspace_scale.
+CALIB_FLOAT_PARAMS = [
+    ('grip_offset_x',        -0.10, 0.10, 0.005),
+    ('grip_offset_y',        -0.10, 0.10, 0.005),
+    ('workspace_scale',       0.50, 1.50, 0.01),
 ]
 # Factory defaults for the Detection tab "Reset knobs to defaults" button.
 # Keep in sync with the node's declared defaults in custom_sortingv5.py
@@ -119,6 +129,8 @@ BOOL_PARAMS = [
     'parallel_base_motion',
     # Force-limited grasp BETA: OFF = standard close-to-pulse grasp.
     'compliance_grasp_enabled',
+    # Grasp orientation: prefer clamping on the SHORT OBB axis vs vendor min-yaw.
+    'grasp_prefer_short_axis',
     'inference_warmup',
     'hot_log_inference_ms',
     # Independent stop/start of camera subscription + inference.
@@ -548,6 +560,7 @@ class TunerUI:
         self._model_tab = detect_tab
         self._model_tab_index = notebook.index('end') - 1
         places_tab = ttk.Frame(notebook); notebook.add(places_tab, text='Places')
+        calibrate_tab = ttk.Frame(notebook); notebook.add(calibrate_tab, text='Calibrate')
         toggles_tab = ttk.Frame(notebook); notebook.add(toggles_tab, text='Toggles')
         profiles_tab = ttk.Frame(notebook); notebook.add(profiles_tab, text='Profiles')
 
@@ -570,9 +583,11 @@ class TunerUI:
         all_names = ([n for n, *_ in FLOAT_PARAMS] + [n for n, *_ in INT_PARAMS]
                      + [n for n, *_ in MODEL_FLOAT_PARAMS]
                      + [n for n, *_ in MODEL_INT_PARAMS]
+                     + [n for n, *_ in CALIB_FLOAT_PARAMS]
                      + BOOL_PARAMS + ['engine_path', 'engine_task',
                                        'yolo_enabled_classes',
-                                       'place_positions'])
+                                       'place_positions',
+                                       'calibrate_overlay_mode'])
         current = self.client.get_values(all_names)
         self.engine_var.set(self._short_engine(current.get('engine_path', '-')))
 
@@ -598,6 +613,10 @@ class TunerUI:
         self._add_tab_save_bar(toggles_tab, list(BOOL_PARAMS), 'Toggles')
         self._add_tab_save_bar(places_tab,
                                ['place_positions', 'grasp_strength'], 'Places')
+        # Calibrate tab gets its own Save & Close bar (also clears the live
+        # overlay mode on save). Body is added below to the scrollable area.
+        calib_keys = [n for n, *_ in CALIB_FLOAT_PARAMS]
+        self._add_calibrate_save_bar(calibrate_tab, calib_keys)
 
         # Scrollable content bodies so nothing is clipped on a small Jetson
         # screen (this is the fix for "I can't scroll" / "can't reach the
@@ -607,6 +626,7 @@ class TunerUI:
         detect_body = self._make_scrollable(detect_tab)
         toggles_body = self._make_scrollable(toggles_tab)
         places_body = self._make_scrollable(places_tab)
+        calibrate_body = self._make_scrollable(calibrate_tab)
 
         # Everything not speed/grip lives on the Detection tab.
         for name, lo, hi, res in FLOAT_PARAMS:
@@ -624,6 +644,8 @@ class TunerUI:
         self._build_model_section(detect_body, current)
         # Places tab — per-class targets (place position + grip strength).
         self._build_places_tab(places_body, current.get('place_positions', '{}'))
+        # Calibrate tab — manual world XY offset + workspace scale + overlay.
+        self._build_calibrate_tab(calibrate_body, current)
         # Profiles tab is short and has its own listbox scroll - no body wrap.
         self._build_profiles_tab(profiles_tab)
 
@@ -1019,6 +1041,108 @@ class TunerUI:
                 messagebox.showerror('Save failed',
                                      'apply_and_persist service rejected.')
         threading.Thread(target=go, daemon=True).start()
+
+    # ---- Calibrate tab: manual workspace nudge + overlay ----
+
+    def _add_calibrate_save_bar(self, parent, keys):
+        """Save & Close button for the Calibrate tab. Persists the world XY
+        offset + workspace scale to default.yaml AND clears the live
+        calibration overlay (so the user sees a clean view post-save)."""
+        bar = ttk.Frame(parent)
+        bar.pack(side='bottom', fill='x', padx=8, pady=6)
+        tk.Button(bar, text='Save & Close', bg='#2e8b57', fg='white',
+                  font=('TkDefaultFont', 10, 'bold'),
+                  command=lambda: self._on_calibrate_save_close(keys)
+                  ).pack(side='right', padx=4)
+        ttk.Label(bar, foreground='#666',
+                  text='applies + saves to default.yaml + clears the overlay'
+                  ).pack(side='right', padx=8)
+
+    def _on_calibrate_save_close(self, keys):
+        """Calibrate-tab save: persist values then flip overlay mode to off."""
+        def go():
+            getters = getattr(self, '_param_get', {})
+            vals = {k: getters[k]() for k in (keys or []) if k in getters}
+            ok = bool(vals) and self.client.apply_and_persist(vals,
+                                                              persist=True)
+            try:
+                self.client.set_value('calibrate_overlay_mode', 'off')
+            except Exception:
+                pass
+            if ok:
+                self._set_status('Calibrate SAVED', '#3366aa')
+            elif not vals:
+                messagebox.showinfo('Nothing to save',
+                                    'No calibrate settings to save.')
+            else:
+                messagebox.showerror('Save failed',
+                                     'apply_and_persist service rejected.')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _build_calibrate_tab(self, parent, current):
+        """Three world sliders + Enter-manual / Reset buttons. Save & Close
+        lives in the bottom bar."""
+        header = ttk.LabelFrame(parent, text='Manual workspace calibration')
+        header.pack(fill='x', padx=8, pady=(8, 4))
+        ttk.Label(header, foreground='#666', wraplength=720,
+                  justify='left',
+                  text='Nudge how the arm interprets the workspace, without '
+                       'the AprilTag. X / Y shift the landing point in '
+                       'metres; Z scales the workspace map around the '
+                       'centre. Press "Enter manual mode" to show the live '
+                       'workspace overlay on the camera view; "Save & Close" '
+                       'persists the values to default.yaml and clears the '
+                       'overlay. Use the top-bar CALIBRATE button to run the '
+                       'AprilTag auto-calibration instead.'
+                  ).pack(anchor='w', padx=8, pady=(2, 6))
+
+        knob_frame = ttk.LabelFrame(parent, text='World offsets (live)')
+        knob_frame.pack(fill='x', padx=8, pady=4)
+        for name, lo, hi, res in CALIB_FLOAT_PARAMS:
+            self._add_float(knob_frame, name, lo, hi, res,
+                            float(current.get(name, lo)))
+
+        btn_frame = ttk.LabelFrame(parent, text='Overlay')
+        btn_frame.pack(fill='x', padx=8, pady=4)
+        ttk.Label(btn_frame, foreground='#666',
+                  text='The overlay shows the workspace centre, X/Y axes, '
+                       'and how the offset moves the arm\'s belief.'
+                  ).pack(anchor='w', padx=8, pady=(2, 4))
+        row = ttk.Frame(btn_frame); row.pack(fill='x', padx=4, pady=4)
+        tk.Button(row, text='Enter manual mode', bg='#3366aa', fg='white',
+                  font=('TkDefaultFont', 10, 'bold'),
+                  command=self._on_enter_manual_calibrate
+                  ).pack(side='left', padx=4)
+        tk.Button(row, text='Reset to 0', bg='#aa6633', fg='white',
+                  font=('TkDefaultFont', 10, 'bold'),
+                  command=self._on_calibrate_reset
+                  ).pack(side='left', padx=4)
+
+    def _on_enter_manual_calibrate(self):
+        def go():
+            try:
+                self.client.set_value('calibrate_overlay_mode', 'manual')
+                self._set_status('Calibrate: manual overlay ON', '#3366aa')
+            except Exception:
+                messagebox.showerror('Overlay',
+                                     'Could not enable manual overlay mode.')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_calibrate_reset(self):
+        """Zero the three calibrate sliders (live; not yet persisted)."""
+        setters = getattr(self, '_param_setters', {})
+        for name, default in (('grip_offset_x', 0.0),
+                              ('grip_offset_y', 0.0),
+                              ('workspace_scale', 1.0)):
+            if name in setters:
+                try:
+                    setters[name](default)
+                except Exception:
+                    pass
+            try:
+                self.client.set_value(name, default)
+            except Exception:
+                pass
 
     def _detect_save_extra(self):
         """Engine path + task + class filter for the Detection tab's Save & Apply."""
