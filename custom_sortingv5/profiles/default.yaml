@@ -80,6 +80,11 @@
     # so you can SEE whether depth is reading the cubes and is aligned
     # with the RGB image. Cheap; only when overlay is on.
     overlay_depth_view: false
+    # ---- Round 14 AA (LAB color calibration - vendor lab_manager parity) ----
+    # No tunables here - LAB ranges live in their own lab_config.yaml
+    # (vendor schema) so vendor sorting apps read the same file.
+    # The Color tab in the UI drives /custom_sortingv5/lab_* services
+    # to live-edit / stash / save those ranges.
 
     # ---- Grasp orientation ----
     # Prefer clamping on the SHORT OBB axis (narrow waist) for elongated

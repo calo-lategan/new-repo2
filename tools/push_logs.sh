@@ -71,25 +71,38 @@ for src in $files; do
 done
 
 if [ "$copied" -eq 0 ]; then
-  echo "[push_logs] no logs found in $LOG_DIR"
-  exit 0
+  echo "[push_logs] no logs found in $LOG_DIR" >&2
+  # Distinct rc so the UI can show "no new logs" instead of "pushed".
+  exit 2
 fi
 
 git add logs/
 if git diff --cached --quiet; then
-  echo "[push_logs] no log changes to commit"
-  exit 0
+  echo "[push_logs] no log changes to commit (logs already in repo)" >&2
+  exit 3
 fi
 
 git commit -m "logs: session $ts ($copied file(s))" \
   -m "Auto-published by tools/push_logs.sh from the JetArm."
-if ! git push -u origin "$BRANCH"; then
+push_ok=0
+if git push -u origin "$BRANCH" 2>&1; then
+  push_ok=1
+else
   for sleep_for in 2 4 8 16; do
     sleep "$sleep_for"
-    if git push -u origin "$BRANCH"; then
+    if git push -u origin "$BRANCH" 2>&1; then
+      push_ok=1
       break
     fi
   done
+fi
+
+# Round 14 DD.3: surface real rc so the UI doesn't claim success on a
+# silent failure. Previously the script exited 0 even when every push
+# attempt failed, so the UI lied.
+if [ "$push_ok" -ne 1 ]; then
+  echo "[push_logs] git push failed after retries (auth/network?)" >&2
+  exit 4
 fi
 
 echo "[push_logs] done."

@@ -266,6 +266,30 @@ class TunerClient(Node):
         # re-running the AprilTag step.
         self.depth_plane_refit_cli = self.create_client(
             Trigger, f'/{target_node}/depth_plane_refit')
+        # Round 14 AA: LAB color calibration clients (vendor lab_manager
+        # service signatures).
+        from interfaces.srv import (
+            StashRange as _StashRange, GetRange as _GetRange,
+            ChangeRange as _ChangeRange, GetAllColorName as _GetAllColorName,
+        )
+        self.lab_enter_cli = self.create_client(
+            Trigger, f'/{target_node}/lab_enter')
+        self.lab_exit_cli = self.create_client(
+            Trigger, f'/{target_node}/lab_exit')
+        self.lab_save_to_disk_cli = self.create_client(
+            Trigger, f'/{target_node}/lab_save_to_disk')
+        self.lab_get_range_cli = self.create_client(
+            _GetRange, f'/{target_node}/lab_get_range')
+        self.lab_change_range_cli = self.create_client(
+            _ChangeRange, f'/{target_node}/lab_change_range')
+        self.lab_stash_range_cli = self.create_client(
+            _StashRange, f'/{target_node}/lab_stash_range')
+        self.lab_get_all_names_cli = self.create_client(
+            _GetAllColorName, f'/{target_node}/lab_get_all_color_name')
+        self._lab_StashRange = _StashRange
+        self._lab_GetRange = _GetRange
+        self._lab_ChangeRange = _ChangeRange
+        self._lab_GetAllColorName = _GetAllColorName
         self.enter_cli = self.create_client(Trigger, f'/{target_node}/enter')
         self.exit_cli = self.create_client(Trigger, f'/{target_node}/exit')
         self.load_engine_cli = self.create_client(SetStringBool, f'/{target_node}/load_engine')
@@ -378,6 +402,56 @@ class TunerClient(Node):
 
     def call_recalibrate(self): return self._trigger(self.recalibrate_cli)
     def call_run_calibration(self): return self._trigger(self.run_calibration_cli)
+
+    # Round 14 AA: LAB color helpers (vendor lab_manager parity).
+    def lab_enter(self): return self._trigger(self.lab_enter_cli)
+    def lab_exit(self):  return self._trigger(self.lab_exit_cli)
+    def lab_save(self):  return self._trigger(self.lab_save_to_disk_cli)
+
+    def lab_get_range(self, color_name):
+        req = self._lab_GetRange.Request()
+        req.color_name = str(color_name)
+        fut = self.lab_get_range_cli.call_async(req)
+        deadline = time.time() + 3.0
+        while not fut.done() and time.time() < deadline:
+            time.sleep(0.02)
+        res = fut.result() if fut.done() else None
+        if res is None or not getattr(res, 'success', False):
+            return None
+        return list(res.min), list(res.max)
+
+    def lab_change_range(self, mn, mx):
+        req = self._lab_ChangeRange.Request()
+        req.min = [int(x) for x in mn]
+        req.max = [int(x) for x in mx]
+        fut = self.lab_change_range_cli.call_async(req)
+        deadline = time.time() + 2.0
+        while not fut.done() and time.time() < deadline:
+            time.sleep(0.02)
+        res = fut.result() if fut.done() else None
+        return bool(res and getattr(res, 'success', False))
+
+    def lab_stash_range(self, color_name):
+        req = self._lab_StashRange.Request()
+        req.color_name = str(color_name)
+        fut = self.lab_stash_range_cli.call_async(req)
+        deadline = time.time() + 3.0
+        while not fut.done() and time.time() < deadline:
+            time.sleep(0.02)
+        res = fut.result() if fut.done() else None
+        return bool(res and getattr(res, 'success', False))
+
+    def lab_get_all_names(self):
+        req = self._lab_GetAllColorName.Request()
+        fut = self.lab_get_all_names_cli.call_async(req)
+        deadline = time.time() + 3.0
+        while not fut.done() and time.time() < deadline:
+            time.sleep(0.02)
+        res = fut.result() if fut.done() else None
+        if res is None:
+            return []
+        return list(res.color_names)
+
     def trigger_service(self, name):
         """Generic Trigger-service call by short name. Used by tabs that
         add buttons after the constructor (Round 12 Y6: depth_plane_refit)."""
@@ -691,6 +765,10 @@ class TunerUI:
         self._model_tab_index = notebook.index('end') - 1
         places_tab = ttk.Frame(notebook); notebook.add(places_tab, text='Places')
         calibrate_tab = ttk.Frame(notebook); notebook.add(calibrate_tab, text='Calibrate')
+        # Round 14 AA.5: LAB color calibration tab (vendor lab_manager
+        # parity). Sits between Calibrate and Toggles so all the
+        # calibration tabs are adjacent.
+        color_tab = ttk.Frame(notebook); notebook.add(color_tab, text='Color (LAB)')
         toggles_tab = ttk.Frame(notebook); notebook.add(toggles_tab, text='Toggles')
         profiles_tab = ttk.Frame(notebook); notebook.add(profiles_tab, text='Profiles')
 
@@ -757,6 +835,7 @@ class TunerUI:
         toggles_body = self._make_scrollable(toggles_tab)
         places_body = self._make_scrollable(places_tab)
         calibrate_body = self._make_scrollable(calibrate_tab)
+        color_body = self._make_scrollable(color_tab)
 
         # Everything not speed/grip lives on the Detection tab.
         for name, lo, hi, res in FLOAT_PARAMS:
@@ -776,6 +855,8 @@ class TunerUI:
         self._build_places_tab(places_body, current.get('place_positions', '{}'))
         # Calibrate tab — manual world XY offset + workspace scale + overlay.
         self._build_calibrate_tab(calibrate_body, current)
+        # Round 14 AA.5: Color (LAB) tab — vendor lab_manager parity.
+        self._build_color_tab(color_body, current)
         # Profiles tab is short and has its own listbox scroll - no body wrap.
         self._build_profiles_tab(profiles_tab)
 
@@ -1359,14 +1440,34 @@ class TunerUI:
                 res = subprocess.run(['bash', script], env=env,
                                      capture_output=True, text=True,
                                      timeout=120)
-                if res.returncode == 0:
+                # Round 14 DD.3: distinct rc codes from push_logs.sh:
+                # 0 = pushed, 2 = no logs found, 3 = nothing new to
+                # commit, 4 = git push failed (auth/network).
+                rc = res.returncode
+                if rc == 0:
                     self._set_status('PUSH LOGS: pushed', '#3366aa')
                     _ui_log('push_logs', 'OK')
+                elif rc == 2:
+                    self._set_status('PUSH LOGS: no logs found yet '
+                                     '(start the node first)',
+                                     '#aa6633')
+                    _ui_log('push_logs', 'no logs found')
+                elif rc == 3:
+                    self._set_status('PUSH LOGS: nothing new to commit',
+                                     '#666666')
+                    _ui_log('push_logs', 'nothing new to commit')
+                elif rc == 4:
+                    tail = (res.stderr or '')[-300:]
+                    self._set_status(
+                        f'PUSH LOGS: git push failed - {tail.strip()[:80]}',
+                        '#aa6633')
+                    _ui_log('push_logs', f'push failed: {tail}')
                 else:
                     self._set_status(
-                        f'PUSH LOGS: rc={res.returncode}', '#aa6633')
-                    _ui_log('push_logs', f'rc={res.returncode} '
-                                          f'stderr={res.stderr[-500:]}')
+                        f'PUSH LOGS: rc={rc} - {(res.stderr or "")[-80:]}',
+                        '#aa6633')
+                    _ui_log('push_logs', f'rc={rc} '
+                                          f'stderr={(res.stderr or "")[-500:]}')
             except Exception as e:
                 self._set_status('PUSH LOGS: error', '#aa6633')
                 _ui_log('push_logs', 'crashed', exc=e)
@@ -1388,6 +1489,217 @@ class TunerUI:
                 _ui_log('plane_refit', 'crashed', exc=e)
                 self._set_status('Plane refit error', '#aa6633')
         threading.Thread(target=go, daemon=True).start()
+
+    # ---------------------------------------------------------------- Color tab
+    # Round 14 AA.5: vendor lab_manager.py one-for-one. 6 LAB sliders +
+    # mask preview + Enter/Exit/Stash/Save/Reload/Reset buttons.
+
+    DEFAULT_LAB_RANGES = {
+        'red':    {'min': [9, 146, 146],   'max': [160, 187, 207]},
+        'green':  {'min': [72, 49, 128],   'max': [203, 113, 197]},
+        'blue':   {'min': [11, 115, 46],   'max': [172, 178, 117]},
+        'black':  {'min': [0, 30, 92],     'max': [86, 187, 196]},
+        'white':  {'min': [111, 100, 100], 'max': [255, 155, 155]},
+        'yellow': {'min': [195, 110, 146], 'max': [255, 177, 184]},
+        'tennis': {'min': [31, 66, 178],   'max': [210, 159, 255]},
+    }
+
+    def _build_color_tab(self, parent, current):
+        """LAB color calibration (vendor lab_manager.py one-for-one).
+        Sliders push live ChangeRange requests so the published mask
+        updates in real time."""
+        header = ttk.LabelFrame(parent, text='How LAB color calibration works')
+        header.pack(fill='x', padx=8, pady=(8, 4))
+        ttk.Label(header, foreground='#444', wraplength=720,
+                  justify='left',
+                  text=(
+                      'LAB COLOR THRESHOLD (vendor lab_manager parity)\n'
+                      '* Click ENTER to start publishing a live mask on '
+                      '/custom_sortingv5/lab_mask.\n'
+                      '* Pick a color (red / green / blue / etc.).\n'
+                      '* Move the L / A / B min/max sliders - mask updates '
+                      'in real time. Aim for a clean mask of just the '
+                      'cube of that color.\n'
+                      '* STASH saves the current sliders to the selected '
+                      'color. SAVE writes lab_config.yaml to disk.\n'
+                      '* Same yaml schema vendor sorting reads, so changes '
+                      'are picked up by every other Hiwonder app too.\n'
+                      '* RELOAD pulls the saved range back from disk for '
+                      'the current color (handy for "I broke it - revert").'
+                  )).pack(anchor='w', padx=8, pady=(2, 6))
+
+        # Active color + status panel.
+        top = ttk.LabelFrame(parent, text='Active color + status')
+        top.pack(fill='x', padx=8, pady=4)
+        row = ttk.Frame(top); row.pack(fill='x', padx=8, pady=4)
+        ttk.Label(row, text='Color:').pack(side='left')
+        self.color_active_var = tk.StringVar(value='red')
+        self.color_dropdown = ttk.Combobox(
+            row, textvariable=self.color_active_var, width=12,
+            values=list(self.DEFAULT_LAB_RANGES.keys()), state='readonly')
+        self.color_dropdown.pack(side='left', padx=6)
+        self.color_dropdown.bind('<<ComboboxSelected>>',
+                                 lambda e: self._on_color_dropdown_change())
+        self.color_status_var = tk.StringVar(value='LAB: OFF')
+        ttk.Label(row, textvariable=self.color_status_var,
+                  foreground='#222', font=('TkFixedFont', 9)
+                  ).pack(side='left', padx=12)
+
+        # 6 sliders for L/A/B min + max (0..255).
+        slid_frame = ttk.LabelFrame(parent,
+                                    text='LAB thresholds (live)')
+        slid_frame.pack(fill='x', padx=8, pady=4)
+        self._lab_sliders = {}
+        for label in ('L_min', 'A_min', 'B_min',
+                      'L_max', 'A_max', 'B_max'):
+            r = ttk.Frame(slid_frame); r.pack(fill='x', padx=6, pady=2)
+            ttk.Label(r, text=label, width=8).pack(side='left')
+            v = tk.IntVar(value=0 if label.endswith('_min') else 255)
+            s = tk.Scale(r, from_=0, to=255, orient='horizontal',
+                         variable=v, length=420, showvalue=True,
+                         resolution=1,
+                         command=lambda *_: self._lab_push_live_change())
+            s.pack(side='left', fill='x', expand=True)
+            self._lab_sliders[label] = v
+
+        # Buttons.
+        btn_frame = ttk.LabelFrame(parent, text='Actions')
+        btn_frame.pack(fill='x', padx=8, pady=4)
+        b_row = ttk.Frame(btn_frame); b_row.pack(fill='x', padx=4, pady=4)
+        tk.Button(b_row, text='ENTER (start preview)', bg='#3366aa',
+                  fg='white', font=('TkDefaultFont', 10, 'bold'),
+                  command=self._on_color_enter
+                  ).pack(side='left', padx=4)
+        tk.Button(b_row, text='EXIT', bg='#666666', fg='white',
+                  font=('TkDefaultFont', 10, 'bold'),
+                  command=self._on_color_exit
+                  ).pack(side='left', padx=4)
+        tk.Button(b_row, text='STASH to color', bg='#226699', fg='white',
+                  font=('TkDefaultFont', 10, 'bold'),
+                  command=self._on_color_stash
+                  ).pack(side='left', padx=4)
+        tk.Button(b_row, text='SAVE to disk', bg='#2e8b57', fg='white',
+                  font=('TkDefaultFont', 10, 'bold'),
+                  command=self._on_color_save
+                  ).pack(side='left', padx=4)
+        tk.Button(b_row, text='Reload from disk', bg='#666666',
+                  fg='white', font=('TkDefaultFont', 10, 'bold'),
+                  command=self._on_color_reload
+                  ).pack(side='left', padx=4)
+        tk.Button(b_row, text='Reset color to default', bg='#aa6633',
+                  fg='white', font=('TkDefaultFont', 10, 'bold'),
+                  command=self._on_color_reset
+                  ).pack(side='left', padx=4)
+
+        # Pull starting values for the dropdown's default color.
+        self.root.after(500, self._on_color_dropdown_change)
+
+    def _on_color_dropdown_change(self):
+        """Load saved range for the newly-selected color into sliders.
+        Push it as the live mask range so the preview matches."""
+        color = self.color_active_var.get()
+        def go():
+            rng = self.client.lab_get_range(color)
+            if rng is None:
+                # fall back to defaults so sliders still get something
+                d = self.DEFAULT_LAB_RANGES.get(
+                    color, {'min': [0, 0, 0], 'max': [255, 255, 255]})
+                rng = (d['min'], d['max'])
+            mn, mx = rng
+            self.root.after(0,
+                            lambda: self._lab_set_sliders(mn, mx))
+            self.client.lab_change_range(mn, mx)
+            _ui_log('color', f'loaded {color}: min={mn} max={mx}')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _lab_set_sliders(self, mn, mx):
+        for axis, val in zip(('L_min', 'A_min', 'B_min'), mn):
+            self._lab_sliders[axis].set(int(val))
+        for axis, val in zip(('L_max', 'A_max', 'B_max'), mx):
+            self._lab_sliders[axis].set(int(val))
+
+    def _lab_collect_sliders(self):
+        mn = [self._lab_sliders[a].get() for a in ('L_min', 'A_min', 'B_min')]
+        mx = [self._lab_sliders[a].get() for a in ('L_max', 'A_max', 'B_max')]
+        # Clamp min<=max so cv2.inRange never inverts.
+        for i in range(3):
+            if mn[i] > mx[i]:
+                mn[i], mx[i] = mx[i], mn[i]
+        return mn, mx
+
+    def _lab_push_live_change(self):
+        """Debounced 120 ms; sends ChangeRange so the published mask
+        updates in real time as sliders move."""
+        if getattr(self, '_lab_pending_after', None) is not None:
+            try:
+                self.root.after_cancel(self._lab_pending_after)
+            except Exception:
+                pass
+        self._lab_pending_after = self.root.after(
+            120, self._lab_push_live_change_now)
+
+    def _lab_push_live_change_now(self):
+        self._lab_pending_after = None
+        mn, mx = self._lab_collect_sliders()
+        def go():
+            self.client.lab_change_range(mn, mx)
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_color_enter(self):
+        def go():
+            ok = self.client.lab_enter()
+            if ok:
+                self.color_status_var.set('LAB: ON (mask publishing)')
+                self._set_status('LAB: enter OK', '#3366aa')
+                _ui_log('color', 'enter OK')
+            else:
+                self.color_status_var.set('LAB: enter failed')
+                self._set_status('LAB: enter failed', '#aa6633')
+                _ui_log('color', 'enter failed')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_color_exit(self):
+        def go():
+            ok = self.client.lab_exit()
+            self.color_status_var.set(
+                'LAB: OFF' if ok else 'LAB: exit failed')
+            self._set_status('LAB: exit OK' if ok else 'LAB: exit failed',
+                             '#3366aa' if ok else '#aa6633')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_color_stash(self):
+        color = self.color_active_var.get()
+        mn, mx = self._lab_collect_sliders()
+        def go():
+            self.client.lab_change_range(mn, mx)
+            ok = self.client.lab_stash_range(color)
+            self._set_status(
+                f'LAB: stashed -> {color}' if ok else
+                f'LAB: stash {color} failed',
+                '#3366aa' if ok else '#aa6633')
+            _ui_log('color', f'stash {color}: ok={ok}')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_color_save(self):
+        def go():
+            ok = self.client.lab_save()
+            self._set_status(
+                'LAB: saved lab_config.yaml' if ok else 'LAB: save failed',
+                '#2e8b57' if ok else '#aa6633')
+            _ui_log('color', f'save: ok={ok}')
+        threading.Thread(target=go, daemon=True).start()
+
+    def _on_color_reload(self):
+        self._on_color_dropdown_change()
+
+    def _on_color_reset(self):
+        color = self.color_active_var.get()
+        d = self.DEFAULT_LAB_RANGES.get(color)
+        if d is None:
+            return
+        self._lab_set_sliders(d['min'], d['max'])
+        self._lab_push_live_change_now()
+        self._set_status(f'LAB: {color} reset to default', '#666666')
 
     def _on_enter_manual_calibrate(self):
         def go():

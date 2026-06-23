@@ -186,6 +186,21 @@ from servo_controller_msgs.msg import ServosPosition, ServoPosition
 from servo_controller.bus_servo_control import set_servo_position
 from kinematics.kinematics_control import set_pose_target
 from app.utils import calculate_grasp_yaw, position_change_detect, distortion_inverse_map
+# Round 14 CC: vendor positioning utilities. calculate_world_position is
+# THE function vendor uses to land the arm on objects - importing
+# instead of re-deriving keeps v5 gripping in lockstep with vendor.
+try:
+    from app.utils import utils as vendor_utils
+    from app.utils import search_plane as vendor_search_plane
+    from app.utils import calculate_grasp_yaw_by_depth as vendor_grasp_depth
+    _VENDOR_UTILS_OK = True
+except Exception as _e:
+    vendor_utils = None
+    vendor_search_plane = None
+    vendor_grasp_depth = None
+    _VENDOR_UTILS_OK = False
+    print(f'[v4][init] WARN: vendor utils not importable: {_e}',
+          file=sys.stderr, flush=True)
 
 from ros_robot_controller_msgs.srv import GetBusServoState
 from ros_robot_controller_msgs.msg import GetBusServoCmd
@@ -1026,6 +1041,11 @@ class ObjectSortingNodeV5(Node):
                             self._depth_plane_refit_srv,
                             callback_group=self.svc_group)
 
+        # Round 14 AA: LAB color threshold calibration (one-for-one with
+        # vendor lab_manager.py). 7 services + a mono8 mask publisher.
+        # Reuses the SAME lab_config.yaml schema vendor sorting reads.
+        self._lab_init()
+
         # ---- Vendor calibration node clients (idle until CALIBRATE) ----
         # Created, not blocked on: if the calibration node isn't running we
         # degrade gracefully (run_calibration logs + returns failure).
@@ -1142,6 +1162,16 @@ class ObjectSortingNodeV5(Node):
         # Round 12 Y2/Y3: table plane fit + per-pixel plane heights.
         self.table_plane = None
         self._plane_values = None
+        # Round 14 CC.3: vendor hand-to-camera transform (calibration.py
+        # L28-33). Static seed; Round 12 Y1 composes the depth->color TF
+        # into it once that arrives so this matrix is what vendor would
+        # compute. Stored at instance scope so the world-position path
+        # reads it without re-deriving every tick.
+        self.hand2cam_tf_matrix = np.array([
+            [0.0,  0.0, 1.0, -0.101],
+            [-1.0, 0.0, 0.0,  0.0],
+            [0.0, -1.0, 0.0,  0.05],
+            [0.0,  0.0, 0.0,  1.0]], dtype=np.float64)
         for topic in ('/depth_cam/depth_to_color', '/depth_cam/depth/image_raw'):
             try:
                 self.create_subscription(Image, topic, self._depth_callback,
@@ -1508,6 +1538,9 @@ class ObjectSortingNodeV5(Node):
                 'table_plane': (list(self.table_plane)
                                 if getattr(self, 'table_plane', None) is not None
                                 else None),
+                # Round 14 CC.1: confirm vendor utils are importable so the
+                # world-position math can use the vendor pipeline.
+                'vendor_utils_ok': bool(_VENDOR_UTILS_OK),
                 'last_calibrate': getattr(self, '_last_calibrate', None),
                 # v5: class names from model.names (id -> name). The tuner
                 # UI auto-populates the Classes filter + Places tab when
@@ -1767,6 +1800,207 @@ class ObjectSortingNodeV5(Node):
             time.sleep(0.02)
         res = fut.result() if fut.done() else None
         return bool(res and res.success)
+
+    # ---------------------------------------------------------------- LAB color
+    # Round 14 AA: vendor lab_manager.py one-for-one (mask pipeline,
+    # services, YAML schema). Lives inline so the v5 app is the single
+    # tool the user opens for both color and position calibration.
+
+    DEFAULT_LAB_RANGES = {
+        'red':    {'min': [9, 146, 146],    'max': [160, 187, 207]},
+        'green':  {'min': [72, 49, 128],    'max': [203, 113, 197]},
+        'blue':   {'min': [11, 115, 46],    'max': [172, 178, 117]},
+        'black':  {'min': [0, 30, 92],      'max': [86, 187, 196]},
+        'white':  {'min': [111, 100, 100],  'max': [255, 155, 155]},
+        'yellow': {'min': [195, 110, 146],  'max': [255, 177, 184]},
+        'tennis': {'min': [31, 66, 178],    'max': [210, 159, 255]},
+    }
+
+    def _lab_init(self):
+        """Embed the vendor lab_manager service surface in v5 (Round 14 AA).
+        Reuses the SAME lab_config.yaml the vendor sorting reads, so any
+        changes are picked up by the vendor app and vice versa.
+        Services mirror vendor names with our '~/lab_*' prefix."""
+        from interfaces.srv import (
+            StashRange as _StashRange, GetRange as _GetRange,
+            ChangeRange as _ChangeRange, GetAllColorName as _GetAllColorName,
+        )
+        self._lab_StashRange = _StashRange
+        self._lab_GetRange = _GetRange
+        self._lab_ChangeRange = _ChangeRange
+        self._lab_GetAllColorName = _GetAllColorName
+        self._lab_path = os.path.join(self.config_path, 'lab_config.yaml')
+        # Boot-load from disk; vendor schema is /**:ros__parameters:color_range_list.
+        self._lab_ranges = self._lab_load_yaml()
+        # Currently-active (live) range; vendor seeds with 'red'.
+        active = self._lab_ranges.get('red',
+                                      dict(self.DEFAULT_LAB_RANGES['red']))
+        self._lab_current = {'min': list(active['min']),
+                             'max': list(active['max'])}
+        self._lab_active = False  # set True via ~/lab_enter
+        self._lab_mask_pub = self.create_publisher(
+            Image, '~/lab_mask', 1)
+        # Services
+        self.create_service(Trigger, '~/lab_enter',
+                            self._lab_enter_srv,
+                            callback_group=self.svc_group)
+        self.create_service(Trigger, '~/lab_exit',
+                            self._lab_exit_srv,
+                            callback_group=self.svc_group)
+        self.create_service(Trigger, '~/lab_save_to_disk',
+                            self._lab_save_srv,
+                            callback_group=self.svc_group)
+        self.create_service(self._lab_GetRange, '~/lab_get_range',
+                            self._lab_get_range_srv,
+                            callback_group=self.svc_group)
+        self.create_service(self._lab_ChangeRange, '~/lab_change_range',
+                            self._lab_change_range_srv,
+                            callback_group=self.svc_group)
+        self.create_service(self._lab_StashRange, '~/lab_stash_range',
+                            self._lab_stash_range_srv,
+                            callback_group=self.svc_group)
+        self.create_service(self._lab_GetAllColorName, '~/lab_get_all_color_name',
+                            self._lab_get_all_names_srv,
+                            callback_group=self.svc_group)
+        _stage('init', f'LAB color services up; yaml={self._lab_path} '
+                       f'colors={list(self._lab_ranges.keys())}')
+
+    def _lab_load_yaml(self):
+        """Read vendor schema {'/**': {'ros__parameters':
+        {'color_range_list': {name: {min, max}}}}}. Falls back to the
+        7 vendor defaults when missing."""
+        try:
+            if os.path.isfile(self._lab_path):
+                with open(self._lab_path, 'r') as f:
+                    data = yaml.safe_load(f) or {}
+                cr = (data.get('/**', {}) or {}).get('ros__parameters', {}) \
+                                               .get('color_range_list', {})
+                if cr:
+                    out = {}
+                    for k, v in cr.items():
+                        if isinstance(v, dict) and 'min' in v and 'max' in v:
+                            out[k] = {'min': list(v['min']),
+                                      'max': list(v['max'])}
+                    if out:
+                        return out
+        except Exception as e:
+            _stage('lab', 'load_yaml failed; using defaults', exc=e)
+        return {k: {'min': list(v['min']), 'max': list(v['max'])}
+                for k, v in self.DEFAULT_LAB_RANGES.items()}
+
+    def _lab_write_yaml(self):
+        """Persist the in-memory ranges back to lab_config.yaml in vendor
+        schema. Called by ~/lab_save_to_disk."""
+        data = {'/**': {'ros__parameters': {
+            'color_range_list': {
+                k: {'min': list(v['min']), 'max': list(v['max'])}
+                for k, v in self._lab_ranges.items()
+            }
+        }}}
+        os.makedirs(os.path.dirname(self._lab_path), exist_ok=True)
+        with open(self._lab_path, 'w') as f:
+            yaml.safe_dump(data, f, default_flow_style=False,
+                           allow_unicode=True)
+
+    def _lab_process_frame(self, bgr):
+        """Vendor lab_manager.py L84-103 mask pipeline, byte-for-byte:
+            resize/2 -> RGB2LAB (vendor uses RGB2LAB on RGB input) ->
+            GaussianBlur(3,3)/3 -> inRange(min,max) -> erode 5x5 ->
+            dilate 5x5 -> resize back to native -> publish mono8."""
+        ow, oh = bgr.shape[1], bgr.shape[0]
+        small = cv2.resize(bgr, (ow // 2, oh // 2),
+                           interpolation=cv2.INTER_NEAREST)
+        # Vendor calls cvtColor on the camera frame which is RGB; v5's
+        # _latest_raw_bgr is BGR, so we use BGR2LAB to land on the same
+        # LAB space the vendor sliders are calibrated against.
+        lab = cv2.cvtColor(small, cv2.COLOR_BGR2LAB)
+        lab = cv2.GaussianBlur(lab, (3, 3), 3)
+        rng = self._lab_current
+        mask = cv2.inRange(lab, tuple(rng['min']), tuple(rng['max']))
+        k = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        eroded = cv2.erode(mask, k)
+        dilated = cv2.dilate(eroded, k)
+        return cv2.resize(dilated, (ow, oh))
+
+    def _lab_publish_mask(self, bgr):
+        """Called from the camera callback when _lab_active. Cheap when
+        off (early return)."""
+        if not self._lab_active:
+            return
+        try:
+            mask = self._lab_process_frame(bgr)
+            msg = self.bridge.cv2_to_imgmsg(mask, 'mono8')
+            self._lab_mask_pub.publish(msg)
+        except Exception as e:
+            if not getattr(self, '_lab_pub_warned', False):
+                _stage('lab', 'mask publish failed (one-time warn)', exc=e)
+                self._lab_pub_warned = True
+
+    # ---- Service callbacks (signatures match vendor lab_manager.py) ----
+
+    def _lab_enter_srv(self, request, response):
+        self._lab_active = True
+        _stage('lab', 'enter: LAB mask publishing ON')
+        response.success = True
+        response.message = 'start'
+        return response
+
+    def _lab_exit_srv(self, request, response):
+        self._lab_active = False
+        _stage('lab', 'exit: LAB mask publishing OFF')
+        response.success = True
+        response.message = 'exit'
+        return response
+
+    def _lab_save_srv(self, request, response):
+        try:
+            self._lab_write_yaml()
+            _stage('lab', f'saved to {self._lab_path}')
+            response.success = True
+            response.message = 'Thresholds saved successfully.'
+        except Exception as e:
+            _stage('lab', 'save failed', exc=e)
+            response.success = False
+            response.message = f'save failed: {e}'
+        return response
+
+    def _lab_get_range_srv(self, request, response):
+        name = request.color_name
+        if name in self._lab_ranges:
+            response.min = list(self._lab_ranges[name]['min'])
+            response.max = list(self._lab_ranges[name]['max'])
+            response.success = True
+        else:
+            response.success = False
+            response.min = []
+            response.max = []
+        return response
+
+    def _lab_change_range_srv(self, request, response):
+        # Vendor uses int16[] for min/max. Update the LIVE mask range.
+        self._lab_current = {'min': [int(x) for x in request.min],
+                             'max': [int(x) for x in request.max]}
+        response.success = True
+        response.message = 'start'
+        return response
+
+    def _lab_stash_range_srv(self, request, response):
+        # Save the current live range under the given color name.
+        name = str(request.color_name)
+        if not name:
+            response.success = False
+            response.message = 'empty color_name'
+            return response
+        self._lab_ranges[name] = {'min': list(self._lab_current['min']),
+                                  'max': list(self._lab_current['max'])}
+        _stage('lab', f'stashed live range -> {name}')
+        response.success = True
+        response.message = 'stashed'
+        return response
+
+    def _lab_get_all_names_srv(self, request, response):
+        response.color_names = list(self._lab_ranges.keys())
+        return response
 
     def _depth_plane_refit_srv(self, request, response):
         """Round 12 Y6: refit the table plane from the latest depth frame
@@ -2602,15 +2836,28 @@ class ObjectSortingNodeV5(Node):
         return self._calib_cache
 
     def _apply_world_offsets(self, position):
-        """Apply the calibration.yaml pixel affine + the live manual
-        grip_offset and workspace_scale to a world position. Single source
-        of truth shared by get_object_world_position (the real pick) and the
-        calibration overlay, so the overlay can never drift from the pick."""
+        """Apply the calibration.yaml pixel + kinematics affines + the
+        live manual grip_offset and workspace_scale to a world position.
+        Single source of truth shared by get_object_world_position (the
+        real pick) and the calibration overlay, so the overlay can never
+        drift from the pick.
+
+        Round 14 BB.1: apply BOTH `pixel` and `kinematics` scale+offset
+        (vendor calibration.yaml schema). Previously only `pixel` was
+        applied; `kinematics` is the per-axis correction vendor uses to
+        compensate the arm's actual reach vs. ideal IK. Without it the
+        arm under/overshoots laterally on cubes far from centre."""
         cfg = self._calibration_cfg()
-        offset = tuple(cfg['pixel']['offset'])
-        scale = tuple(cfg['pixel']['scale'])
+        # pixel affine (extrinsic-side correction).
+        offset = tuple(cfg.get('pixel', {}).get('offset', (0.0, 0.0, 0.0)))
+        scale = tuple(cfg.get('pixel', {}).get('scale', (1.0, 1.0, 1.0)))
         for i in range(3):
             position[i] = position[i] * scale[i] + offset[i]
+        # Kinematics affine (arm-reach-side correction; vendor convention).
+        k_offset = tuple(cfg.get('kinematics', {}).get('offset', (0.0, 0.0, 0.0)))
+        k_scale = tuple(cfg.get('kinematics', {}).get('scale', (1.0, 1.0, 1.0)))
+        for i in range(3):
+            position[i] = position[i] * k_scale[i] + k_offset[i]
         # Manual world nudge (default 0): shift the final pick position so
         # the arm lands on the object, compensating calibration drift when
         # the AprilTag can't be re-run. Read live so the slider applies on
@@ -2627,13 +2874,78 @@ class ObjectSortingNodeV5(Node):
 
     def get_object_world_position(self, position, intrinsic, extristric,
                                   white_area_center, height=0.03):
-        projection_matrix = np.row_stack((np.column_stack((extristric[1], extristric[0])),
-                                          np.array([[0, 0, 0, 1]])))
-        world_pose = common.pixels_to_world([position], intrinsic, projection_matrix)[0]
-        world_pose[0] = -world_pose[0]
-        world_pose[1] = -world_pose[1]
-        position = white_area_center[:3, 3] + world_pose
-        position[2] = height
+        """Pixel -> world XYZ for picking. The projection_matrix return is
+        used elsewhere for `calculate_pixel_length` only.
+
+        Round 14 CC.2: when a depth measurement + fitted table plane +
+        endpoint pose are all available, route the world math through
+        vendor `utils.calculate_world_position` (utils.py L294-343) so
+        v5 gripping lands at the exact spot the vendor shape_recognition
+        / object_sorting pick path would. This is the change that makes
+        the arm grip the cube under it instead of off to the side.
+
+        Fallback (no depth / no plane / no endpoint / vendor utils not
+        importable) keeps the legacy pixels_to_world path that's worked
+        since Round 10. _apply_world_offsets runs at the end either way."""
+        # Always build projection_matrix for the caller (used by
+        # calculate_pixel_length downstream).
+        projection_matrix = np.row_stack(
+            (np.column_stack((extristric[1], extristric[0])),
+             np.array([[0, 0, 0, 1]])))
+        px, py = int(position[0]), int(position[1])
+        # Vendor path: only when EVERY input vendor needs is available.
+        # depth here is in METRES (we hold it that way); vendor function
+        # wants MM (it divides by 1000 internally). Convert just at the
+        # call.
+        used_vendor = False
+        try:
+            if (_VENDOR_UTILS_OK
+                    and vendor_utils is not None
+                    and self.table_plane is not None
+                    and self._depth_available
+                    and self._latest_depth is not None):
+                z_at = self._depth_at(px, py)
+                if z_at is not None:
+                    # _depth_at returns height-above-plane when plane is
+                    # set (Round 12 Y3). Vendor calculate_world_position
+                    # wants the RAW depth (mm) to do its own plane math.
+                    # Re-sample the raw median depth here.
+                    half = max(1, int(self.p('depth_window_px')))
+                    img = self._latest_depth
+                    h, w = img.shape[:2]
+                    if 0 <= px < w and 0 <= py < h:
+                        x0 = max(0, px - half); x1 = min(w, px + half + 1)
+                        y0 = max(0, py - half); y1 = min(h, py + half + 1)
+                        patch = img[y0:y1, x0:x1].ravel()
+                        patch = patch[patch > 0]
+                        if len(patch) >= (2*half+1)**2 * 0.5:
+                            depth_mm = float(np.median(patch))
+                            endpoint = self._current_endpoint_pose()
+                            if endpoint is None:
+                                endpoint = np.eye(4, dtype=np.float64)
+                            K = np.asarray(self.intrinsic,
+                                           dtype=np.float64).flatten()
+                            world = vendor_utils.calculate_world_position(
+                                px, py, depth_mm,
+                                tuple(self.table_plane),
+                                endpoint,
+                                self.hand2cam_tf_matrix,
+                                K)
+                            position = np.array(world, dtype=np.float64)
+                            used_vendor = True
+        except Exception as e:
+            _stage('pick', 'vendor calculate_world_position failed; '
+                            'using legacy path', exc=e)
+
+        if not used_vendor:
+            # Legacy path (pre-Round 14). Identical to vendor's
+            # object_sorting.py for the no-depth case.
+            world_pose = common.pixels_to_world(
+                [position], intrinsic, projection_matrix)[0]
+            world_pose[0] = -world_pose[0]
+            world_pose[1] = -world_pose[1]
+            position = white_area_center[:3, 3] + world_pose
+            position[2] = height
         position = self._apply_world_offsets(position)
         return position, projection_matrix
 
@@ -3201,7 +3513,14 @@ class ObjectSortingNodeV5(Node):
                          tr.transform.rotation.z])
                     self._depth_to_color_tf = np.asarray(M, dtype=np.float64)
                     self._depth_tf_ok = True
-                    _stage('init', f'depth->color TF resolved')
+                    # Round 14 CC.3: vendor calibration.py L99-100 composes
+                    # the depth->color static TF into hand2cam so the
+                    # world-position math sees the refined extrinsic.
+                    # Mirror exactly: M @ default_hand2cam.
+                    self.hand2cam_tf_matrix = np.matmul(
+                        self._depth_to_color_tf, self.hand2cam_tf_matrix)
+                    _stage('init', f'depth->color TF resolved + composed '
+                                    f'into hand2cam')
                     return
                 except Exception:
                     time.sleep(0.5)
@@ -3224,6 +3543,23 @@ class ObjectSortingNodeV5(Node):
         self._latest_depth = img
         self._latest_depth_ts = time.time()
         self._depth_available = True
+        # Round 14 CC.4: per-frame plane-height map via vendor utility.
+        # Cached so detection-gating + per-object height labels reuse the
+        # same map instead of recomputing per pixel. Cheap: vectorised.
+        try:
+            if (_VENDOR_UTILS_OK and vendor_utils is not None
+                    and self.table_plane is not None
+                    and self._depth_cam_info is not None):
+                info = self._depth_cam_info
+                K = info.k if hasattr(info, 'k') else None
+                if K is not None and len(K) >= 6:
+                    self._plane_values = vendor_utils.get_plane_values(
+                        img, tuple(self.table_plane), K)
+        except Exception as e:
+            if not getattr(self, '_plane_values_warned', False):
+                _stage('camera', 'get_plane_values failed (one-time warn)',
+                       exc=e)
+                self._plane_values_warned = True
         if not self._depth_first_logged:
             self._depth_first_logged = True
             _stage('camera', f'FIRST DEPTH FRAME on {self._depth_topic}: '
@@ -3305,6 +3641,9 @@ class ObjectSortingNodeV5(Node):
             _dbg('cam-recv', f'frame #{self._frames_received} shape={bgr.shape} '
                              f'enc={ros_rgb_image.encoding}')
         self._latest_raw_bgr = bgr
+        # Round 14 AA: when LAB color tab is in ENTER state, publish a
+        # live mask on ~/lab_mask. Cheap when off (single bool check).
+        self._lab_publish_mask(bgr)
         # Inference runs whenever the worker is not paused (enable_inference
         # param / Pause AI button). This lets the user tune YOLO sliders with
         # sorting OFF and see detections live in the viewer — the pick
