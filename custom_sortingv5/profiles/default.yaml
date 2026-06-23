@@ -73,9 +73,6 @@
     depth_min_z_m: -0.02
     depth_max_z_m: 0.20
     # ---- Round 12 (calibration overhaul) ----
-    # Skip the separate vendor calibration node and run AprilTag solvePnP
-    # inline. Useful when the vendor node is dead or misbehaving.
-    prefer_inline_calibration: false
     # Paint a JET-colormapped depth heatmap inside the workspace overlay
     # so you can SEE whether depth is reading the cubes and is aligned
     # with the RGB image. Cheap; only when overlay is on.

@@ -508,6 +508,27 @@ if [ "$WAIT_FOR_FACTORY_SERVICE" = "1" ]; then
         err camera "camera did not start publishing within ${CAMERA_READY_TIMEOUT}s"
         err camera "we'll launch anyway - the v4 node will print [camera] errors if it can't see frames"
     fi
+
+    # Round 15: also soft-wait for the depth topic. Not fatal - depth often
+    # comes up a few seconds after RGB - but the user needs to know.
+    DEPTH_TOPIC="${DEPTH_TOPIC:-/depth_cam/depth/image_raw}"
+    DEPTH_WAIT="${DEPTH_WAIT:-15}"
+    stage depth "soft-waiting up to ${DEPTH_WAIT}s for $DEPTH_TOPIC..."
+    depth_ok=0
+    for ((i=0; i<DEPTH_WAIT; i++)); do
+        if ros2 topic list 2>/dev/null | grep -q "^${DEPTH_TOPIC}$"; then
+            if timeout 2 ros2 topic echo --once "$DEPTH_TOPIC" >/dev/null 2>&1; then
+                ok depth "depth publishing frames (took ${i}s)"
+                depth_ok=1; break
+            fi
+        fi
+        sleep 1
+    done
+    if [ "$depth_ok" -ne 1 ]; then
+        err depth "depth topic NOT publishing yet ($DEPTH_TOPIC)"
+        err depth "the Depth tab's plane fit + the depth heatmap will be unavailable"
+        err depth "until it does. Check: ros2 topic list | grep depth_cam"
+    fi
 else
     stage launcher "skipping pre-launch service/controllers/camera waits"
     stage launcher "  (v5 brings everything up inside ros2 launch below;"

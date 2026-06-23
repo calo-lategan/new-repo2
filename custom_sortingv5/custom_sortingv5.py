@@ -801,10 +801,6 @@ class ObjectSortingNodeV5(Node):
         # and depth_min_z_m is effectively unused.
         ('depth_min_z_m', -0.02, (-0.10, 0.20)),
         ('depth_max_z_m',  0.20, (0.05, 0.50)),
-        # Calibration: when True, the CALIBRATE button skips the separate
-        # vendor calibration node and runs solvePnP inline. Useful when
-        # the vendor node is dead or misbehaving.
-        ('prefer_inline_calibration', False, None),
         # Overlay: paint a JET-colormapped depth heatmap inside the
         # workspace ROI so the user can SEE whether depth is reading the
         # cubes (Round 12 Y5).
@@ -1044,7 +1040,9 @@ class ObjectSortingNodeV5(Node):
         # Round 14 AA: LAB color threshold calibration (one-for-one with
         # vendor lab_manager.py). 7 services + a mono8 mask publisher.
         # Reuses the SAME lab_config.yaml schema vendor sorting reads.
-        self._lab_init()
+        # Round 15: LAB color calibration is now delegated to the vendor
+        # lab_manager_node (launched alongside us by the v5 launch file).
+        # The Color tab in tune_uiv5 talks to /lab_manager/* directly.
 
         # ---- Vendor calibration node clients (idle until CALIBRATE) ----
         # Created, not blocked on: if the calibration node isn't running we
@@ -1801,206 +1799,9 @@ class ObjectSortingNodeV5(Node):
         res = fut.result() if fut.done() else None
         return bool(res and res.success)
 
-    # ---------------------------------------------------------------- LAB color
-    # Round 14 AA: vendor lab_manager.py one-for-one (mask pipeline,
-    # services, YAML schema). Lives inline so the v5 app is the single
-    # tool the user opens for both color and position calibration.
+    # Round 15: LAB color calibration is delegated to the vendor
+    # lab_manager_node. v5 no longer hosts the LAB service surface.
 
-    DEFAULT_LAB_RANGES = {
-        'red':    {'min': [9, 146, 146],    'max': [160, 187, 207]},
-        'green':  {'min': [72, 49, 128],    'max': [203, 113, 197]},
-        'blue':   {'min': [11, 115, 46],    'max': [172, 178, 117]},
-        'black':  {'min': [0, 30, 92],      'max': [86, 187, 196]},
-        'white':  {'min': [111, 100, 100],  'max': [255, 155, 155]},
-        'yellow': {'min': [195, 110, 146],  'max': [255, 177, 184]},
-        'tennis': {'min': [31, 66, 178],    'max': [210, 159, 255]},
-    }
-
-    def _lab_init(self):
-        """Embed the vendor lab_manager service surface in v5 (Round 14 AA).
-        Reuses the SAME lab_config.yaml the vendor sorting reads, so any
-        changes are picked up by the vendor app and vice versa.
-        Services mirror vendor names with our '~/lab_*' prefix."""
-        from interfaces.srv import (
-            StashRange as _StashRange, GetRange as _GetRange,
-            ChangeRange as _ChangeRange, GetAllColorName as _GetAllColorName,
-        )
-        self._lab_StashRange = _StashRange
-        self._lab_GetRange = _GetRange
-        self._lab_ChangeRange = _ChangeRange
-        self._lab_GetAllColorName = _GetAllColorName
-        self._lab_path = os.path.join(self.config_path, 'lab_config.yaml')
-        # Boot-load from disk; vendor schema is /**:ros__parameters:color_range_list.
-        self._lab_ranges = self._lab_load_yaml()
-        # Currently-active (live) range; vendor seeds with 'red'.
-        active = self._lab_ranges.get('red',
-                                      dict(self.DEFAULT_LAB_RANGES['red']))
-        self._lab_current = {'min': list(active['min']),
-                             'max': list(active['max'])}
-        self._lab_active = False  # set True via ~/lab_enter
-        self._lab_mask_pub = self.create_publisher(
-            Image, '~/lab_mask', 1)
-        # Services
-        self.create_service(Trigger, '~/lab_enter',
-                            self._lab_enter_srv,
-                            callback_group=self.svc_group)
-        self.create_service(Trigger, '~/lab_exit',
-                            self._lab_exit_srv,
-                            callback_group=self.svc_group)
-        self.create_service(Trigger, '~/lab_save_to_disk',
-                            self._lab_save_srv,
-                            callback_group=self.svc_group)
-        self.create_service(self._lab_GetRange, '~/lab_get_range',
-                            self._lab_get_range_srv,
-                            callback_group=self.svc_group)
-        self.create_service(self._lab_ChangeRange, '~/lab_change_range',
-                            self._lab_change_range_srv,
-                            callback_group=self.svc_group)
-        self.create_service(self._lab_StashRange, '~/lab_stash_range',
-                            self._lab_stash_range_srv,
-                            callback_group=self.svc_group)
-        self.create_service(self._lab_GetAllColorName, '~/lab_get_all_color_name',
-                            self._lab_get_all_names_srv,
-                            callback_group=self.svc_group)
-        _stage('init', f'LAB color services up; yaml={self._lab_path} '
-                       f'colors={list(self._lab_ranges.keys())}')
-
-    def _lab_load_yaml(self):
-        """Read vendor schema {'/**': {'ros__parameters':
-        {'color_range_list': {name: {min, max}}}}}. Falls back to the
-        7 vendor defaults when missing."""
-        try:
-            if os.path.isfile(self._lab_path):
-                with open(self._lab_path, 'r') as f:
-                    data = yaml.safe_load(f) or {}
-                cr = (data.get('/**', {}) or {}).get('ros__parameters', {}) \
-                                               .get('color_range_list', {})
-                if cr:
-                    out = {}
-                    for k, v in cr.items():
-                        if isinstance(v, dict) and 'min' in v and 'max' in v:
-                            out[k] = {'min': list(v['min']),
-                                      'max': list(v['max'])}
-                    if out:
-                        return out
-        except Exception as e:
-            _stage('lab', 'load_yaml failed; using defaults', exc=e)
-        return {k: {'min': list(v['min']), 'max': list(v['max'])}
-                for k, v in self.DEFAULT_LAB_RANGES.items()}
-
-    def _lab_write_yaml(self):
-        """Persist the in-memory ranges back to lab_config.yaml in vendor
-        schema. Called by ~/lab_save_to_disk."""
-        data = {'/**': {'ros__parameters': {
-            'color_range_list': {
-                k: {'min': list(v['min']), 'max': list(v['max'])}
-                for k, v in self._lab_ranges.items()
-            }
-        }}}
-        os.makedirs(os.path.dirname(self._lab_path), exist_ok=True)
-        with open(self._lab_path, 'w') as f:
-            yaml.safe_dump(data, f, default_flow_style=False,
-                           allow_unicode=True)
-
-    def _lab_process_frame(self, bgr):
-        """Vendor lab_manager.py L84-103 mask pipeline, byte-for-byte:
-            resize/2 -> RGB2LAB (vendor uses RGB2LAB on RGB input) ->
-            GaussianBlur(3,3)/3 -> inRange(min,max) -> erode 5x5 ->
-            dilate 5x5 -> resize back to native -> publish mono8."""
-        ow, oh = bgr.shape[1], bgr.shape[0]
-        small = cv2.resize(bgr, (ow // 2, oh // 2),
-                           interpolation=cv2.INTER_NEAREST)
-        # Vendor calls cvtColor on the camera frame which is RGB; v5's
-        # _latest_raw_bgr is BGR, so we use BGR2LAB to land on the same
-        # LAB space the vendor sliders are calibrated against.
-        lab = cv2.cvtColor(small, cv2.COLOR_BGR2LAB)
-        lab = cv2.GaussianBlur(lab, (3, 3), 3)
-        rng = self._lab_current
-        mask = cv2.inRange(lab, tuple(rng['min']), tuple(rng['max']))
-        k = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        eroded = cv2.erode(mask, k)
-        dilated = cv2.dilate(eroded, k)
-        return cv2.resize(dilated, (ow, oh))
-
-    def _lab_publish_mask(self, bgr):
-        """Called from the camera callback when _lab_active. Cheap when
-        off (early return)."""
-        if not self._lab_active:
-            return
-        try:
-            mask = self._lab_process_frame(bgr)
-            msg = self.bridge.cv2_to_imgmsg(mask, 'mono8')
-            self._lab_mask_pub.publish(msg)
-        except Exception as e:
-            if not getattr(self, '_lab_pub_warned', False):
-                _stage('lab', 'mask publish failed (one-time warn)', exc=e)
-                self._lab_pub_warned = True
-
-    # ---- Service callbacks (signatures match vendor lab_manager.py) ----
-
-    def _lab_enter_srv(self, request, response):
-        self._lab_active = True
-        _stage('lab', 'enter: LAB mask publishing ON')
-        response.success = True
-        response.message = 'start'
-        return response
-
-    def _lab_exit_srv(self, request, response):
-        self._lab_active = False
-        _stage('lab', 'exit: LAB mask publishing OFF')
-        response.success = True
-        response.message = 'exit'
-        return response
-
-    def _lab_save_srv(self, request, response):
-        try:
-            self._lab_write_yaml()
-            _stage('lab', f'saved to {self._lab_path}')
-            response.success = True
-            response.message = 'Thresholds saved successfully.'
-        except Exception as e:
-            _stage('lab', 'save failed', exc=e)
-            response.success = False
-            response.message = f'save failed: {e}'
-        return response
-
-    def _lab_get_range_srv(self, request, response):
-        name = request.color_name
-        if name in self._lab_ranges:
-            response.min = list(self._lab_ranges[name]['min'])
-            response.max = list(self._lab_ranges[name]['max'])
-            response.success = True
-        else:
-            response.success = False
-            response.min = []
-            response.max = []
-        return response
-
-    def _lab_change_range_srv(self, request, response):
-        # Vendor uses int16[] for min/max. Update the LIVE mask range.
-        self._lab_current = {'min': [int(x) for x in request.min],
-                             'max': [int(x) for x in request.max]}
-        response.success = True
-        response.message = 'start'
-        return response
-
-    def _lab_stash_range_srv(self, request, response):
-        # Save the current live range under the given color name.
-        name = str(request.color_name)
-        if not name:
-            response.success = False
-            response.message = 'empty color_name'
-            return response
-        self._lab_ranges[name] = {'min': list(self._lab_current['min']),
-                                  'max': list(self._lab_current['max'])}
-        _stage('lab', f'stashed live range -> {name}')
-        response.success = True
-        response.message = 'stashed'
-        return response
-
-    def _lab_get_all_names_srv(self, request, response):
-        response.color_names = list(self._lab_ranges.keys())
-        return response
 
     def _depth_plane_refit_srv(self, request, response):
         """Round 12 Y6: refit the table plane from the latest depth frame
@@ -2038,11 +1839,9 @@ class ObjectSortingNodeV5(Node):
         rebuild ROI from the transform.yaml it writes. Fully guarded -
         never raises, always tries to leave the vendor node in 'exit'.
 
-        Round 12 X1+X4: capture per-stage failure reason and (if requested
-        or vendor unreachable) fall back to the inline _v5_inline_calibrate
-        path. Reason strings published in heartbeat last_calibrate so the
-        UI can show CALIBRATE FAILED: <reason>."""
-        result_source = 'vendor'
+        Round 15: vendor calibration_node is the ONLY path. No v5-side
+        fallback - if the vendor node isn't reachable we surface that
+        reason rather than running a less-faithful reimplementation."""
         try:
             self.enable_sorting = False
             try:
@@ -2053,41 +1852,19 @@ class ObjectSortingNodeV5(Node):
             _stage('calibrate', 'sorting force-stopped; starting calibration')
             self._calib_finished.clear()
 
-            prefer_inline = bool(self.p('prefer_inline_calibration'))
-            vendor_up = self.calib_enter_cli.wait_for_service(timeout_sec=2.0)
-            if prefer_inline or not vendor_up:
-                reason = 'prefer_inline' if prefer_inline else 'no_vendor_node'
-                _stage('calibrate', f'using inline fallback ({reason})')
-                ok, inline_reason = self._v5_inline_calibrate()
-                result_source = 'inline'
-                self._last_calibrate = {
-                    'ts': time.time(), 'ok': bool(ok),
-                    'source': result_source,
-                    'error': None if ok else inline_reason,
-                }
-                if ok:
-                    self.start_get_roi = True
-                    self._flash_overlay()
+            if not self.calib_enter_cli.wait_for_service(timeout_sec=2.0):
+                _stage('calibrate', 'vendor calibration_node service not '
+                                    'reachable - is it launched?')
+                self._last_calibrate = {'ts': time.time(), 'ok': False,
+                                        'source': 'vendor',
+                                        'error': 'no_vendor_node'}
                 return
-
             if not self._call_trigger(self.calib_enter_cli):
                 _stage('calibrate', 'vendor enter failed/timed out')
                 self._last_calibrate = {'ts': time.time(), 'ok': False,
                                         'source': 'vendor',
                                         'error': 'enter_failed'}
                 self._call_trigger(self.calib_exit_cli, timeout=3.0)
-                # Auto-fallback: vendor present but enter failed - try inline.
-                _stage('calibrate', 'auto-falling back to inline calibrate')
-                ok, inline_reason = self._v5_inline_calibrate()
-                if ok:
-                    self.start_get_roi = True
-                    self._flash_overlay()
-                    self._last_calibrate = {'ts': time.time(), 'ok': True,
-                                            'source': 'inline',
-                                            'error': None}
-                else:
-                    self._last_calibrate['error'] = (
-                        f'enter_failed_then_{inline_reason}')
                 return
             if not self._call_trigger(self.calib_start_cli):
                 _stage('calibrate', 'vendor start failed/timed out')
@@ -2117,7 +1894,7 @@ class ObjectSortingNodeV5(Node):
             except Exception:
                 pass
             self._last_calibrate = {'ts': time.time(), 'ok': False,
-                                    'source': result_source,
+                                    'source': 'vendor',
                                     'error': f'exception:{type(e).__name__}'}
         finally:
             self._calibrating = False
@@ -2141,185 +1918,6 @@ class ObjectSortingNodeV5(Node):
         except Exception as e:
             _stage('calibrate', 'flash overlay schedule failed', exc=e)
 
-    def _v5_inline_calibrate(self):
-        """Vendor-style AprilTag calibration ported into v5 so we can
-        calibrate even when the separate vendor node is dead. Mirrors
-        full jetarm source for context/app/app/calibration.py L132-226:
-
-        1. Grab the latest RGB frame.
-        2. dt_apriltags.Detector.detect() with the SAME params the vendor
-           uses (tag36h11, tag_size=0.025).
-        3. Filter to exactly ONE tag in [1,2,3,100], require the tag to be
-           steady (distance to last frame's tag < 0.003 m), collect 10
-           stable samples (timeout 15 s).
-        4. cv2.solvePnP over the 10x4 corner correspondences.
-        5. Average tag poses, compose with vendor's hand2cam_tf_matrix
-           and the endpoint pose -> white_area_pose_world.
-        6. Build the 4 workspace corners via xyz_euler_to_mat.
-        7. Write transform.yaml in the vendor schema -> get_roi() reloads.
-
-        Returns (ok: bool, reason: str). Reason is one of:
-          'no_apriltags_lib' / 'no_frame' / 'no_intrinsics' / 'tag_not_seen'
-          / 'multiple_tags' / 'unsteady' / 'solve_pnp_failed' /
-          'no_endpoint' / 'write_failed' / 'exception'."""
-        try:
-            try:
-                from dt_apriltags import Detector
-            except ImportError:
-                _stage('calibrate', 'inline: dt_apriltags not installed '
-                                    '(pip3 install --user dt_apriltags)')
-                return False, 'no_apriltags_lib'
-            if self._latest_raw_bgr is None:
-                return False, 'no_frame'
-            if self.intrinsic is None or self.distortion is None:
-                return False, 'no_intrinsics'
-            K = np.asarray(self.intrinsic, dtype=np.float64)
-            D = np.asarray(self.distortion, dtype=np.float64).reshape(-1)
-            fx, fy = float(K[0, 0]), float(K[1, 1])
-            cx_i, cy_i = float(K[0, 2]), float(K[1, 2])
-            tag_size = 0.025
-            valid_ids = {1, 2, 3, 100}
-            detector = Detector(families='tag36h11', nthreads=4,
-                                quad_decimate=1.0, quad_sigma=0.0,
-                                refine_edges=1, decode_sharpening=0.25,
-                                debug=0)
-            samples = []
-            t0 = time.time()
-            last_t = None
-            seen_any = False
-            saw_multiple = False
-            while time.time() - t0 < 15.0 and len(samples) < 10:
-                bgr = self._latest_raw_bgr
-                if bgr is None:
-                    time.sleep(0.05)
-                    continue
-                gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-                detections = detector.detect(
-                    gray, True, (fx, fy, cx_i, cy_i), tag_size)
-                if len(detections) > 1:
-                    saw_multiple = True
-                    last_t = None
-                    time.sleep(0.05); continue
-                if len(detections) == 1 and detections[0].tag_id in valid_ids:
-                    seen_any = True
-                    t = detections[0]
-                    if last_t is not None and common.distance(last_t.pose_t,
-                                                              t.pose_t) > 0.003:
-                        samples = []
-                    samples.append(t)
-                    last_t = t
-                time.sleep(0.05)
-            if len(samples) < 10:
-                if saw_multiple and not seen_any:
-                    return False, 'multiple_tags'
-                if not seen_any:
-                    return False, 'tag_not_seen'
-                return False, 'unsteady'
-            # solvePnP over all sampled corners.
-            world_pts = np.array(
-                [(-tag_size / 2, -tag_size / 2, 0),
-                 ( tag_size / 2, -tag_size / 2, 0),
-                 ( tag_size / 2,  tag_size / 2, 0),
-                 (-tag_size / 2,  tag_size / 2, 0)] * len(samples),
-                dtype=np.float64)
-            image_pts = np.array([t.corners for t in samples],
-                                 dtype=np.float64).reshape(-1, 2)
-            ok, rvec, tvec = cv2.solvePnP(world_pts, image_pts, K, D)
-            if not ok:
-                return False, 'solve_pnp_failed'
-            rmat, _ = cv2.Rodrigues(rvec)
-            extristric = [tvec.flatten().tolist(),
-                          rmat[0].tolist(),
-                          rmat[1].tolist(),
-                          rmat[2].tolist()]
-            # Average tag poses (vendor calibration.py L162-180).
-            poses = [common.xyz_rot_to_mat(t.pose_t, t.pose_R) for t in samples]
-            vectors = [p.ravel() for p in poses]
-            avg_pose = np.mean(np.array(vectors), axis=0).reshape((4, 4))
-            white_area_pose_cam = avg_pose
-            # hand2cam: use the vendor constant (calibration.py L28-33). If
-            # a future Y1 TF lookup folds in the depth->color offset it can
-            # multiply on top.
-            hand2cam = np.array([
-                [0.0, 0.0, 1.0, -0.101],
-                [-1.0, 0.0, 0.0, 0.0],
-                [0.0, -1.0, 0.0, 0.05],
-                [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
-            if getattr(self, '_depth_to_color_tf', None) is not None:
-                hand2cam = np.matmul(self._depth_to_color_tf, hand2cam)
-            pose_end = np.matmul(hand2cam, avg_pose)
-            endpoint = self._current_endpoint_pose()
-            if endpoint is None:
-                return False, 'no_endpoint'
-            pose_world = np.matmul(endpoint, pose_end)
-            # 4 mat corners + centre (vendor pattern).
-            W = pose_world
-            local = [(+self.white_area_height / 2, +self.white_area_width / 2, 0),
-                     (-self.white_area_height / 2, +self.white_area_width / 2, 0),
-                     (-self.white_area_height / 2, -self.white_area_width / 2, 0),
-                     (+self.white_area_height / 2, -self.white_area_width / 2, 0)]
-            corners = []
-            for (lx, ly, lz) in local:
-                M = common.xyz_euler_to_mat((lx, ly, lz), (0, 0, 0))
-                P = np.matmul(W, M)
-                corners.append(P[:3, 3].tolist())
-            corners.append(W[:3, 3].tolist())  # centre last (vendor schema)
-            data = {
-                'extristric': extristric,
-                'white_area_pose_cam': white_area_pose_cam.tolist(),
-                'white_area_pose_world': pose_world.tolist(),
-                'corners': corners,
-            }
-            # Y2: include plane if we have a depth frame.
-            plane = self._fit_table_plane()
-            if plane is not None:
-                data['plane'] = list(plane)
-            try:
-                cfg_path = os.path.join(self.config_path, self.config_file)
-                # Merge with existing yaml so we don't drop unrelated keys.
-                existing = {}
-                try:
-                    with open(cfg_path, 'r') as f:
-                        existing = yaml.safe_load(f) or {}
-                except Exception:
-                    pass
-                existing.update(data)
-                with open(cfg_path, 'w') as f:
-                    yaml.safe_dump(existing, f)
-                _stage('calibrate', f'inline: wrote {cfg_path}')
-            except Exception as e:
-                _stage('calibrate', 'inline: write transform.yaml failed', exc=e)
-                return False, 'write_failed'
-            return True, 'ok'
-        except Exception as e:
-            _stage('calibrate', 'inline: crashed', exc=e)
-            return False, f'exception:{type(e).__name__}'
-
-    def _current_endpoint_pose(self):
-        """Return the current end-effector pose as a 4x4 matrix.
-
-        The vendor uses the IK service to read the current endpoint. We use
-        the same kinematics_client if available. Falls back to None when
-        kinematics aren't reachable, which the inline calibrate treats as a
-        graceful failure."""
-        try:
-            if self.kinematics_client is None:
-                return None
-            # Best-effort: use the live target pose stored by motion if
-            # available. The vendor doesn't refit endpoint inside
-            # calibration_proc (it uses self.endpoint stashed by another
-            # call); we mirror that by trusting any cached value.
-            ep = getattr(self.motion, 'last_endpoint_pose', None)
-            if ep is not None:
-                return np.asarray(ep, dtype=np.float64)
-            # Fallback: identity at the arm's nominal pre-pose. Better than
-            # nothing - the AprilTag PnP still produces a valid camera
-            # extrinsic; the world projection just inherits the nominal
-            # pre-calibrate stance, which the user can dial out with
-            # grip_offset_x/y.
-            return np.eye(4, dtype=np.float64)
-        except Exception:
-            return None
 
     def _fit_table_plane(self):
         """Round 12 Y2: RANSAC plane fit on the latest depth frame using the
@@ -2920,9 +2518,15 @@ class ObjectSortingNodeV5(Node):
                         patch = patch[patch > 0]
                         if len(patch) >= (2*half+1)**2 * 0.5:
                             depth_mm = float(np.median(patch))
-                            endpoint = self._current_endpoint_pose()
+                            # Round 15: endpoint pose taken from cached motion
+                            # state, else identity (same conservative behavior
+                            # the deleted _current_endpoint_pose used).
+                            endpoint = getattr(self.motion, 'last_endpoint_pose',
+                                               None)
                             if endpoint is None:
                                 endpoint = np.eye(4, dtype=np.float64)
+                            else:
+                                endpoint = np.asarray(endpoint, dtype=np.float64)
                             K = np.asarray(self.intrinsic,
                                            dtype=np.float64).flatten()
                             world = vendor_utils.calculate_world_position(
@@ -3641,9 +3245,6 @@ class ObjectSortingNodeV5(Node):
             _dbg('cam-recv', f'frame #{self._frames_received} shape={bgr.shape} '
                              f'enc={ros_rgb_image.encoding}')
         self._latest_raw_bgr = bgr
-        # Round 14 AA: when LAB color tab is in ENTER state, publish a
-        # live mask on ~/lab_mask. Cheap when off (single bool check).
-        self._lab_publish_mask(bgr)
         # Inference runs whenever the worker is not paused (enable_inference
         # param / Pause AI button). This lets the user tune YOLO sliders with
         # sorting OFF and see detections live in the viewer — the pick

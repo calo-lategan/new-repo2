@@ -122,6 +122,14 @@ def launch_setup(context):
             os.path.join(app_package_path, 'launch/calibration_node.launch.py')),
     )
 
+    # Round 15: also bring up the vendor LAB color-threshold manager so the
+    # Color tab in tune_uiv5 can talk to /lab_manager/* directly. It loads
+    # lab_config.yaml at boot, exposes 7 services + a mono8 mask preview.
+    lab_manager_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(app_package_path, 'launch/lab_manager.launch.py')),
+    )
+
     # --- Resolve the optional named profile to a YAML file path -----------
     # If the user passed `profile:=fast`, look for ~/jetarm_v5_profiles/fast.yaml
     # and pass it via parameters=[...]. The node also auto-loads default.yaml
@@ -239,6 +247,7 @@ def launch_setup(context):
         sdk_launch,
         depth_camera_launch,
         calibration_launch,
+        lab_manager_launch,
         custom_sorting_v4_node,
         tune_ui_node,
         web_video_server_node,

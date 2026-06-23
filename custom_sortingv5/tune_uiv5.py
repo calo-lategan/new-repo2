@@ -272,20 +272,24 @@ class TunerClient(Node):
             StashRange as _StashRange, GetRange as _GetRange,
             ChangeRange as _ChangeRange, GetAllColorName as _GetAllColorName,
         )
+        # Round 15: drive the vendor lab_manager_node directly. v5 used to
+        # host its own /custom_sortingv5/lab_* services (Round 14) but
+        # those have been removed - the vendor node IS the canonical
+        # implementation and lives at /lab_manager/* on the same domain.
         self.lab_enter_cli = self.create_client(
-            Trigger, f'/{target_node}/lab_enter')
+            Trigger, '/lab_manager/enter')
         self.lab_exit_cli = self.create_client(
-            Trigger, f'/{target_node}/lab_exit')
+            Trigger, '/lab_manager/exit')
         self.lab_save_to_disk_cli = self.create_client(
-            Trigger, f'/{target_node}/lab_save_to_disk')
+            Trigger, '/lab_manager/save_to_disk')
         self.lab_get_range_cli = self.create_client(
-            _GetRange, f'/{target_node}/lab_get_range')
+            _GetRange, '/lab_manager/get_range')
         self.lab_change_range_cli = self.create_client(
-            _ChangeRange, f'/{target_node}/lab_change_range')
+            _ChangeRange, '/lab_manager/change_range')
         self.lab_stash_range_cli = self.create_client(
-            _StashRange, f'/{target_node}/lab_stash_range')
+            _StashRange, '/lab_manager/stash_range')
         self.lab_get_all_names_cli = self.create_client(
-            _GetAllColorName, f'/{target_node}/lab_get_all_color_name')
+            _GetAllColorName, '/lab_manager/get_all_color_name')
         self._lab_StashRange = _StashRange
         self._lab_GetRange = _GetRange
         self._lab_ChangeRange = _ChangeRange
@@ -543,25 +547,31 @@ class TunerUI:
                     f"ai={st.get('ai', '?')} "
                     f"inf_age={st.get('inference_age_ms', '-')}ms "
                     f"depth={d_str}{badge}")
-                # Round 12 Y6: populate the Calibrate-tab status panel.
-                if hasattr(self, 'calib_status_var'):
-                    tp = st.get('table_plane')
-                    plane_str = ('[{:.3f}, {:.3f}, {:.3f}, {:.3f}]'.format(*tp)
-                                 if tp and len(tp) == 4 else 'NOT FIT')
-                    tf_str = 'aligned' if st.get('depth_tf_ok') else 'unavailable'
-                    last = st.get('last_calibrate') or {}
-                    last_str = ('OK ({})'.format(last.get('source', '?'))
-                                if last.get('ok')
-                                else ('{}: {}'.format(
-                                        last.get('source', '?'),
-                                        last.get('error') or '-')
-                                      if last else '(never)'))
-                    self.calib_status_var.set(
+                # Round 15: split per-tab status panels.
+                tp = st.get('table_plane')
+                plane_str = ('[{:.3f}, {:.3f}, {:.3f}, {:.3f}]'.format(*tp)
+                             if tp and len(tp) == 4 else 'NOT FIT')
+                tf_str = 'aligned' if st.get('depth_tf_ok') else 'unavailable'
+                last = st.get('last_calibrate') or {}
+                last_str = ('OK ({})'.format(last.get('source', '?'))
+                            if last.get('ok')
+                            else ('{}: {}'.format(
+                                    last.get('source', '?'),
+                                    last.get('error') or '-')
+                                  if last else '(never)'))
+                if hasattr(self, 'position_status_var'):
+                    self.position_status_var.set(
+                        f"last calibrate : {last_str}\n"
+                        f"workspace size : "
+                        f"{st.get('workspace_size_x', '?')} x "
+                        f"{st.get('workspace_size_y', '?')} m"
+                    )
+                if hasattr(self, 'depth_status_var'):
+                    self.depth_status_var.set(
                         f"depth topic : {st.get('depth_topic', '') or 'OFF'}\n"
                         f"depth status: {d_str} (age {d_age} ms)\n"
                         f"depth->color TF: {tf_str}\n"
-                        f"table plane : {plane_str}\n"
-                        f"last cal    : {last_str}"
+                        f"table plane : {plane_str}"
                     )
                 engine = st.get('engine') or ''
                 task = st.get('task') or ''
@@ -764,11 +774,13 @@ class TunerUI:
         self._model_tab = detect_tab
         self._model_tab_index = notebook.index('end') - 1
         places_tab = ttk.Frame(notebook); notebook.add(places_tab, text='Places')
-        calibrate_tab = ttk.Frame(notebook); notebook.add(calibrate_tab, text='Calibrate')
-        # Round 14 AA.5: LAB color calibration tab (vendor lab_manager
-        # parity). Sits between Calibrate and Toggles so all the
-        # calibration tabs are adjacent.
-        color_tab = ttk.Frame(notebook); notebook.add(color_tab, text='Color (LAB)')
+        # Round 15: three independent calibration tabs - each with its own
+        # CALIBRATE button that ONLY runs that calibration. Position drives
+        # the vendor calibration_node; Color drives the vendor lab_manager;
+        # Depth drives our depth_plane_refit (which uses vendor SearchPlane).
+        position_tab = ttk.Frame(notebook); notebook.add(position_tab, text='Position')
+        color_tab = ttk.Frame(notebook); notebook.add(color_tab, text='Color')
+        depth_tab = ttk.Frame(notebook); notebook.add(depth_tab, text='Depth')
         toggles_tab = ttk.Frame(notebook); notebook.add(toggles_tab, text='Toggles')
         profiles_tab = ttk.Frame(notebook); notebook.add(profiles_tab, text='Profiles')
 
@@ -834,8 +846,9 @@ class TunerUI:
         detect_body = self._make_scrollable(detect_tab)
         toggles_body = self._make_scrollable(toggles_tab)
         places_body = self._make_scrollable(places_tab)
-        calibrate_body = self._make_scrollable(calibrate_tab)
+        position_body = self._make_scrollable(position_tab)
         color_body = self._make_scrollable(color_tab)
+        depth_body = self._make_scrollable(depth_tab)
 
         # Everything not speed/grip lives on the Detection tab.
         for name, lo, hi, res in FLOAT_PARAMS:
@@ -853,10 +866,10 @@ class TunerUI:
         self._build_model_section(detect_body, current)
         # Places tab — per-class targets (place position + grip strength).
         self._build_places_tab(places_body, current.get('place_positions', '{}'))
-        # Calibrate tab — manual world XY offset + workspace scale + overlay.
-        self._build_calibrate_tab(calibrate_body, current)
-        # Round 14 AA.5: Color (LAB) tab — vendor lab_manager parity.
+        # Round 15: three independent calibration tabs.
+        self._build_position_tab(position_body, current)
         self._build_color_tab(color_body, current)
+        self._build_depth_tab(depth_body, current)
         # Profiles tab is short and has its own listbox scroll - no body wrap.
         self._build_profiles_tab(profiles_tab)
 
@@ -1290,44 +1303,41 @@ class TunerUI:
                                      'apply_and_persist service rejected.')
         threading.Thread(target=go, daemon=True).start()
 
-    def _build_calibrate_tab(self, parent, current):
-        """Five world sliders + Enter-manual / Reset buttons. Save & Close
-        lives in the bottom bar."""
-        header = ttk.LabelFrame(parent, text='How calibration works')
+    def _build_position_tab(self, parent, current):
+        """Round 15: Position calibration tab - AprilTag → workspace
+        world frame, drives the vendor calibration_node ONLY. The big
+        CALIBRATE POSITION button is the only entrypoint to the
+        AprilTag flow.
+
+        Knobs (world XY offset, workspace size + scale) live here for
+        manual-mode fine-tuning AFTER AprilTag calibration."""
+        header = ttk.LabelFrame(parent, text='Position calibration')
         header.pack(fill='x', padx=8, pady=(8, 4))
         ttk.Label(header, foreground='#444', wraplength=720,
                   justify='left',
                   text=(
-                      'HOW CALIBRATION WORKS\n'
-                      '• Cyan + at "0,0" is the workspace centre (set by '
-                      'AprilTag CALIBRATE).\n'
-                      '• Red / Green arrows are world +X (right) and +Y '
+                      'POSITION CALIBRATION (AprilTag → workspace world frame)\n'
+                      '• Drives the vendor calibration_node (same one the '
+                      'Hiwonder PC tool uses).\n'
+                      '• Requires ONE tag in [1, 2, 3, 100], 2.5 cm, '
+                      'tag36h11, flat on the mat.\n'
+                      '• On success the workspace overlay flashes briefly '
+                      'so you see how it landed.\n'
+                      '\n'
+                      'AFTER calibration, fine-tune live:\n'
+                      '• Cyan + at "0,0" is the workspace centre.\n'
+                      '• Red/Green arrows are world +X (right) / +Y '
                       '(forward).\n'
-                      '• Yellow rectangle is the workspace the arm thinks '
-                      'it has - size it to your physical mat with '
-                      'Workspace size X / Y.\n'
+                      '• Yellow rectangle = the workspace the arm thinks '
+                      'it has. Size it to your mat with Workspace size '
+                      'X / Y.\n'
                       '• Yellow X on each object = where the arm will '
-                      'actually grab it. When calibration is right, X sits '
-                      'on the object centre.\n'
-                      '• Per-object mm label (with depth) = measured '
-                      'object top height.\n'
-                      '• Magenta diamonds = drop bins per class (set in '
-                      'Places).\n'
+                      'grab. When calibration is right, X sits on the '
+                      'object centre.\n'
                       '\n'
-                      'CALIBRATE WITHOUT THE TAG\n'
-                      '1. Click "Enter manual mode".\n'
-                      '2. Set Workspace size X / Y to your physical mat '
-                      'dimensions (in metres).\n'
-                      '3. Drag Offset X / Y until the yellow rectangle '
-                      'covers your mat AND the yellow X\'s sit on the cubes.\n'
-                      '4. If the whole map feels too big or too small, '
-                      'adjust Workspace scale (Z).\n'
-                      '5. Save & Close persists to default.yaml and clears '
-                      'the overlay.\n'
-                      '\n'
-                      'Use the top-bar CALIBRATE button to run the AprilTag '
-                      'auto-calibration instead - after success the overlay '
-                      'flashes briefly so you see how it landed.'
+                      'NO TAG? Click "Enter manual mode" and drag the '
+                      'sliders by hand. Save & Close persists to '
+                      'default.yaml.'
                   )).pack(anchor='w', padx=8, pady=(2, 6))
 
         knob_frame = ttk.LabelFrame(parent, text='World offsets + workspace size (live)')
@@ -1336,63 +1346,93 @@ class TunerUI:
             self._add_float(knob_frame, name, lo, hi, res,
                             float(current.get(name, lo)))
 
-        # Round 12 Y6: depth + camera controls all live here now.
-        depth_frame = ttk.LabelFrame(parent, text='Camera & depth (live)')
-        depth_frame.pack(fill='x', padx=8, pady=4)
-        ttk.Label(depth_frame, foreground='#666', wraplength=720,
-                  text='Depth-aware Z, sanity gate, and depth overlay. '
-                       'When a table plane is fit (run CALIBRATE), the '
-                       'gate becomes "above plane" so depth_min_z_m is '
-                       'effectively unused.',
-                  justify='left'
-                  ).pack(anchor='w', padx=8, pady=(2, 4))
-        # Boolean toggles inline (small row).
-        toggle_row = ttk.Frame(depth_frame); toggle_row.pack(fill='x', padx=4)
-        for bname in ('use_depth_for_z', 'overlay_depth_view',
-                      'prefer_inline_calibration'):
-            self._add_bool(toggle_row, bname,
-                           bool(current.get(bname, False)))
-        for name, lo, hi, res in CALIB_DEPTH_FLOAT_PARAMS:
-            self._add_float(depth_frame, name, lo, hi, res,
-                            float(current.get(name, lo)))
-        for name, lo, hi, res in CALIB_DEPTH_INT_PARAMS:
-            self._add_int(depth_frame, name, lo, hi, res,
-                          int(current.get(name, lo)))
-
-        # Live status panel (Round 12 Y6). Bound by _poll_node_status.
+        # Status panel - position-only fields from heartbeat last_calibrate.
         status_frame = ttk.LabelFrame(parent,
-                                      text='Camera & depth status (live)')
+                                      text='Position status (live)')
         status_frame.pack(fill='x', padx=8, pady=4)
-        self.calib_status_var = tk.StringVar(
-            value='(awaiting heartbeat...)')
-        ttk.Label(status_frame, textvariable=self.calib_status_var,
+        self.position_status_var = tk.StringVar(value='(awaiting heartbeat...)')
+        ttk.Label(status_frame, textvariable=self.position_status_var,
                   foreground='#222', wraplength=720, justify='left',
                   font=('TkFixedFont', 9)
                   ).pack(anchor='w', padx=8, pady=(4, 6))
 
-        btn_frame = ttk.LabelFrame(parent, text='Overlay & actions')
+        btn_frame = ttk.LabelFrame(parent, text='Actions')
         btn_frame.pack(fill='x', padx=8, pady=4)
-        ttk.Label(btn_frame, foreground='#666',
-                  text='Live workspace overlay - rectangle, axes, '
-                       'per-object grab aim, optional depth heatmap. '
-                       'Save & Close persists everything to default.yaml.'
-                  ).pack(anchor='w', padx=8, pady=(2, 4))
         row = ttk.Frame(btn_frame); row.pack(fill='x', padx=4, pady=4)
+        # PRIMARY: this tab's own CALIBRATE button.
+        tk.Button(row, text='CALIBRATE POSITION',
+                  bg='#226699', fg='white',
+                  font=('TkDefaultFont', 11, 'bold'),
+                  width=22, height=2,
+                  command=self._on_calibrate
+                  ).pack(side='left', padx=4)
         tk.Button(row, text='Enter manual mode', bg='#3366aa', fg='white',
                   font=('TkDefaultFont', 10, 'bold'),
                   command=self._on_enter_manual_calibrate
                   ).pack(side='left', padx=4)
-        tk.Button(row, text='Run AprilTag calibrate', bg='#226699',
-                  fg='white', font=('TkDefaultFont', 10, 'bold'),
-                  command=self._on_calibrate
-                  ).pack(side='left', padx=4)
-        tk.Button(row, text='Plane refit', bg='#226666', fg='white',
-                  font=('TkDefaultFont', 10, 'bold'),
-                  command=self._on_plane_refit
-                  ).pack(side='left', padx=4)
         tk.Button(row, text='Reset to 0', bg='#aa6633', fg='white',
                   font=('TkDefaultFont', 10, 'bold'),
                   command=self._on_calibrate_reset
+                  ).pack(side='left', padx=4)
+
+    def _build_depth_tab(self, parent, current):
+        """Round 15: Depth tab - alignment status + plane fit + depth
+        heatmap toggle. The big CALIBRATE DEPTH (plane refit) button
+        re-fits the table plane via vendor SearchPlane from the
+        latest depth frame."""
+        header = ttk.LabelFrame(parent, text='Depth calibration')
+        header.pack(fill='x', padx=8, pady=(8, 4))
+        ttk.Label(header, foreground='#444', wraplength=720,
+                  justify='left',
+                  text=(
+                      'DEPTH CALIBRATION (table plane fit + RGB alignment)\n'
+                      '• RANSAC plane fit on the latest depth frame '
+                      '(vendor SearchPlane). Persists [a, b, c, d] to '
+                      'transform.yaml.\n'
+                      '• Above-plane height gating: detections gate on '
+                      '"how far above the table" instead of absolute '
+                      'depth - hands and reflections are filtered.\n'
+                      '• Depth->color TF lookup at boot aligns the depth '
+                      'camera to RGB without needing the depth_to_color '
+                      'topic.\n'
+                      '\n'
+                      'TURN ON "Show depth heatmap" to SEE whether the '
+                      'depth camera is reading the cubes - they appear as '
+                      'warmer patches inside the workspace overlay.'
+                  )).pack(anchor='w', padx=8, pady=(2, 6))
+
+        knob_frame = ttk.LabelFrame(parent, text='Depth tunables (live)')
+        knob_frame.pack(fill='x', padx=8, pady=4)
+        toggle_row = ttk.Frame(knob_frame); toggle_row.pack(fill='x', padx=4)
+        for bname in ('use_depth_for_z', 'overlay_depth_view'):
+            self._add_bool(toggle_row, bname,
+                           bool(current.get(bname, False)))
+        for name, lo, hi, res in CALIB_DEPTH_FLOAT_PARAMS:
+            self._add_float(knob_frame, name, lo, hi, res,
+                            float(current.get(name, lo)))
+        for name, lo, hi, res in CALIB_DEPTH_INT_PARAMS:
+            self._add_int(knob_frame, name, lo, hi, res,
+                          int(current.get(name, lo)))
+
+        # Status panel - depth-only fields.
+        status_frame = ttk.LabelFrame(parent,
+                                      text='Depth status (live)')
+        status_frame.pack(fill='x', padx=8, pady=4)
+        self.depth_status_var = tk.StringVar(value='(awaiting heartbeat...)')
+        ttk.Label(status_frame, textvariable=self.depth_status_var,
+                  foreground='#222', wraplength=720, justify='left',
+                  font=('TkFixedFont', 9)
+                  ).pack(anchor='w', padx=8, pady=(4, 6))
+
+        btn_frame = ttk.LabelFrame(parent, text='Actions')
+        btn_frame.pack(fill='x', padx=8, pady=4)
+        row = ttk.Frame(btn_frame); row.pack(fill='x', padx=4, pady=4)
+        # PRIMARY: this tab's own CALIBRATE button (plane refit).
+        tk.Button(row, text='CALIBRATE DEPTH (plane refit)',
+                  bg='#226666', fg='white',
+                  font=('TkDefaultFont', 11, 'bold'),
+                  width=28, height=2,
+                  command=self._on_plane_refit
                   ).pack(side='left', padx=4)
 
     def _on_push_logs(self):
@@ -1513,9 +1553,9 @@ class TunerUI:
         ttk.Label(header, foreground='#444', wraplength=720,
                   justify='left',
                   text=(
-                      'LAB COLOR THRESHOLD (vendor lab_manager parity)\n'
+                      'LAB COLOR THRESHOLD (drives vendor lab_manager_node)\n'
                       '* Click ENTER to start publishing a live mask on '
-                      '/custom_sortingv5/lab_mask.\n'
+                      '/lab_manager/image_result.\n'
                       '* Pick a color (red / green / blue / etc.).\n'
                       '* Move the L / A / B min/max sliders - mask updates '
                       'in real time. Aim for a clean mask of just the '
