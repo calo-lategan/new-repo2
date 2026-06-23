@@ -386,16 +386,34 @@ class TunerClient(Node):
         self._wait_future(future, 2.0)
 
     def _trigger(self, client):
-        if not client.wait_for_service(timeout_sec=1.0): return False
+        # Round 17 OO.1: 5 s discovery wait. 1 s was too short on the Jetson
+        # under load (service discovery can lag 2-4 s after a node starts).
+        if not client.wait_for_service(timeout_sec=5.0): return False
         future = client.call_async(Trigger.Request())
-        self._wait_future(future, 2.0)
+        self._wait_future(future, 5.0)
         return future.done() and future.result() is not None and future.result().success
 
+    def _trigger_with_msg(self, client, discovery_wait=False):
+        """Round 17 OO.2/OO.3: like _trigger, but returns (success, message).
+        When discovery_wait=False we skip wait_for_service entirely and let
+        call_async queue the request - matches the working pattern of
+        lab_get_range. Returns ('timeout', '<reason>') on failure."""
+        if discovery_wait and not client.wait_for_service(timeout_sec=5.0):
+            return False, 'service unreachable (discovery timeout)'
+        future = client.call_async(Trigger.Request())
+        self._wait_future(future, 5.0)
+        if not future.done():
+            return False, 'service call timeout'
+        res = future.result()
+        if res is None:
+            return False, 'no response from service'
+        return bool(res.success), getattr(res, 'message', '') or ''
+
     def _set_string_bool(self, client, s, b=True):
-        if not client.wait_for_service(timeout_sec=1.0): return False
+        if not client.wait_for_service(timeout_sec=5.0): return False
         req = SetStringBool.Request(); req.data_str = s; req.data_bool = b
         future = client.call_async(req)
-        self._wait_future(future, 4.0)
+        self._wait_future(future, 5.0)
         return future.done() and future.result() is not None and future.result().success
 
     def call_enable_sorting(self, enable):
@@ -409,9 +427,9 @@ class TunerClient(Node):
     def call_run_calibration(self): return self._trigger(self.run_calibration_cli)
 
     # Round 14 AA: LAB color helpers (vendor lab_manager parity).
-    def lab_enter(self): return self._trigger(self.lab_enter_cli)
-    def lab_exit(self):  return self._trigger(self.lab_exit_cli)
-    def lab_save(self):  return self._trigger(self.lab_save_to_disk_cli)
+    def lab_enter(self): return self._trigger_with_msg(self.lab_enter_cli)
+    def lab_exit(self):  return self._trigger_with_msg(self.lab_exit_cli)
+    def lab_save(self):  return self._trigger_with_msg(self.lab_save_to_disk_cli)
 
     def lab_get_range(self, color_name):
         req = self._lab_GetRange.Request()
@@ -1695,17 +1713,21 @@ class TunerUI:
         threading.Thread(target=go, daemon=True).start()
 
     def _on_plane_refit(self):
-        """Round 12 Y6: call the node's depth_plane_refit service."""
+        """Round 12 Y6 / Round 17 PP.4: call the node's depth_plane_refit
+        service and surface the response.message (specific failure reason)
+        instead of an opaque 'failed'."""
         def go():
             try:
-                ok = self.client.trigger_service('depth_plane_refit')
+                ok, msg = self.client._trigger_with_msg(
+                    self.client.depth_plane_refit_cli)
                 if ok:
                     self._set_status('Plane refit OK', '#3366aa')
                     _ui_log('plane_refit', 'OK')
                 else:
-                    self._set_status('Plane refit failed (no depth?)',
-                                     '#aa6633')
-                    _ui_log('plane_refit', 'failed')
+                    reason = msg or 'unknown'
+                    self._set_status(
+                        f'PLANE REFIT FAILED: {reason}', '#aa6633')
+                    _ui_log('plane_refit', f'failed: {reason}')
             except Exception as e:
                 _ui_log('plane_refit', 'crashed', exc=e)
                 self._set_status('Plane refit error', '#aa6633')
@@ -1878,24 +1900,27 @@ class TunerUI:
         threading.Thread(target=go, daemon=True).start()
 
     def _on_color_enter(self):
+        # Round 17 OO.3: capture the vendor's response message so failures
+        # carry their real reason instead of a flat "enter failed".
         def go():
-            ok = self.client.lab_enter()
+            ok, msg = self.client.lab_enter()
             if ok:
                 self.color_status_var.set('LAB: ON (mask publishing)')
                 self._set_status('LAB: enter OK', '#3366aa')
-                _ui_log('color', 'enter OK')
+                _ui_log('color', f'enter OK ({msg})')
             else:
-                self.color_status_var.set('LAB: enter failed')
-                self._set_status('LAB: enter failed', '#aa6633')
-                _ui_log('color', 'enter failed')
+                reason = msg or 'no detail'
+                self.color_status_var.set(f'LAB: enter failed - {reason}')
+                self._set_status(f'LAB: enter failed - {reason}', '#aa6633')
+                _ui_log('color', f'enter failed: {reason}')
         threading.Thread(target=go, daemon=True).start()
 
     def _on_color_exit(self):
         def go():
-            ok = self.client.lab_exit()
+            ok, msg = self.client.lab_exit()
             self.color_status_var.set(
-                'LAB: OFF' if ok else 'LAB: exit failed')
-            self._set_status('LAB: exit OK' if ok else 'LAB: exit failed',
+                'LAB: OFF' if ok else f'LAB: exit failed - {msg or "no detail"}')
+            self._set_status('LAB: exit OK' if ok else f'LAB: exit failed - {msg}',
                              '#3366aa' if ok else '#aa6633')
         threading.Thread(target=go, daemon=True).start()
 
@@ -1914,11 +1939,12 @@ class TunerUI:
 
     def _on_color_save(self):
         def go():
-            ok = self.client.lab_save()
+            ok, msg = self.client.lab_save()
             self._set_status(
-                'LAB: saved lab_config.yaml' if ok else 'LAB: save failed',
+                'LAB: saved lab_config.yaml' if ok
+                else f'LAB: save failed - {msg or "no detail"}',
                 '#2e8b57' if ok else '#aa6633')
-            _ui_log('color', f'save: ok={ok}')
+            _ui_log('color', f'save: ok={ok} msg={msg}')
         threading.Thread(target=go, daemon=True).start()
 
     def _on_color_reload(self):

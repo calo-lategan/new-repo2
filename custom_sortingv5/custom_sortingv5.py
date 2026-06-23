@@ -754,18 +754,14 @@ class ObjectSortingNodeV5(Node):
         # tuner UI's Model tab.
         ('yolo_enabled_classes', '[]', None),
         # ---- Detection lock/movement gating ----
-        # Round 16 KK: vendor uses 5 mm / 10-frame stillness on stable
-        # LAB colour-blob centroids. YOLO box centres jitter more, so the
-        # same gate rarely converges -> "blue line but never grabs". Looser
-        # band + fewer still-frames make it trigger while staying tunable.
-        ('lock_distance_thresh', 0.012, (0.001, 0.05)),
-        ('count_still_threshold', 3, (1, 30)),
-        ('count_move_threshold', 8, (1, 30)),
-        ('detection_avg_frames', 3, (1, 10)),
-        # Staleness escape: if a target stays locked this many frames
-        # without firing a pick (e.g. position_reorder index drift keeps
-        # skipping it), drop the lock so the loop can re-acquire cleanly.
-        ('lock_timeout_frames', 45, (5, 200)),
+        # Round 17 NN.3: vendor-exact thresholds. The Round 16 looser values
+        # were a workaround for the index-drift bug; NN.1 fixes it by
+        # matching on label only, so we can return to vendor parity.
+        ('lock_distance_thresh', 0.005, (0.001, 0.05)),
+        ('count_still_threshold', 10, (1, 30)),
+        ('count_move_threshold', 10, (1, 30)),
+        # Vendor uses instantaneous positions (no multi-frame averaging).
+        ('detection_avg_frames', 1, (1, 10)),
         # ---- Manual offsets (calibration-free nudge) ----
         # Pixel-space: shifts detection coords so the overlay boxes sit on
         # the objects (also corrects the pixel fed to the world projection).
@@ -1192,10 +1188,23 @@ class ObjectSortingNodeV5(Node):
             except Exception as e:
                 _stage('init', f'depth subscription failed for {topic}', exc=e)
         # Depth camera_info subscription so the plane fit has fx/fy/cx/cy.
+        # Round 17 PP.3: the Orbbec driver publishes camera_info with
+        # TRANSIENT_LOCAL durability (one-shot latched). A vanilla
+        # depth=1 subscription with default volatile QoS misses it,
+        # leaving _depth_cam_info None forever -> plane refit fails with
+        # "no_depth_caminfo_yet". Use TRANSIENT_LOCAL+RELIABLE so the
+        # latched message lands when we subscribe.
         try:
+            from rclpy.qos import (QoSProfile, ReliabilityPolicy,
+                                   DurabilityPolicy)
+            qos_caminfo = QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            )
             self.create_subscription(CameraInfo, '/depth_cam/depth/camera_info',
                                      self._depth_cam_info_callback,
-                                     1, callback_group=self.cam_group)
+                                     qos_caminfo, callback_group=self.cam_group)
         except Exception as e:
             _stage('init', 'depth camera_info subscription failed', exc=e)
         # TF lookup runs in a background thread so we don't block boot if the
@@ -1456,6 +1465,10 @@ class ObjectSortingNodeV5(Node):
         self.target = None
         self.start_get_roi = False
         self.last_position = None
+        # Round 17 NN.1: pixel of the currently-locked target's centroid,
+        # used to disambiguate when label-only matching finds multiple
+        # candidates of the same colour.
+        self._last_target_pixel = None
         self.last_object_info_list = None
         self.detection_history = {}
 
@@ -1816,14 +1829,15 @@ class ObjectSortingNodeV5(Node):
 
 
     def _depth_plane_refit_srv(self, request, response):
-        """Round 12 Y6: refit the table plane from the latest depth frame
-        and persist it to transform.yaml. Useful when the camera angle has
-        shifted slightly but the AprilTag calibration is still good."""
+        """Round 12 Y6 / Round 17 PP.2: refit the table plane from the
+        latest depth frame and persist it to transform.yaml. Echoes the
+        specific failure reason on response.message so the UI shows it."""
         try:
-            plane = self._fit_table_plane()
+            plane, reason = self._fit_table_plane()
             if plane is None:
-                _stage('calibrate', 'plane refit: no depth / SearchPlane unavail')
+                _stage('calibrate', f'plane refit failed: {reason}')
                 response.success = False
+                response.message = reason
                 return response
             cfg_path = os.path.join(self.config_path, self.config_file)
             try:
@@ -1838,12 +1852,15 @@ class ObjectSortingNodeV5(Node):
                 self.start_get_roi = True
                 _stage('calibrate', 'plane refit: persisted')
                 response.success = True
+                response.message = 'ok'
             except Exception as e:
                 _stage('calibrate', 'plane refit: yaml write failed', exc=e)
                 response.success = False
+                response.message = f'write_failed:{type(e).__name__}'
         except Exception as e:
             _stage('calibrate', 'plane refit crashed', exc=e)
             response.success = False
+            response.message = f'exception:{type(e).__name__}'
         return response
 
     def _run_vendor_calibration(self):
@@ -1932,13 +1949,14 @@ class ObjectSortingNodeV5(Node):
 
 
     def _fit_table_plane(self):
-        """Round 12 Y2: RANSAC plane fit on the latest depth frame using the
-        vendor SearchPlane utility. Returns [a, b, c, d] for ax+by+cz+d=0
-        or None if depth or the utility is unavailable."""
+        """Round 12 Y2 / Round 17 PP.1: RANSAC plane fit on the latest depth
+        frame via vendor SearchPlane. Returns (plane, reason). `plane` is the
+        [a,b,c,d] list on success, None on failure; `reason` is a short
+        token the UI can show to the operator instead of an opaque 'failed'."""
         if not getattr(self, '_depth_available', False):
-            return None
+            return None, 'no_depth_subscription'
         if self._latest_depth is None:
-            return None
+            return None, 'no_depth_frame_yet'
         try:
             from app.utils.search_plane import SearchPlane
         except Exception:
@@ -1946,11 +1964,11 @@ class ObjectSortingNodeV5(Node):
                 from utils.search_plane import SearchPlane
             except Exception as e:
                 _stage('calibrate', 'plane fit: SearchPlane not importable', exc=e)
-                return None
+                return None, 'searchplane_unavailable'
         try:
             depth_info = getattr(self, '_depth_cam_info', None)
             if depth_info is None:
-                return None
+                return None, 'no_depth_caminfo_yet'
             p = depth_info.p if hasattr(depth_info, 'p') else depth_info.k
             fx = p[0]; fy = p[5] if len(p) >= 12 else depth_info.k[4]
             cx = p[2]; cy = p[6] if len(p) >= 12 else depth_info.k[5]
@@ -1959,13 +1977,13 @@ class ObjectSortingNodeV5(Node):
             searcher = SearchPlane(W, H, [fx, fy, cx, cy])
             _, plane, _ = searcher.find_plane(self._latest_depth)
             if plane is None:
-                return None
+                return None, 'searchplane_returned_none'
             arr = np.asarray(plane, dtype=np.float64).ravel().tolist()
             _stage('calibrate', f'plane fit: {arr}')
-            return arr
+            return arr, 'ok'
         except Exception as e:
             _stage('calibrate', 'plane fit failed', exc=e)
-            return None
+            return None, f'exception:{type(e).__name__}'
 
     def _on_engine_loaded(self, path):
         """InferenceWorker callback: fires from the worker thread after a
@@ -2927,7 +2945,6 @@ class ObjectSortingNodeV5(Node):
                 still_thresh = int(self.p('count_still_threshold'))
                 move_thresh = int(self.p('count_move_threshold'))
                 lock_thresh = float(self.p('lock_distance_thresh'))
-                lock_timeout = int(self.p('lock_timeout_frames'))
                 lock_line = None
                 primitives = {'yolo_ops': [], 'color_corners': []}
                 if len(roi) > 0 and not self.start_transport and intrinsic is not None:
@@ -2941,28 +2958,43 @@ class ObjectSortingNodeV5(Node):
                     # appear in the viewer for YOLO tuning) but no pick runs.
                     if self.enable_sorting:
                         target_miss = True
-                        # Round 16 KK.3: staleness escape. If we've held a
-                        # target lock for too many frames without firing a
-                        # pick (position_reorder index drift keeps skipping
-                        # it), drop the lock so we can re-acquire.
+                        # Round 17 NN.1: lock by LABEL only. Vendor's LAB-blob
+                        # detection produces stable area-sorted indices so
+                        # checking target[1] there is safe; v5 uses YOLO +
+                        # position_reorder which can shuffle indices, breaking
+                        # the lock every frame. When the locked target's
+                        # label appears in this frame, prefer the candidate
+                        # whose pixel position is closest to last_target_pixel.
                         if self.target is not None:
-                            self._lock_frames = getattr(self, '_lock_frames', 0) + 1
-                            if self._lock_frames > lock_timeout:
-                                _stage('sorting-loop',
-                                       f'lock STALE on {self.target[0]} after '
-                                       f'{self._lock_frames} frames - releasing '
-                                       f'to re-acquire')
+                            same_label = [t for t in target_info
+                                          if t[0] == self.target[0]
+                                          and self.target_labels.get(t[0], False)]
+                            if same_label:
+                                lp = getattr(self, '_last_target_pixel', None)
+                                if lp is not None:
+                                    same_label.sort(
+                                        key=lambda t: (t[2][0]-lp[0])**2
+                                                      + (t[2][1]-lp[1])**2)
+                                # Reorder target_info so the chosen instance
+                                # is iterated first; falls through to the
+                                # standard lock branch below.
+                                chosen = same_label[0]
+                                target_info = [chosen] + [t for t in target_info
+                                                          if t is not chosen]
+                            else:
+                                # Label disappeared - release lock cleanly so
+                                # we can re-acquire next time it shows up.
                                 self.target = None
-                                self._lock_frames = 0
                                 self.count_still = 0
                                 self.count_move = 0
-                        else:
-                            self._lock_frames = 0
                         for t in target_info:
                             if not self.target_labels.get(t[0], False):
                                 continue
                             if self.target is not None:
-                                if self.target[0] != t[0] or self.target[1] != t[1]:
+                                # Label-only match (Round 17 NN.1); ignore
+                                # the instance index t[1] which YOLO/position_
+                                # reorder may have shuffled.
+                                if self.target[0] != t[0]:
                                     continue
                                 target_miss = False
                                 self.target = t
@@ -2976,6 +3008,14 @@ class ObjectSortingNodeV5(Node):
                                                                     intrinsic, projection_matrix)
                             if result is not None and self.target is None:
                                 self.target = t
+                                self._last_target_pixel = (t[2][0], t[2][1])
+                                # Round 17 NN.4: one-shot LOCKED log so the
+                                # session log captures the moment a target is
+                                # first acquired.
+                                _stage('sorting-loop',
+                                       f'LOCKED on {t[0]} pixel={t[2]} '
+                                       f'world=({position[0]:.3f},'
+                                       f'{position[1]:.3f},{position[2]:.3f})')
                                 break
                             if (self.last_position is not None and self.target is not None
                                     and result is not None):
@@ -2989,16 +3029,15 @@ class ObjectSortingNodeV5(Node):
                                 else:
                                     self.count_move += 1
                                     self.count_still = 0
-                                # Round 16 KK.1: throttled trigger diagnostics
-                                # (~1 Hz) so the pushed logs show WHY a pick
-                                # does/doesn't fire.
+                                # Round 17 NN.4: throttled diagnostics so the
+                                # pushed logs show exactly why a pick does or
+                                # does not fire.
                                 if ticks % 30 == 0:
                                     _stage('sorting-loop',
                                            f'TRACK {t[0]} e_dist={e_distance:.4f} '
                                            f'(thresh={lock_thresh:.3f}) '
                                            f'still={self.count_still}/{still_thresh} '
-                                           f'move={self.count_move}/{move_thresh} '
-                                           f'lock_frames={getattr(self, "_lock_frames", 0)}')
+                                           f'move={self.count_move}/{move_thresh}')
                                 if self.count_move > move_thresh:
                                     self.target = None
                                 if self.count_still > still_thresh:
@@ -3009,21 +3048,26 @@ class ObjectSortingNodeV5(Node):
                                     avg_pos = [sum(p[i] for p in hist) / len(hist) for i in range(3)]
                                     self.detection_history[t[0]] = hist
                                     yaw_pulse = 500 + int(result[0] / 240 * 1000)
+                                    # Round 17 NN.4: one-shot FIRING TRANSPORT
+                                    # log proves the trigger landed.
                                     _stage('sorting-loop',
-                                           f'LOCK -> {t[0]} at '
+                                           f'FIRING TRANSPORT label={t[0]} pos='
                                            f'({avg_pos[0]:.3f},{avg_pos[1]:.3f},{avg_pos[2]:.3f}) '
-                                           f'yaw_pulse={yaw_pulse} '
-                                           f'(avg over {len(hist)} frame{"" if len(hist)==1 else "s"})')
+                                           f'yaw={yaw_pulse}')
                                     self.transport_info = [avg_pos, yaw_pulse, t]
                                     self.target = t
-                                    self._lock_frames = 0
                                     self.start_transport = True
                             self.last_position = position
+                            # Round 17 NN.1: remember the locked target's
+                            # pixel so the next frame's label-only match can
+                            # pick the closest instance.
+                            self._last_target_pixel = (t[2][0], t[2][1])
                         if target_miss:
                             self.target_miss_count += 1
                         if self.target_miss_count > 10:
                             self.target_miss_count = 0
                             self.target = None
+                            self._last_target_pixel = None
                 else:
                     target_info = []
                 # Stash the overlay dict for _raw_republish_tick to composite

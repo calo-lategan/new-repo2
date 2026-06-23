@@ -34,15 +34,13 @@
     yolo_enabled_classes: '[]'
 
     # ---- Detection lock gating ----
-    # Round 16 KK: looser band + fewer still-frames so YOLO box-centre
-    # jitter still converges to a pick (vendor's 5mm/10-frame gate assumed
-    # stable LAB colour-blob centroids). lock_timeout_frames releases a
-    # stuck lock so position_reorder index drift can't deadlock the grab.
-    lock_distance_thresh: 0.012
-    count_still_threshold: 3
-    count_move_threshold: 8
-    detection_avg_frames: 3
-    lock_timeout_frames: 45
+    # Round 17 NN.3: vendor-exact thresholds. Round 16 loosened these as a
+    # workaround for the index-drift bug; NN.1 fixes the bug structurally
+    # (lock on label, not on instance index), so we restore vendor parity.
+    lock_distance_thresh: 0.005
+    count_still_threshold: 10
+    count_move_threshold: 10
+    detection_avg_frames: 1
 
     # ---- Manual offsets (calibration-free nudge; 0 = no change) ----
     # Pixel-space: move the overlay boxes onto the objects (also corrects
