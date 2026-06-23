@@ -87,7 +87,12 @@ PARAM_LABELS = {
     'grip_offset_x':     ('Offset X', 'm - shift the arm landing left/right'),
     'grip_offset_y':     ('Offset Y', 'm - shift the arm landing forward/back'),
     'workspace_scale':   ('Workspace scale (Z)', 'how big/small the world map is (1.0 = no change)'),
+    'workspace_size_x':  ('Workspace size X', 'm - width of your physical mat'),
+    'workspace_size_y':  ('Workspace size Y', 'm - depth of your physical mat'),
     'grasp_short_axis_min_ratio': ('Short-axis gate', '|w-h|/max(w,h) above which short-axis preference applies (cubes: stay vendor)'),
+    'depth_window_px':   ('Depth window', 'half-size of median window around each detection (px)'),
+    'depth_min_z_m':     ('Depth min Z', 'm - drop detections below this (reflections)'),
+    'depth_max_z_m':     ('Depth max Z', 'm - drop detections above this (hand)'),
 }
 
 # v5 Round 2: live YOLO knobs rendered on the Detection tab (apply on release
@@ -99,20 +104,31 @@ MODEL_FLOAT_PARAMS = [
     # Aspect-ratio gate for the short-axis grasp preference. Below this
     # the OBB is "near square" and vendor min-yaw is used.
     ('grasp_short_axis_min_ratio', 0.02, 0.50, 0.01),
+    # Depth sanity-gate band (metres). Detections outside the band are
+    # dropped (filters hands above and reflections below the workspace).
+    ('depth_min_z_m',        -0.10, 0.20, 0.005),
+    ('depth_max_z_m',         0.05, 0.50, 0.005),
 ]
 MODEL_INT_PARAMS = [
     ('yolo_max_det',             1, 300, 1),
     # Pixel-space overlay nudge - shift boxes to sit on the objects.
     ('detection_offset_x',    -300, 300, 1),
     ('detection_offset_y',    -300, 300, 1),
+    # Half-size (in pixels) of the median window used for per-object depth.
+    ('depth_window_px',          1, 30, 1),
 ]
-# Calibrate tab: manual world-XY offset + workspace scale.
+# Calibrate tab: manual world-XY offset + workspace scale + workspace size.
 # grip_offset_x/y were on Detection in commit Q; commit R moves them here
-# (their proper home) alongside workspace_scale.
+# (their proper home) alongside workspace_scale. Ranges widened in Round 11
+# (±0.50 m, was ±0.10) for users compensating significant calibration drift
+# without re-running the AprilTag. workspace_size_x/y added Round 11 so the
+# user sizes the overlay rectangle to their physical mat.
 CALIB_FLOAT_PARAMS = [
-    ('grip_offset_x',        -0.10, 0.10, 0.005),
-    ('grip_offset_y',        -0.10, 0.10, 0.005),
+    ('grip_offset_x',        -0.50, 0.50, 0.005),
+    ('grip_offset_y',        -0.50, 0.50, 0.005),
     ('workspace_scale',       0.50, 1.50, 0.01),
+    ('workspace_size_x',      0.05, 1.00, 0.005),
+    ('workspace_size_y',      0.05, 1.00, 0.005),
 ]
 # Factory defaults for the Detection tab "Reset knobs to defaults" button.
 # Keep in sync with the node's declared defaults in custom_sortingv5.py
@@ -131,6 +147,8 @@ BOOL_PARAMS = [
     'compliance_grasp_enabled',
     # Grasp orientation: prefer clamping on the SHORT OBB axis vs vendor min-yaw.
     'grasp_prefer_short_axis',
+    # Depth integration: use measured Z per object instead of fixed table plane.
+    'use_depth_for_z',
     'inference_warmup',
     'hot_log_inference_ms',
     # Independent stop/start of camera subscription + inference.
@@ -362,11 +380,23 @@ class TunerUI:
             else:
                 unmapped = int(st.get('unmapped_count', 0) or 0)
                 badge = f"  unmapped={unmapped}" if unmapped else ''
+                # Depth status (Round 11): ON if a fresh frame arrived
+                # recently, STALE if subscribed but no frame in >1s, OFF if
+                # the subscription never connected.
+                d_avail = bool(st.get('depth_available', False))
+                d_age = int(st.get('depth_age_ms', -1) or -1)
+                if not d_avail:
+                    d_str = 'OFF'
+                elif d_age < 0 or d_age > 1000:
+                    d_str = 'STALE'
+                else:
+                    d_str = 'ON'
                 self.perf_var.set(
                     f"perf: cam={st.get('cam_fps', '-')}fps "
                     f"pub={st.get('pub_fps', '-')}fps "
                     f"ai={st.get('ai', '?')} "
-                    f"inf_age={st.get('inference_age_ms', '-')}ms{badge}")
+                    f"inf_age={st.get('inference_age_ms', '-')}ms "
+                    f"depth={d_str}{badge}")
                 engine = st.get('engine') or ''
                 task = st.get('task') or ''
                 override = (st.get('task_override') or 'auto').strip().lower()
@@ -1080,23 +1110,46 @@ class TunerUI:
         threading.Thread(target=go, daemon=True).start()
 
     def _build_calibrate_tab(self, parent, current):
-        """Three world sliders + Enter-manual / Reset buttons. Save & Close
+        """Five world sliders + Enter-manual / Reset buttons. Save & Close
         lives in the bottom bar."""
-        header = ttk.LabelFrame(parent, text='Manual workspace calibration')
+        header = ttk.LabelFrame(parent, text='How calibration works')
         header.pack(fill='x', padx=8, pady=(8, 4))
-        ttk.Label(header, foreground='#666', wraplength=720,
+        ttk.Label(header, foreground='#444', wraplength=720,
                   justify='left',
-                  text='Nudge how the arm interprets the workspace, without '
-                       'the AprilTag. X / Y shift the landing point in '
-                       'metres; Z scales the workspace map around the '
-                       'centre. Press "Enter manual mode" to show the live '
-                       'workspace overlay on the camera view; "Save & Close" '
-                       'persists the values to default.yaml and clears the '
-                       'overlay. Use the top-bar CALIBRATE button to run the '
-                       'AprilTag auto-calibration instead.'
-                  ).pack(anchor='w', padx=8, pady=(2, 6))
+                  text=(
+                      'HOW CALIBRATION WORKS\n'
+                      '• Cyan + at "0,0" is the workspace centre (set by '
+                      'AprilTag CALIBRATE).\n'
+                      '• Red / Green arrows are world +X (right) and +Y '
+                      '(forward).\n'
+                      '• Yellow rectangle is the workspace the arm thinks '
+                      'it has - size it to your physical mat with '
+                      'Workspace size X / Y.\n'
+                      '• Yellow X on each object = where the arm will '
+                      'actually grab it. When calibration is right, X sits '
+                      'on the object centre.\n'
+                      '• Per-object mm label (with depth) = measured '
+                      'object top height.\n'
+                      '• Magenta diamonds = drop bins per class (set in '
+                      'Places).\n'
+                      '\n'
+                      'CALIBRATE WITHOUT THE TAG\n'
+                      '1. Click "Enter manual mode".\n'
+                      '2. Set Workspace size X / Y to your physical mat '
+                      'dimensions (in metres).\n'
+                      '3. Drag Offset X / Y until the yellow rectangle '
+                      'covers your mat AND the yellow X\'s sit on the cubes.\n'
+                      '4. If the whole map feels too big or too small, '
+                      'adjust Workspace scale (Z).\n'
+                      '5. Save & Close persists to default.yaml and clears '
+                      'the overlay.\n'
+                      '\n'
+                      'Use the top-bar CALIBRATE button to run the AprilTag '
+                      'auto-calibration instead - after success the overlay '
+                      'flashes briefly so you see how it landed.'
+                  )).pack(anchor='w', padx=8, pady=(2, 6))
 
-        knob_frame = ttk.LabelFrame(parent, text='World offsets (live)')
+        knob_frame = ttk.LabelFrame(parent, text='World offsets + workspace size (live)')
         knob_frame.pack(fill='x', padx=8, pady=4)
         for name, lo, hi, res in CALIB_FLOAT_PARAMS:
             self._add_float(knob_frame, name, lo, hi, res,
@@ -1105,8 +1158,8 @@ class TunerUI:
         btn_frame = ttk.LabelFrame(parent, text='Overlay')
         btn_frame.pack(fill='x', padx=8, pady=4)
         ttk.Label(btn_frame, foreground='#666',
-                  text='The overlay shows the workspace centre, X/Y axes, '
-                       'and how the offset moves the arm\'s belief.'
+                  text='Live workspace overlay - rectangle, axes, and '
+                       'per-object grab aim. Save & Close clears it.'
                   ).pack(anchor='w', padx=8, pady=(2, 4))
         row = ttk.Frame(btn_frame); row.pack(fill='x', padx=4, pady=4)
         tk.Button(row, text='Enter manual mode', bg='#3366aa', fg='white',
@@ -1129,11 +1182,16 @@ class TunerUI:
         threading.Thread(target=go, daemon=True).start()
 
     def _on_calibrate_reset(self):
-        """Zero the three calibrate sliders (live; not yet persisted)."""
+        """Reset the Calibrate-tab sliders to their no-op defaults (live;
+        not yet persisted). Offsets back to 0, scale to 1.0, workspace size
+        back to 0.30 m so the overlay rectangle reappears at a reasonable
+        size after a user has scaled it to nothing."""
         setters = getattr(self, '_param_setters', {})
         for name, default in (('grip_offset_x', 0.0),
                               ('grip_offset_y', 0.0),
-                              ('workspace_scale', 1.0)):
+                              ('workspace_scale', 1.0),
+                              ('workspace_size_x', 0.30),
+                              ('workspace_size_y', 0.30)):
             if name in setters:
                 try:
                     setters[name](default)

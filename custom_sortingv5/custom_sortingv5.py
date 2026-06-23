@@ -668,13 +668,20 @@ class ObjectSortingNodeV5(Node):
         ('detection_offset_y', 0, (-300, 300)),   # +y shifts detections DOWN (px)
         # World-space: shifts the final pick position (metres) so the arm
         # lands on the object, compensating calibration without the AprilTag.
-        ('grip_offset_x', 0.0, (-0.1, 0.1)),
-        ('grip_offset_y', 0.0, (-0.1, 0.1)),
+        # Range widened in Round 11: ±0.50 m covers significant tag drift.
+        ('grip_offset_x', 0.0, (-0.5, 0.5)),
+        ('grip_offset_y', 0.0, (-0.5, 0.5)),
         # Workspace XY scale (the user's "Z" - how big the world-map appears).
         # Multiplies the projected world XY around (0,0) AFTER grip_offset,
         # so 1.05 stretches the workspace 5% outward from centre. 1.0 = no
         # change.
         ('workspace_scale', 1.0, (0.5, 1.5)),
+        # Physical workspace dimensions (m). The yellow overlay rectangle is
+        # drawn at this world size around the AprilTag centre, so the user
+        # can size it to match their physical mat and confirm the centre is
+        # under the arm.
+        ('workspace_size_x', 0.30, (0.05, 1.0)),
+        ('workspace_size_y', 0.30, (0.05, 1.0)),
         # Calibration overlay state machine. UI sets this:
         #   'off'    no extra overlay (default)
         #   'manual' persistent overlay while the user nudges the sliders
@@ -692,6 +699,17 @@ class ObjectSortingNodeV5(Node):
         # |w-h|/max(w,h) >= grasp_short_axis_min_ratio (squares stay vendor).
         ('grasp_prefer_short_axis', True, None),
         ('grasp_short_axis_min_ratio', 0.10, (0.02, 0.5)),
+        # ---- Depth integration (Round 11) ----
+        # Use the depth camera to derive per-object Z height so the arm
+        # descends to the actual top of each cube instead of the hardcoded
+        # table-plane assumption. Falls back gracefully if the depth topic
+        # isn't published or no fresh frames arrive.
+        ('use_depth_for_z', True, None),
+        ('depth_window_px', 5, (1, 30)),
+        # Sanity gate: drop detections whose median depth is outside this
+        # band (above table = floating, hand; below table = reflection).
+        ('depth_min_z_m', -0.02, (-0.10, 0.20)),
+        ('depth_max_z_m',  0.20, (0.05, 0.50)),
         # ---- Motion ----
         ('motion_speed', 1.5, (0.3, 2.5)),
         ('aggression', 1.3, (0.3, 2.0)),
@@ -1013,6 +1031,26 @@ class ObjectSortingNodeV5(Node):
             1, callback_group=self.cam_group)
         _stage('init', 'camera subscriptions created (always-on) - '
                        'topic /depth_cam/rgb/image_raw + camera_info')
+        # Depth subscription for per-object Z height. Try the aligned topic
+        # first (depth_to_color is depth pre-warped to the colour intrinsics,
+        # so depth[v,u] indexes by colour pixel directly). Fall back to the
+        # raw depth topic if the aligned one doesn't exist. Subscribing to a
+        # non-existent topic is a no-op in rclpy - we set _depth_available
+        # when a frame actually arrives.
+        self._depth_available = False
+        self._latest_depth = None
+        self._latest_depth_ts = 0.0
+        self._depth_topic = ''
+        self._depth_first_logged = False
+        for topic in ('/depth_cam/depth_to_color', '/depth_cam/depth/image_raw'):
+            try:
+                self.create_subscription(Image, topic, self._depth_callback,
+                                         1, callback_group=self.cam_group)
+                self._depth_topic = topic
+                _stage('init', f'depth subscribed: {topic}')
+                break
+            except Exception as e:
+                _stage('init', f'depth subscription failed for {topic}', exc=e)
 
         self._startup_done = False
         self._frames_received = 0
@@ -1348,6 +1386,12 @@ class ObjectSortingNodeV5(Node):
                 'engine': engine,
                 'task': task,
                 'task_override': self.p('engine_task'),
+                # Depth subscription status (Round 11). UI uses this to show
+                # whether per-object Z is live (ON), missing (OFF), or stale.
+                'depth_topic': getattr(self, '_depth_topic', ''),
+                'depth_available': bool(getattr(self, '_depth_available', False)),
+                'depth_age_ms': (int(1000 * (time.time() - getattr(self, '_latest_depth_ts', 0.0)))
+                                 if getattr(self, '_depth_available', False) else -1),
                 # v5: class names from model.names (id -> name). The tuner
                 # UI auto-populates the Classes filter + Places tab when
                 # this changes.
@@ -2036,6 +2080,17 @@ class ObjectSortingNodeV5(Node):
     # YOLO model and the static transform.yaml extrinsic.
 
     def _pixel_to_world(self, pixel, height=0.03):
+        # If depth is enabled + available, use the median depth at the pixel
+        # as Z so the arm descends to the actual top of the object instead
+        # of the hardcoded table-plane assumption. Falls back to `height`
+        # when depth is unavailable / stale / sparse.
+        try:
+            if bool(self.p('use_depth_for_z')):
+                z = self._depth_at(int(pixel[0]), int(pixel[1]))
+                if z is not None:
+                    height = float(z)
+        except Exception:
+            pass
         return self.get_object_world_position(pixel, self.intrinsic, self.extristric,
                                               self.white_area_center, height)
 
@@ -2063,6 +2118,20 @@ class ObjectSortingNodeV5(Node):
         # pixel used for picking.
         ox = int(self.p('detection_offset_x'))
         oy = int(self.p('detection_offset_y'))
+        # Depth sanity gate config (Round 11). When depth is available, a
+        # detection whose median depth is outside [min, max] gets dropped
+        # (filters hands and floor reflections without retraining).
+        use_depth = bool(self.p('use_depth_for_z'))
+        dmin = float(self.p('depth_min_z_m'))
+        dmax = float(self.p('depth_max_z_m'))
+
+        def _depth_ok(px, py):
+            if not use_depth:
+                return True
+            z = self._depth_at(int(px), int(py))
+            if z is None:
+                return True   # depth unavailable - don't reject
+            return dmin <= z <= dmax
         # v5: ALL detection comes from YOLO. The model's class names
         # (model.names) are the source of truth - no hardcoded
         # red/green/blue/scaff list, no LAB color thresholding, no HED.
@@ -2076,6 +2145,8 @@ class ObjectSortingNodeV5(Node):
                     cls_id = int(obb.cls.cpu().numpy()) if hasattr(obb, 'cls') else 0
                     label = names.get(cls_id, f'cls_{cls_id}')
                     cx += ox; cy += oy
+                    if not _depth_ok(cx, cy):
+                        continue
                     # ultralytics OBB r is in radians, ~[-pi/2, pi/2]. If the
                     # gripper rotates 90 off the intended grasp, try `90 - ...`.
                     angle = int(math.degrees(r))
@@ -2091,6 +2162,8 @@ class ObjectSortingNodeV5(Node):
                     label = names.get(cls_id, f'cls_{cls_id}')
                     cx = (x1 + x2) / 2 + ox
                     cy = (y1 + y2) / 2 + oy
+                    if not _depth_ok(cx, cy):
+                        continue
                     w, h = x2 - x1, y2 - y1
                     target_info.append([label, 1, (int(cx), int(cy)),
                                         (int(w), int(h)), 0])
@@ -2674,6 +2747,53 @@ class ObjectSortingNodeV5(Node):
         except Exception as e:
             _stage('camera', 'camera_info parse failed', exc=e)
 
+    def _depth_callback(self, msg):
+        """Cache the latest aligned depth frame for per-object Z lookup.
+        Depth is uint16 in mm; converted to numpy array, kept as-is so
+        _depth_at can index by colour pixel and convert per-window."""
+        try:
+            img = self.bridge.imgmsg_to_cv2(msg, '16UC1')
+        except Exception as e:
+            if not getattr(self, '_depth_cb_warned', False):
+                _stage('camera', 'depth cv_bridge failed (one-time warn)', exc=e)
+                self._depth_cb_warned = True
+            return
+        self._latest_depth = img
+        self._latest_depth_ts = time.time()
+        self._depth_available = True
+        if not self._depth_first_logged:
+            self._depth_first_logged = True
+            _stage('camera', f'FIRST DEPTH FRAME on {self._depth_topic}: '
+                             f'shape={img.shape} dtype={img.dtype}')
+
+    def _depth_at(self, px, py, half=None):
+        """Median depth (m) in a (2*half+1)^2 window around (px, py).
+        Drops zeros (invalid pixels). Returns None if the depth subscription
+        is dead, the latest frame is stale (>1s), or <50% of the window is
+        valid."""
+        if not self._depth_available or self._latest_depth is None:
+            return None
+        if time.time() - self._latest_depth_ts > 1.0:
+            return None
+        if half is None:
+            try:
+                half = int(self.p('depth_window_px'))
+            except Exception:
+                half = 5
+        img = self._latest_depth
+        h, w = img.shape[:2]
+        px = int(px); py = int(py)
+        if px < 0 or py < 0 or px >= w or py >= h:
+            return None
+        x0 = max(0, px - half); x1 = min(w, px + half + 1)
+        y0 = max(0, py - half); y1 = min(h, py + half + 1)
+        patch = img[y0:y1, x0:x1].ravel()
+        patch = patch[patch > 0]
+        win_area = (2 * half + 1) ** 2
+        if len(patch) < win_area * 0.5:
+            return None
+        return float(np.median(patch)) / 1000.0  # mm -> m
+
     def image_callback(self, ros_rgb_image):
         try:
             bgr = self.bridge.imgmsg_to_cv2(ros_rgb_image, 'bgr8')
@@ -2755,12 +2875,6 @@ class ObjectSortingNodeV5(Node):
                     f'{header}  X={gx:+.3f}m  Y={gy:+.3f}m  scale={ws:.3f}',
                     (8, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                     (0, 255, 255), 2)
-        # Workspace ROI rectangle (from the AprilTag projection in get_roi).
-        if hasattr(self.roi, '__len__') and len(self.roi) >= 4:
-            y_min, y_max, x_min, x_max = (int(self.roi[0]), int(self.roi[1]),
-                                          int(self.roi[2]), int(self.roi[3]))
-            cv2.rectangle(bgr, (x_min, y_min), (x_max, y_max),
-                          (0, 255, 255), 2)
         # Need camera intrinsics + extrinsics + workspace centre to project.
         if (self.intrinsic is None or self.distortion is None
                 or not hasattr(self, 'extristric') or self.extristric is None
@@ -2802,6 +2916,25 @@ class ObjectSortingNodeV5(Node):
                             tipLength=0.2)
             cv2.putText(bgr, 'Y', (ytip[0] + 4, ytip[1] + 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            # Workspace rectangle sized by workspace_size_x/y. The four
+            # corners are projected DIRECTLY through cv2.projectPoints
+            # (same as get_roi), bypassing the sign-flip path that
+            # _project_world_to_pixel undoes - because these corners are
+            # already in the AprilTag world frame, not the get_object_
+            # world_position output frame.
+            sx = float(self.p('workspace_size_x')) / 2.0
+            sy = float(self.p('workspace_size_y')) / 2.0
+            corners_w = np.array([
+                centre_w + np.array([+sx, +sy, 0.0]),
+                centre_w + np.array([+sx, -sy, 0.0]),
+                centre_w + np.array([-sx, -sy, 0.0]),
+                centre_w + np.array([-sx, +sy, 0.0]),
+            ], dtype=np.float64)
+            cimg, _ = cv2.projectPoints(corners_w, np.array(rmat),
+                                        np.array(tvec),
+                                        self.intrinsic, self.distortion)
+            poly = np.int32(cimg).reshape(-1, 1, 2)
+            cv2.polylines(bgr, [poly], True, (0, 255, 255), 2)
             # Legend for the per-object + bin markers below.
             cv2.putText(bgr, 'yellow = arm grab aim   magenta = place bin',
                         (8, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
@@ -2822,13 +2955,23 @@ class ObjectSortingNodeV5(Node):
         for t in targets:
             try:
                 px, py = int(t[2][0]), int(t[2][1])
+                # Use the measured depth as the projection height when
+                # available so the aim marker tracks the real top of the
+                # object (matches what the pick will actually do).
+                z_meas = self._depth_at(px, py)
+                height = float(z_meas) if z_meas is not None else 0.03
                 world, _ = self.get_object_world_position(
                     (px, py), self.intrinsic, self.extristric,
-                    self.white_area_center, height=0.03)
+                    self.white_area_center, height=height)
                 ax, ay = self._project_world_to_pixel(world)
                 cv2.line(bgr, (px, py), (ax, ay), (0, 200, 255), 1)
                 cv2.drawMarker(bgr, (ax, ay), (0, 200, 255),
                                cv2.MARKER_TILTED_CROSS, 16, 2)
+                if z_meas is not None:
+                    cv2.putText(bgr, f'{int(z_meas * 1000)}mm',
+                                (ax + 10, ay + 14),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                                (0, 200, 255), 1)
             except Exception:
                 continue
 
@@ -2853,15 +2996,29 @@ class ObjectSortingNodeV5(Node):
             pass
 
     def _project_world_to_pixel(self, world_xyz):
-        """Project a world-frame point (same frame as white_area_center /
-        corners, which get_roi projects correctly) to a pixel using the live
-        AprilTag extrinsic. Used by the calibration overlay."""
+        """Project a position from the get_object_world_position output frame
+        back to a pixel for the overlay.
+
+        get_object_world_position builds
+            position = white_area_center[:3,3] + (-wp_x, -wp_y, wp_z)
+        followed by the user offsets. To reverse, we undo the
+        white_area_center translation and the X/Y sign-flip before
+        cv2.projectPoints. The user offsets stay APPLIED on purpose - the
+        overlay marker is meant to show where the offset moves the aim
+        point.
+
+        At grip_offset_x/y = 0 and workspace_scale = 1, the round-trip
+        property holds: project(pixel -> world) sits exactly on `pixel`."""
+        p = np.array(world_xyz, dtype=np.float64).copy()
+        p = p - self.white_area_center[:3, 3]
+        p[0] = -p[0]
+        p[1] = -p[1]
         tvec, rmat = self.extristric
-        pts = np.array([world_xyz], dtype=np.float64)
-        img, _ = cv2.projectPoints(pts, np.array(rmat), np.array(tvec),
-                                   self.intrinsic, self.distortion)
-        p = img.reshape(-1, 2)[0]
-        return int(p[0]), int(p[1])
+        img, _ = cv2.projectPoints(np.array([p]), np.array(rmat),
+                                   np.array(tvec), self.intrinsic,
+                                   self.distortion)
+        out = img.reshape(-1, 2)[0]
+        return int(out[0]), int(out[1])
 
     def _raw_republish_tick(self):
         """30 Hz publisher: always grabs the latest raw camera frame and
