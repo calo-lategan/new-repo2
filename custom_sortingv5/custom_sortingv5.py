@@ -2101,6 +2101,44 @@ class ObjectSortingNodeV5(Node):
         primitives = {'yolo_ops': yolo_ops, 'color_corners': []}
         return target_info, primitives
 
+    def _calibration_cfg(self):
+        """calibration.yaml cached in memory, re-read only when the file
+        mtime changes. Used by the pick/place paths and the live overlay
+        (which calls the world math per-object per-tick)."""
+        path = os.path.join(self.config_path, self.calibration_file)
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            return getattr(self, '_calib_cache', {}) or {}
+        if getattr(self, '_calib_cache_mtime', None) != mtime:
+            self._calib_cache = common.get_yaml_data(path)
+            self._calib_cache_mtime = mtime
+        return self._calib_cache
+
+    def _apply_world_offsets(self, position):
+        """Apply the calibration.yaml pixel affine + the live manual
+        grip_offset and workspace_scale to a world position. Single source
+        of truth shared by get_object_world_position (the real pick) and the
+        calibration overlay, so the overlay can never drift from the pick."""
+        cfg = self._calibration_cfg()
+        offset = tuple(cfg['pixel']['offset'])
+        scale = tuple(cfg['pixel']['scale'])
+        for i in range(3):
+            position[i] = position[i] * scale[i] + offset[i]
+        # Manual world nudge (default 0): shift the final pick position so
+        # the arm lands on the object, compensating calibration drift when
+        # the AprilTag can't be re-run. Read live so the slider applies on
+        # the next pick / overlay tick.
+        position[0] += float(self.p('grip_offset_x'))
+        position[1] += float(self.p('grip_offset_y'))
+        # Workspace scale: stretch/shrink around world origin AFTER the
+        # offset so "shift by N m" means a fixed distance regardless of
+        # scale. 1.0 = no change.
+        ws = float(self.p('workspace_scale'))
+        position[0] *= ws
+        position[1] *= ws
+        return position
+
     def get_object_world_position(self, position, intrinsic, extristric,
                                   white_area_center, height=0.03):
         projection_matrix = np.row_stack((np.column_stack((extristric[1], extristric[0])),
@@ -2110,24 +2148,7 @@ class ObjectSortingNodeV5(Node):
         world_pose[1] = -world_pose[1]
         position = white_area_center[:3, 3] + world_pose
         position[2] = height
-        config_data = common.get_yaml_data(os.path.join(self.config_path,
-                                                        self.calibration_file))
-        offset = tuple(config_data['pixel']['offset'])
-        scale = tuple(config_data['pixel']['scale'])
-        for i in range(3):
-            position[i] = position[i] * scale[i] + offset[i]
-        # Manual world nudge (default 0): shift the final pick position so
-        # the arm lands on the object, compensating calibration drift when
-        # the AprilTag can't be re-run. Read live so the slider applies on
-        # the next pick.
-        position[0] += float(self.p('grip_offset_x'))
-        position[1] += float(self.p('grip_offset_y'))
-        # Workspace scale: stretch/shrink around world origin AFTER the
-        # offset so "shift by N m" means a fixed distance regardless of
-        # scale. 1.0 = no change.
-        ws = float(self.p('workspace_scale'))
-        position[0] *= ws
-        position[1] *= ws
+        position = self._apply_world_offsets(position)
         return position, projection_matrix
 
     def calculate_pick_grasp_yaw(self, position, target, target_info,
@@ -2202,8 +2223,7 @@ class ObjectSortingNodeV5(Node):
     # ------------------------------------------------------------------ pick & place
 
     def _apply_kinematics_calibration(self, position):
-        config_data = common.get_yaml_data(os.path.join(self.config_path,
-                                                        self.calibration_file))
+        config_data = self._calibration_cfg()
         offset = tuple(config_data['kinematics']['offset'])
         scale = tuple(config_data['kinematics']['scale'])
         return [position[i] * scale[i] + offset[i] for i in range(3)]
@@ -2365,8 +2385,7 @@ class ObjectSortingNodeV5(Node):
                             f'- set one in the tuner UI Places tab')
             return False
         yaw = self.calculate_place_grasp_yaw(position, 0)
-        config_data = common.get_yaml_data(os.path.join(self.config_path,
-                                                        self.calibration_file))
+        config_data = self._calibration_cfg()
         offset = tuple(config_data['kinematics']['offset'])
         scale = tuple(config_data['kinematics']['scale'])
         angle = math.degrees(math.atan2(position[1], position[0]))
@@ -2761,7 +2780,6 @@ class ObjectSortingNodeV5(Node):
                 centre_w,
                 centre_w + np.array([0.05, 0.0, 0.0]),
                 centre_w + np.array([0.0, 0.05, 0.0]),
-                centre_w + np.array([0.10, 0.0, 0.0]),  # for ppm
             ], dtype=np.float64)
             imgpts, _ = cv2.projectPoints(pts_w, np.array(rmat),
                                           np.array(tvec),
@@ -2770,9 +2788,6 @@ class ObjectSortingNodeV5(Node):
             cx, cy = int(imgpts[0][0]), int(imgpts[0][1])
             xtip = (int(imgpts[1][0]), int(imgpts[1][1]))
             ytip = (int(imgpts[2][0]), int(imgpts[2][1]))
-            # pixels-per-metre from the 10 cm reference line in X.
-            ppm_x = abs(int(imgpts[3][0]) - cx) / 0.10
-            ppm_y = ppm_x  # camera is roughly square; X scale is good enough
             # True workspace centre (cyan +).
             cv2.drawMarker(bgr, (cx, cy), (255, 255, 0),
                            cv2.MARKER_CROSS, 18, 2)
@@ -2787,22 +2802,66 @@ class ObjectSortingNodeV5(Node):
                             tipLength=0.2)
             cv2.putText(bgr, 'Y', (ytip[0] + 4, ytip[1] + 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            # Arm's belief of the workspace centre after the user's offsets.
-            # Pixel translation per metre of offset is ppm_*.
-            sx = cx + int(round(gx * ppm_x))
-            sy = cy + int(round(gy * ppm_y))
-            if (sx, sy) != (cx, cy):
-                cv2.drawMarker(bgr, (sx, sy), (0, 200, 255),
-                               cv2.MARKER_TILTED_CROSS, 18, 2)
-                cv2.arrowedLine(bgr, (cx, cy), (sx, sy),
-                                (0, 200, 255), 1, tipLength=0.3)
-                cv2.putText(bgr, 'arm thinks', (sx + 8, sy + 12),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.4,
-                            (0, 200, 255), 1)
+            # Legend for the per-object + bin markers below.
+            cv2.putText(bgr, 'yellow = arm grab aim   magenta = place bin',
+                        (8, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                        (0, 200, 255), 1)
         except Exception:
             # Overlay must never break the publisher; swallow projection
             # failures silently and skip the markers.
             pass
+
+        # Per-object pick-aim markers: for each detected object, run the FULL
+        # pick math (offsets + scale) and project the resulting world target
+        # back onto the image. Marker sits on the object when calibration is
+        # right; the line to the detected centre is the residual being dialed
+        # out. Recomputed each tick from live params, so dragging the sliders
+        # (incl. workspace_scale) moves every marker in real time.
+        overlay = self._latest_overlay
+        targets = (overlay or {}).get('targets', ()) if overlay else ()
+        for t in targets:
+            try:
+                px, py = int(t[2][0]), int(t[2][1])
+                world, _ = self.get_object_world_position(
+                    (px, py), self.intrinsic, self.extristric,
+                    self.white_area_center, height=0.03)
+                ax, ay = self._project_world_to_pixel(world)
+                cv2.line(bgr, (px, py), (ax, ay), (0, 200, 255), 1)
+                cv2.drawMarker(bgr, (ax, ay), (0, 200, 255),
+                               cv2.MARKER_TILTED_CROSS, 16, 2)
+            except Exception:
+                continue
+
+        # Place-bin markers: where each class gets dropped on the real table.
+        try:
+            bins = dict(self.DEFAULT_PLACE_POSITIONS)
+            user_pp = json.loads(self.p('place_positions') or '{}')
+            if isinstance(user_pp, dict):
+                for k, v in user_pp.items():
+                    if isinstance(v, (list, tuple)) and len(v) == 3:
+                        bins[k] = [float(v[0]), float(v[1]), float(v[2])]
+            labels = getattr(self, 'target_labels', None) or {}
+            for label, xyz in bins.items():
+                if labels and label not in labels:
+                    continue
+                bx, by = self._project_world_to_pixel(list(xyz))
+                cv2.drawMarker(bgr, (bx, by), (255, 0, 255),
+                               cv2.MARKER_DIAMOND, 14, 2)
+                cv2.putText(bgr, f'{label} bin', (bx + 6, by - 6),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 1)
+        except Exception:
+            pass
+
+    def _project_world_to_pixel(self, world_xyz):
+        """Project a world-frame point (same frame as white_area_center /
+        corners, which get_roi projects correctly) to a pixel using the live
+        AprilTag extrinsic. Used by the calibration overlay."""
+        tvec, rmat = self.extristric
+        pts = np.array([world_xyz], dtype=np.float64)
+        img, _ = cv2.projectPoints(pts, np.array(rmat), np.array(tvec),
+                                   self.intrinsic, self.distortion)
+        p = img.reshape(-1, 2)[0]
+        return int(p[0]), int(p[1])
 
     def _raw_republish_tick(self):
         """30 Hz publisher: always grabs the latest raw camera frame and
