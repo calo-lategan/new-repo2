@@ -1315,28 +1315,41 @@ class TunerUI:
                   ).pack(side='left', padx=4)
 
     def _on_push_logs(self):
-        """Round 12 Z2: run tools/push_logs.sh in a worker thread so the
-        latest session logs land in the repo's logs/ folder + GitHub."""
+        """Round 12 Z2 / Round 13 R13.1: run tools/push_logs.sh in a
+        worker thread so the latest session logs land in the repo's
+        logs/ folder + GitHub. Repo location is resolved from THIS
+        file (symlink-aware) so the installer's clone location
+        (~/jetarm_v5_src) is found automatically."""
+        def _find_repo():
+            env = os.environ.get('JETARM_V5_REPO')
+            if env and os.path.isdir(os.path.join(env, '.git')):
+                return env
+            # tune_uiv5.py is symlinked into ros2_ws/src/app/app/ -
+            # realpath() resolves it back to the real checkout.
+            d = os.path.dirname(os.path.realpath(__file__))
+            while d and d != '/':
+                if os.path.isdir(os.path.join(d, '.git')):
+                    return d
+                d = os.path.dirname(d)
+            for p in (os.path.expanduser('~/jetarm_v5_src'),
+                      os.path.expanduser('~/new-repo2')):
+                if os.path.isdir(os.path.join(p, '.git')):
+                    return p
+            return None
+
         def go():
             try:
-                # Try a few standard repo locations on the Jetson.
-                candidates = [
-                    os.path.expanduser('~/new-repo2'),
-                    os.path.expanduser('~/jetarm-repo'),
-                    os.path.expanduser('~/repo'),
-                ]
-                repo = next((p for p in candidates
-                             if os.path.isdir(os.path.join(p, '.git'))),
-                            None)
+                repo = _find_repo()
                 if repo is None:
                     self._set_status('PUSH LOGS: no repo found '
-                                     '(set REPO env)', '#aa6633')
+                                     '(set JETARM_V5_REPO env)', '#aa6633')
                     _ui_log('push_logs', 'no repo found')
                     return
                 script = os.path.join(repo, 'tools', 'push_logs.sh')
                 if not os.path.isfile(script):
-                    self._set_status('PUSH LOGS: tools/push_logs.sh '
-                                     'missing', '#aa6633')
+                    self._set_status(
+                        f'PUSH LOGS: tools/push_logs.sh missing in {repo}',
+                        '#aa6633')
                     _ui_log('push_logs', f'script missing in {repo}')
                     return
                 self._set_status('PUSH LOGS: running...', '#3366aa')

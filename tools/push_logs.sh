@@ -18,7 +18,11 @@
 
 set -u
 
-REPO="${REPO:-$HOME/new-repo2}"
+# Round 13 R13.2: self-locate the repo by walking up from this script's
+# own path, so a manual run without REPO= still works regardless of
+# where the repo was cloned (~/jetarm_v5_src on the JetArm installer).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="${REPO:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 LOG_DIR="${LOG_DIR:-$HOME/jetarm_v5/logs}"
 KEEP="${KEEP:-5}"
 BRANCH="${BRANCH:-main}"
