@@ -2599,22 +2599,25 @@ class ObjectSortingNodeV5(Node):
         real pick) and the calibration overlay, so the overlay can never
         drift from the pick.
 
-        Round 14 BB.1: apply BOTH `pixel` and `kinematics` scale+offset
-        (vendor calibration.yaml schema). Previously only `pixel` was
-        applied; `kinematics` is the per-axis correction vendor uses to
-        compensate the arm's actual reach vs. ideal IK. Without it the
-        arm under/overshoots laterally on cubes far from centre."""
+        v5.1 FIX (double-kinematics): apply ONLY the `pixel` affine here, NOT
+        `kinematics`. The vendor applies `pixel` in the world-position calc
+        (object_sorting.get_object_world_position) and `kinematics` exactly
+        ONCE in the transport thread (object_sorting.transport_thread). v5's
+        transport_thread already applies the kinematics affine via
+        _apply_kinematics_calibration, so the Round-14 BB.1 addition of the
+        kinematics affine HERE double-applied it (scale squared, offset x2) -
+        e.g. with kinematics y-scale 1.05 / y-offset 0.006 the pick landed
+        ~+9 mm off in Y and the jaws closed beside the cube. Reverted to
+        pixel-only so kinematics is applied exactly once, matching vendor."""
         cfg = self._calibration_cfg()
-        # pixel affine (extrinsic-side correction).
+        # pixel affine (extrinsic-side correction). The kinematics affine is
+        # applied ONCE downstream in transport_thread (_apply_kinematics_
+        # calibration), matching the vendor split - do NOT also apply it here
+        # (that double-applied it and pushed the grasp off-target).
         offset = tuple(cfg.get('pixel', {}).get('offset', (0.0, 0.0, 0.0)))
         scale = tuple(cfg.get('pixel', {}).get('scale', (1.0, 1.0, 1.0)))
         for i in range(3):
             position[i] = position[i] * scale[i] + offset[i]
-        # Kinematics affine (arm-reach-side correction; vendor convention).
-        k_offset = tuple(cfg.get('kinematics', {}).get('offset', (0.0, 0.0, 0.0)))
-        k_scale = tuple(cfg.get('kinematics', {}).get('scale', (1.0, 1.0, 1.0)))
-        for i in range(3):
-            position[i] = position[i] * k_scale[i] + k_offset[i]
         # Manual world nudge (default 0): shift the final pick position so
         # the arm lands on the object, compensating calibration drift when
         # the AprilTag can't be re-run. Read live so the slider applies on
