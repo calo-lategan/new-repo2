@@ -314,6 +314,12 @@ class TunerClient(Node):
         # v5: re-init the currently loaded engine in place (no path change).
         self.reload_engine_cli = self.create_client(
             Trigger, f'/{target_node}/reload_engine')
+        # v5.1 bin-teach: jog the arm (joint-by-joint or world XYZ), read the
+        # live world coordinate, GOTO/SAVE a bin coordinate per class, and
+        # teach the workspace centre/edges. JSON command in data_str; feedback
+        # comes back on the heartbeat (last_teach_msg).
+        self.teach_cli = self.create_client(
+            SetStringBool, f'/{target_node}/teach')
         # Live heartbeat mirror: the node publishes its 5s heartbeat as
         # JSON on ~/status. The background rclpy.spin thread services this
         # subscription; the UI polls latest_status via root.after().
@@ -321,6 +327,14 @@ class TunerClient(Node):
         self.status_rx_t = 0.0
         self.status_sub = self.create_subscription(
             String, f'/{target_node}/status', self._on_status, 1)
+        # v5.1 bin-teach: low-latency teach readout (world pose, servo pulses,
+        # staged workspace centre/edges, last message). Published immediately
+        # after each teach action so the Bin Teach tab doesn't wait for the 5s
+        # heartbeat.
+        self.latest_teach = None
+        self.teach_rx_t = 0.0
+        self.teach_status_sub = self.create_subscription(
+            String, f'/{target_node}/teach_status', self._on_teach_status, 1)
 
     def _on_status(self, msg):
         # Runs on the background spin thread: only write plain attributes
@@ -328,6 +342,13 @@ class TunerClient(Node):
         try:
             self.latest_status = json.loads(msg.data)
             self.status_rx_t = time.time()
+        except Exception:
+            pass
+
+    def _on_teach_status(self, msg):
+        try:
+            self.latest_teach = json.loads(msg.data)
+            self.teach_rx_t = time.time()
         except Exception:
             pass
 
@@ -519,6 +540,13 @@ class TunerClient(Node):
     def call_load_profile(self, name):
         return self._set_string_bool(self.load_profile_cli, name, True)
 
+    def call_teach(self, cmd, persist=False):
+        """Send a bin-teach / workspace-teach command (a JSON dict) to the
+        node. Returns True if the node accepted it; richer status (e.g. the
+        workspace guardrail, the live coordinate) arrives on the heartbeat
+        (last_teach_msg / teach_pose / teach_joints)."""
+        return self._set_string_bool(self.teach_cli, json.dumps(cmd), bool(persist))
+
 
 class TunerUI:
     def __init__(self, client, calib_only=None):
@@ -641,6 +669,13 @@ class TunerUI:
                     self._refresh_places(cnames)
                 except Exception:
                     pass
+                # v5.1 Bin Teach tab: live readout (from ~/teach_status) +
+                # the class dropdown populated from the model class names.
+                if hasattr(self, 'teach_pose_var'):
+                    try:
+                        self._update_teach_readout(cnames)
+                    except Exception:
+                        pass
                 # Live grip telemetry on the Grip tab.
                 try:
                     lg = st.get('last_grip')
@@ -674,6 +709,44 @@ class TunerUI:
         except Exception:
             pass  # never let the poll loop die
         self.root.after(1000, self._poll_node_status)
+
+    def _update_teach_readout(self, class_names):
+        """Refresh the Bin Teach tab from the low-latency ~/teach_status topic
+        and keep its class dropdown in sync with the model's class names."""
+        try:
+            names = sorted(class_names.values()) if class_names else []
+            if names and list(self.teach_class_combo['values']) != names:
+                self.teach_class_combo['values'] = names
+                if not self.teach_class_var.get():
+                    self.teach_class_var.set(names[0])
+        except Exception:
+            pass
+        tt = self.client.latest_teach
+        if not tt:
+            return
+        pose = tt.get('teach_pose')
+        if pose and len(pose) == 3:
+            self.teach_pose_var.set(
+                'world (x, y, z):  {:.4f},  {:.4f},  {:.4f}  m'.format(*pose))
+        else:
+            self.teach_pose_var.set('world (x, y, z): -- (jog or Refresh readout)')
+        joints = tt.get('teach_joints')
+        if joints:
+            self.teach_joints_var.set(
+                'servos 1-5:  ' + '   '.join(str(int(j)) for j in joints))
+        center = tt.get('teach_center')
+        edges = int(tt.get('teach_edges', 0) or 0)
+        if center and len(center) == 3:
+            self.teach_center_var.set(
+                'workspace: centre {:.3f}, {:.3f}, {:.3f}  |  edges staged: {}'
+                .format(center[0], center[1], center[2], edges))
+        else:
+            self.teach_center_var.set(
+                f'workspace: centre not staged  |  edges staged: {edges}')
+        running = bool(tt.get('teach_running'))
+        msg = str(tt.get('last_teach_msg', '') or '')
+        self.teach_msg_var.set(
+            'status: ' + ('MOVING... ' if running else '') + (msg or 'idle'))
 
     def _build(self):
         if self.calib_only:
@@ -813,6 +886,11 @@ class TunerUI:
         self._model_tab = detect_tab
         self._model_tab_index = notebook.index('end') - 1
         places_tab = ttk.Frame(notebook); notebook.add(places_tab, text='Places')
+        # v5.1 bin-teach: jog the arm to each physical bin (joint-by-joint or
+        # world XYZ), read the live coordinate, and save it per class so
+        # everything sorts to the right place. Also teach the workspace
+        # centre/edges to re-anchor the world map.
+        teach_tab = ttk.Frame(notebook); notebook.add(teach_tab, text='Bin Teach')
         # Round 15: three independent calibration tabs - each with its own
         # CALIBRATE button that ONLY runs that calibration. Position drives
         # the vendor calibration_node; Color drives the vendor lab_manager;
@@ -890,6 +968,7 @@ class TunerUI:
         detect_body = self._make_scrollable(detect_tab)
         toggles_body = self._make_scrollable(toggles_tab)
         places_body = self._make_scrollable(places_tab)
+        teach_body = self._make_scrollable(teach_tab)
         position_body = self._make_scrollable(position_tab)
         color_body = self._make_scrollable(color_tab)
         depth_body = self._make_scrollable(depth_tab)
@@ -910,6 +989,8 @@ class TunerUI:
         self._build_model_section(detect_body, current)
         # Places tab — per-class targets (place position + grip strength).
         self._build_places_tab(places_body, current.get('place_positions', '{}'))
+        # Bin Teach tab — jog the arm to each bin, read the coordinate, save it.
+        self._build_teach_tab(teach_body)
         # Round 15: three independent calibration tabs.
         self._build_position_tab(position_body, current)
         self._build_color_tab(color_body, current)
@@ -2229,6 +2310,182 @@ class TunerUI:
             self._set_engine_buffer(path)
 
     # ---- Places tab (per-class targets: place position + grip strength) ----
+
+    # ------------------------------------------------------------------ bin teach
+    def _build_teach_tab(self, parent):
+        """Manual bin teaching. Jog the arm to each physical bin (joint-by-joint
+        or world XYZ), read the live coordinate, and SAVE it per class so the
+        cube lands exactly there. Also teach the workspace centre/edges to
+        re-anchor the world map. All motion goes through the node ~/teach
+        service (refused while sorting/calibrating)."""
+        JS = ('TkDefaultFont', 9)
+        ttk.Label(parent, foreground='#226666', wraplength=720, justify='left',
+                  text='Move the arm to a bin, read its coordinate, then Save it '
+                       'for a class. A SAVED bin is just the drop LOCATION - the '
+                       'arm works out its own approach and drops exactly there '
+                       '(taught bins skip the vision correction). STOP sorting '
+                       'first; the arm MOVES. Joint jog never needs IK, so use it '
+                       'to reach bins the world jog can’t.'
+                  ).pack(anchor='w', padx=8, pady=(8, 4))
+
+        # ---- live readout ------------------------------------------------
+        ro = ttk.LabelFrame(parent, text='Live readout (from the arm)')
+        ro.pack(fill='x', padx=8, pady=4)
+        self.teach_pose_var = tk.StringVar(value='world (x, y, z): --')
+        self.teach_joints_var = tk.StringVar(value='servos 1-5: --')
+        self.teach_center_var = tk.StringVar(value='workspace: centre not staged')
+        self.teach_msg_var = tk.StringVar(value='status: idle')
+        ttk.Label(ro, textvariable=self.teach_pose_var, font=('TkDefaultFont', 10, 'bold'),
+                  foreground='#2e6e2e').pack(anchor='w', padx=8, pady=(6, 0))
+        ttk.Label(ro, textvariable=self.teach_joints_var, font=JS).pack(anchor='w', padx=8)
+        ttk.Label(ro, textvariable=self.teach_center_var, font=JS,
+                  foreground='#555').pack(anchor='w', padx=8)
+        ttk.Label(ro, textvariable=self.teach_msg_var, font=JS, foreground='#996600',
+                  wraplength=720, justify='left').pack(anchor='w', padx=8, pady=(0, 4))
+        ttk.Button(ro, text='Refresh readout',
+                   command=lambda: self._teach_send({'action': 'read'})
+                   ).pack(anchor='w', padx=8, pady=(0, 6))
+
+        # ---- step sizes --------------------------------------------------
+        steps = ttk.LabelFrame(parent, text='Step size')
+        steps.pack(fill='x', padx=8, pady=4)
+        row = ttk.Frame(steps); row.pack(fill='x', padx=8, pady=6)
+        ttk.Label(row, text='world step (m):').pack(side='left')
+        self.teach_world_step = ttk.Entry(row, width=8, justify='right')
+        self.teach_world_step.insert(0, '0.01'); self.teach_world_step.pack(side='left', padx=(2, 16))
+        ttk.Label(row, text='joint step (pulses):').pack(side='left')
+        self.teach_joint_step = ttk.Entry(row, width=8, justify='right')
+        self.teach_joint_step.insert(0, '10'); self.teach_joint_step.pack(side='left', padx=2)
+
+        # ---- joint-by-joint jog -----------------------------------------
+        jf = ttk.LabelFrame(parent, text='Joint jog (one servo at a time - always reachable)')
+        jf.pack(fill='x', padx=8, pady=4)
+        joint_labels = [(1, 'base rotate'), (2, 'shoulder'), (3, 'elbow'),
+                        (4, 'wrist pitch'), (5, 'wrist rotate')]
+        for jid, hint in joint_labels:
+            r = ttk.Frame(jf); r.pack(fill='x', padx=8, pady=2)
+            ttk.Label(r, text=f'J{jid}  {hint}', width=18).pack(side='left')
+            ttk.Button(r, text='–', width=4,
+                       command=lambda j=jid: self._on_teach_joint(j, -1)).pack(side='left', padx=2)
+            ttk.Button(r, text='+', width=4,
+                       command=lambda j=jid: self._on_teach_joint(j, +1)).pack(side='left', padx=2)
+
+        # ---- world XYZ jog ----------------------------------------------
+        wf = ttk.LabelFrame(parent, text='World jog (straight-line X/Y/Z - uses IK)')
+        wf.pack(fill='x', padx=8, pady=4)
+        for axis, hint in (('x', 'left / right'), ('y', 'near / far'), ('z', 'down / up')):
+            r = ttk.Frame(wf); r.pack(fill='x', padx=8, pady=2)
+            ttk.Label(r, text=f'{axis.upper()}  {hint}', width=18).pack(side='left')
+            ttk.Button(r, text='–', width=4,
+                       command=lambda a=axis: self._on_teach_world(a, -1)).pack(side='left', padx=2)
+            ttk.Button(r, text='+', width=4,
+                       command=lambda a=axis: self._on_teach_world(a, +1)).pack(side='left', padx=2)
+        ttk.Button(wf, text='Home (safe centre pose)',
+                   command=lambda: self._teach_send({'action': 'home'})
+                   ).pack(anchor='w', padx=8, pady=(4, 6))
+
+        # ---- save current coordinate as a class bin ---------------------
+        sf = ttk.LabelFrame(parent, text='Save the readout as a bin')
+        sf.pack(fill='x', padx=8, pady=4)
+        r = ttk.Frame(sf); r.pack(fill='x', padx=8, pady=6)
+        ttk.Label(r, text='class:').pack(side='left')
+        self.teach_class_var = tk.StringVar()
+        self.teach_class_combo = ttk.Combobox(r, textvariable=self.teach_class_var,
+                                               width=18, state='normal')
+        self.teach_class_combo.pack(side='left', padx=4)
+        ttk.Button(r, text='Go to bin', command=self._on_teach_goto).pack(side='left', padx=4)
+        ttk.Button(r, text='Save here → bin', command=self._on_teach_save).pack(side='left', padx=4)
+        self.teach_persist_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(sf, text='persist to default.yaml (survives relaunch)',
+                        variable=self.teach_persist_var).pack(anchor='w', padx=8, pady=(0, 6))
+
+        # ---- workspace centre / edges -----------------------------------
+        kf = ttk.LabelFrame(parent, text='Workspace map (centre + edges → world origin)')
+        kf.pack(fill='x', padx=8, pady=4)
+        ttk.Label(kf, foreground='#555', wraplength=720, justify='left',
+                  text='Run AprilTag CALIBRATE first (it sets the camera geometry). '
+                       'Then jog to the mat CENTRE and Set Centre; jog to each EDGE '
+                       'and Add Edge; Save Workspace re-anchors the world origin to '
+                       'your centre and sizes the overlay from the edges. The camera '
+                       'calibration is left untouched.'
+                  ).pack(anchor='w', padx=8, pady=(6, 2))
+        r = ttk.Frame(kf); r.pack(fill='x', padx=8, pady=2)
+        ttk.Button(r, text='Set centre',
+                   command=lambda: self._teach_send({'action': 'set_center'})).pack(side='left', padx=3)
+        ttk.Button(r, text='Add edge',
+                   command=lambda: self._teach_send({'action': 'add_edge'})).pack(side='left', padx=3)
+        ttk.Button(r, text='Clear',
+                   command=lambda: self._teach_send({'action': 'clear_workspace'})).pack(side='left', padx=3)
+        ttk.Button(r, text='Save workspace',
+                   command=self._on_teach_save_workspace).pack(side='left', padx=3)
+        self.teach_force_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(kf, text='Confirm re-anchor (apply even if far from current origin)',
+                        variable=self.teach_force_var).pack(anchor='w', padx=8, pady=(2, 6))
+
+    def _teach_send(self, cmd, persist=False):
+        """Fire a ~/teach command on a worker thread (never block Tk).
+        Results arrive on the ~/teach_status topic and refresh the readout."""
+        def go():
+            try:
+                self.client.call_teach(cmd, persist)
+            except Exception:
+                pass
+        threading.Thread(target=go, daemon=True).start()
+
+    def _teach_world_step(self):
+        try:
+            return abs(float(self.teach_world_step.get()))
+        except Exception:
+            return 0.01
+
+    def _teach_joint_step(self):
+        try:
+            return abs(int(float(self.teach_joint_step.get())))
+        except Exception:
+            return 10
+
+    def _on_teach_joint(self, jid, sign):
+        self._teach_send({'action': 'joint_jog', 'joint': int(jid),
+                          'delta': int(sign) * self._teach_joint_step()})
+
+    def _on_teach_world(self, axis, sign):
+        cmd = {'action': 'jog', 'dx': 0, 'dy': 0, 'dz': 0,
+               'step': self._teach_world_step()}
+        cmd['d' + axis] = int(sign)
+        self._teach_send(cmd)
+
+    def _on_teach_goto(self):
+        cls = self.teach_class_var.get().strip()
+        if not cls:
+            messagebox.showinfo('Pick a class', 'Choose a class to go to its bin.')
+            return
+        self._teach_send({'action': 'goto', 'class': cls})
+
+    def _on_teach_save(self):
+        cls = self.teach_class_var.get().strip()
+        if not cls:
+            messagebox.showinfo('Pick a class', 'Choose (or type) the class to save.')
+            return
+        if not messagebox.askyesno(
+                'Save bin',
+                f'Save the current arm coordinate as the "{cls}" bin?\n\n'
+                f'Every "{cls}" detection will then be dropped here.'):
+            return
+        self._teach_send({'action': 'save', 'class': cls},
+                         persist=bool(self.teach_persist_var.get()))
+
+    def _on_teach_save_workspace(self):
+        if not messagebox.askyesno(
+                'Save workspace',
+                'Re-anchor the world origin to the staged centre (and size the '
+                'overlay from the staged edges)?\n\n'
+                'This rewrites white_area_pose_world in transform.yaml. The '
+                'AprilTag camera calibration is left untouched. Make sure the '
+                'centre was taught at the true mat centre.'):
+            return
+        self._teach_send({'action': 'save_workspace',
+                          'force': bool(self.teach_force_var.get())},
+                         persist=bool(self.teach_persist_var.get()))
 
     def _build_places_tab(self, parent, current_places_json):
         """Per-class targets editor. Rows populate from model.names (~/status).

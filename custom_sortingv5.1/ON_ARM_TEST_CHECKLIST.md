@@ -127,6 +127,34 @@ bash ~/jetarm_v5_src/custom_sortingv5.1/install.sh
 
 ---
 
+## Bin Teach & Workspace Map (tuner UI → "Bin Teach" tab)
+Fixes placement landing in the wrong spot. STOP sorting first; the arm moves.
+- [ ] STOP sorting. Open the **Bin Teach** tab. The class dropdown fills with the
+      model's classes once the engine has loaded.
+- [ ] **Joint jog** — press J1…J5 ± (step = 10 pulses). The corresponding servo
+      moves; the **world (x, y, z)** readout and **servos 1-5** update within ~1 s
+      (via `~/teach_status`). Bump the joint step to 20–30 for coarse moves.
+- [ ] Reach a bin you could NOT reach with world jog (edge of workspace) using
+      joint jog alone — confirms joint jog needs no IK.
+- [ ] **World jog** — X/Y/Z ± (step = 0.01 m) nudges in straight lines. If a
+      target is unreachable the status says `UNREACHABLE (IK) - not moved` and the
+      arm stays put (the jog is reverted).
+- [ ] Lower the gripper to just above a physical bin, pick that class in the
+      dropdown, **Save here → bin** (confirm). Status shows
+      `SAVE <class> = [x, y, z, 'taught']`.
+- [ ] **Go to bin** for that class drives the arm back to the saved spot.
+- [ ] START sorting and drop that class — it lands **at the taught bin** (not the
+      old forward-grid spot, and with no affine offset). Repeat per class incl.
+      `scaff` → waste bin.
+- [ ] If a class is still unmapped, the heartbeat `unmapped` badge flags it.
+- [ ] **Workspace map** (optional, after AprilTag CALIBRATE): jog to mat centre →
+      **Set centre**; jog to each corner → **Add edge** (×4) → **Save workspace**.
+      Status: `world origin re-anchored …`. A centre > 5 cm from the current origin
+      is refused until you tick **Confirm** (catches a mis-jog). Verify a couple of
+      live picks still land correctly (re-anchoring shifts every detection's X/Y).
+- [ ] Confirm `transform.yaml` still has its original `extristric` / `corners` /
+      `plane` (only `white_area_pose_world` should change) — detection ROI intact.
+
 ## If a pick fires but the arm doesn't move
 Look downstream (unchanged logic, but now fed correct world coords): `_do_pick`
 IK reachability, `_apply_kinematics_calibration` offsets from `calibration.yaml`,

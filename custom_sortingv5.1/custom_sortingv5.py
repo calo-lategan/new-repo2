@@ -550,6 +550,41 @@ class MotionController:
             out['voltage'] = int(s.voltage[0])
         return out
 
+    def get_arm_servo_positions(self):
+        """v5.1 bin-teach: read arm servos 1..5 in ONE bulk call ->
+        [p1, p2, p3, p4, p5] pulses (or None). The underlying vendor
+        get_bus_servo_state handler loops over request.cmd, so a single
+        request with five GetBusServoCmd entries returns all five states
+        in one round trip (much lower latency than five serial reads)."""
+        if self.bus_servo_state_client is None:
+            return None
+        req = GetBusServoState.Request()
+        cmds = []
+        for sid in (1, 2, 3, 4, 5):
+            c = GetBusServoCmd()
+            c.id = int(sid)
+            c.get_position = 1
+            cmds.append(c)
+        req.cmd = cmds
+        future = self.bus_servo_state_client.call_async(req)
+        res = self._await_future(future, timeout=0.8)
+        if res is None or len(res.state) < 5:
+            return None
+        try:
+            return [int(s.position[0]) for s in res.state]
+        except Exception:
+            return None
+
+    def set_servo(self, servo_id, pulse, duration):
+        """v5.1 bin-teach: command ONE arm servo to an absolute pulse,
+        clamped to the hard SDK range 0..1000 (the vendor IK solver clamps
+        to the same range). Returns the clamped pulse actually commanded."""
+        p = max(0, min(1000, int(pulse)))
+        set_servo_position(self.joints_pub, float(duration),
+                           ((int(servo_id), p),))
+        self._sleep(duration)
+        return p
+
     def goto_pose(self, position, pitch, duration, parallel_base=True,
                   pitch_range=(-180.0, 180.0)):
         # pitch_range: reference pick_and_place.py constrains approach/grab
@@ -988,6 +1023,20 @@ class ObjectSortingNodeV5(Node):
         self.tag_size = 0.025
 
         self.place_position = copy.deepcopy(self.DEFAULT_PLACE_POSITIONS)
+        # v5.1 bin-teach: the commanded teach/jog world pose [x,y,z]. None until
+        # the first jog/goto (lazily seeded). Tracked here because there is no
+        # get_current_pose service - we follow the pose WE command. Lives in
+        # __init__ (not _init_state) so it survives ~/enter.
+        self._teach_pose = None
+        self._teach_running = False
+        # v5.1 bin-teach (joint jog): the last-read arm servo pulses [p1..p5]
+        # and the FK world readout derived from them. _teach_center/_teach_edges
+        # buffer the workspace-teach captures until 'save_workspace'. _last_teach_msg
+        # mirrors the most recent teach status to the heartbeat for the UI.
+        self._teach_joints = None
+        self._teach_center = None
+        self._teach_edges = []
+        self._last_teach_msg = ''
         self.place_offsets = {k: [0.0, 0.0, 0.0] for k in self.place_position}
 
         # target_labels is REPLACED at engine-load time with one entry per
@@ -1022,6 +1071,12 @@ class ObjectSortingNodeV5(Node):
         # Machine-readable heartbeat mirror for the tuner UI: same data as
         # the 5s log heartbeat, as a JSON String the UI subscribes to.
         self.status_publisher = self.create_publisher(String, '~/status', 1)
+        # v5.1 bin-teach: a low-latency status mirror published the instant a
+        # teach action finishes (the 5s heartbeat is too slow for interactive
+        # jogging). Carries the live world readout, servo pulses, staged
+        # workspace centre/edges and the last status message.
+        self.teach_status_publisher = self.create_publisher(
+            String, '~/teach_status', 1)
 
         # ---- Services (lifecycle + control) ----
         self.create_service(Trigger, '~/enter', self.enter_srv_callback,
@@ -1091,6 +1146,12 @@ class ObjectSortingNodeV5(Node):
         # Round 12 Y6: refit the table plane without re-running AprilTag.
         self.create_service(Trigger, '~/depth_plane_refit',
                             self._depth_plane_refit_srv,
+                            callback_group=self.svc_group)
+        # v5.1 bin-teach: jog the arm in world X/Y/Z, GOTO an existing class
+        # bin, or SAVE the current arm pose as place_positions[<class>]. JSON
+        # command in data_str; data_bool = persist to default.yaml.
+        self.create_service(SetStringBool, '~/teach',
+                            self.teach_srv_callback,
                             callback_group=self.svc_group)
 
         # Round 14 AA: LAB color threshold calibration (one-for-one with
@@ -1658,6 +1719,23 @@ class ObjectSortingNodeV5(Node):
                 # ENTIRE heartbeat publish, blanking the whole UI status panel.
                 'last_grip': self._last_grip,
                 'test_grip_running': bool(getattr(self, '_test_grip_running', False)),
+                # v5.1 bin-teach: current commanded teach pose for the Bin Teach
+                # tab's live readout (None until the first jog/goto).
+                'teach_pose': (list(self._teach_pose)
+                               if getattr(self, '_teach_pose', None) is not None
+                               else None),
+                'teach_running': bool(getattr(self, '_teach_running', False)),
+                # v5.1 bin-teach (joint jog + workspace): live servo pulses,
+                # the staged workspace centre, the edge count, and the last
+                # teach status string for the Bin Teach tab.
+                'teach_joints': (list(self._teach_joints)
+                                 if getattr(self, '_teach_joints', None) is not None
+                                 else None),
+                'teach_center': (list(self._teach_center)
+                                 if getattr(self, '_teach_center', None) is not None
+                                 else None),
+                'teach_edges': len(getattr(self, '_teach_edges', []) or []),
+                'last_teach_msg': str(getattr(self, '_last_teach_msg', '') or ''),
                 # Classes the loaded model can detect but that have no
                 # place target configured (UI badges these).
                 'unmapped_classes': list(getattr(self, '_unmapped_classes', [])),
@@ -2282,6 +2360,351 @@ class ObjectSortingNodeV5(Node):
                                'outcome': 'crashed', 'source': 'test'}
         finally:
             self._test_grip_running = False
+
+    # ------------------------------------------------------------------ bin-teach
+    def _teach_log(self, msg):
+        """Mirror a teach status to the stage log, the heartbeat
+        (_last_teach_msg), and the low-latency ~/teach_status topic so the Bin
+        Teach tab updates immediately after each action."""
+        self._last_teach_msg = str(msg)
+        _stage('teach', msg)
+        self._publish_teach_status()
+
+    def _publish_teach_status(self):
+        """Publish the current teach readout on ~/teach_status (instant UI
+        feedback; never raises)."""
+        try:
+            self.teach_status_publisher.publish(String(data=json.dumps({
+                'teach_pose': (list(self._teach_pose)
+                               if getattr(self, '_teach_pose', None) is not None
+                               else None),
+                'teach_joints': (list(self._teach_joints)
+                                 if getattr(self, '_teach_joints', None) is not None
+                                 else None),
+                'teach_center': (list(self._teach_center)
+                                 if getattr(self, '_teach_center', None) is not None
+                                 else None),
+                'teach_edges': len(getattr(self, '_teach_edges', []) or []),
+                'teach_running': bool(getattr(self, '_teach_running', False)),
+                'last_teach_msg': str(getattr(self, '_last_teach_msg', '') or ''),
+            })))
+        except Exception:
+            pass
+
+    def _fk_world_pose(self, pulses):
+        """Forward-kinematics of 5 servo pulses -> world [x, y, z] in the
+        arm-base frame (the SAME frame as place_positions and the IK target -
+        verified: FK service and IK service share one kinematic chain). This is
+        how the joint-jog readout gets the gripper's real world coordinate
+        without a get_current_pose client. Worker-thread only (blocking await).
+        Returns None on failure."""
+        client = getattr(self, 'set_joint_value_target_client', None)
+        if client is None:
+            return None
+        try:
+            msg = set_joint_value_target([int(p) for p in pulses])
+            res = self.motion._await_future(client.call_async(msg), timeout=3.0)
+            if res is not None and getattr(res, 'pose', None) is not None:
+                p = res.pose.position
+                return [float(p.x), float(p.y), float(p.z)]
+        except Exception as e:
+            _stage('teach', 'FK world readout failed', exc=e)
+        return None
+
+    def teach_srv_callback(self, request, response):
+        """v5.1 manual bin-teach + workspace teach. JSON command in data_str:
+          {"action":"joint_jog","joint":3,"delta":10}  -> jog ONE servo by pulses
+          {"action":"read"}                            -> refresh joints+world readout
+          {"action":"jog","dx":1,"dy":0,"dz":0,"step":0.01} -> jog world X/Y/Z (IK)
+          {"action":"goto","class":"red cube"}         -> move to that saved bin
+          {"action":"home"}                            -> safe central pose
+          {"action":"save","class":"red cube"}         -> save the readout as that bin
+          {"action":"set_center"}                      -> stage the workspace centre
+          {"action":"add_edge"}                        -> stage a workspace edge
+          {"action":"clear_workspace"}                 -> drop staged centre+edges
+          {"action":"save_workspace","force":false}    -> re-anchor world origin
+        data_bool = persist (place_positions / workspace_size to default.yaml).
+        A bin coordinate is just the bin's LOCATION - the arm computes its own
+        drop approach; taught bins skip the vision-reach affine so the cube
+        lands exactly at the saved coordinate. Arm-moving actions run on a worker
+        thread (set_servo / goto_pose must run off the executor); save and the
+        workspace actions are synchronous. Refused while sorting/calibrating/a
+        transport is live."""
+        import json
+        try:
+            cmd = json.loads(request.data_str or '{}')
+            if not isinstance(cmd, dict):
+                cmd = {}
+        except Exception:
+            cmd = {}
+        action = str(cmd.get('action', '')).strip()
+        if self.enable_sorting:
+            self._teach_log('refused - stop sorting first')
+            response.success = False; return response
+        if getattr(self, '_calibrating', False) or self.start_transport:
+            self._teach_log('refused - calibration/transport in progress')
+            response.success = False; return response
+        if action == 'save':
+            if getattr(self, '_teach_running', False):
+                self._teach_log('save refused - a jog is still moving; wait')
+                response.success = False; return response
+            cls = str(cmd.get('class', '')).strip()
+            tp = getattr(self, '_teach_pose', None)
+            if not cls or tp is None:
+                self._teach_log(f'save refused - need a class and a readout '
+                                f'(class={cls!r}, pose={tp})')
+                response.success = False; return response
+            try:
+                pp = json.loads(self.p('place_positions') or '{}')
+                if not isinstance(pp, dict):
+                    pp = {}
+                # 4th element 'taught' marks this as a hand-set coordinate so
+                # _do_place drives straight to it (skips the vision-reach affine).
+                pp[cls] = [round(float(tp[0]), 4), round(float(tp[1]), 4),
+                           round(float(tp[2]), 4), 'taught']
+                self.set_parameters([rclpy.parameter.Parameter(
+                    'place_positions', value=json.dumps(pp))])
+                self.place_position[cls] = [float(tp[0]), float(tp[1]),
+                                            float(tp[2])]  # keep fallback in sync
+                if request.data_bool:
+                    self._merge_into_default(['place_positions'])
+                self._teach_log(f'SAVE {cls} = {pp[cls]} (persist={request.data_bool})')
+                response.success = True
+            except Exception as e:
+                self._teach_log(f'save failed: {type(e).__name__}')
+                _stage('teach', 'save failed', exc=e)
+                response.success = False
+            return response
+        # workspace teach (centre/edges) -> synchronous (uses the current
+        # readout + a transform.yaml write; no arm motion of its own).
+        if action in ('set_center', 'add_edge', 'clear_workspace', 'save_workspace'):
+            if getattr(self, '_teach_running', False):
+                self._teach_log(f'{action} refused - a jog is still moving; wait')
+                response.success = False; return response
+            try:
+                ok, msg = self._teach_workspace(action, cmd, bool(request.data_bool))
+                self._teach_log(f'{action}: {msg}')
+                response.success = bool(ok)
+            except Exception as e:
+                self._teach_log(f'{action} failed: {type(e).__name__}')
+                _stage('teach', 'workspace teach crashed', exc=e)
+                response.success = False
+            return response
+        # jog / joint_jog / read / goto / home -> move (or read) on a worker
+        # thread; the service calls + goto_pose must run OFF the executor.
+        if action not in ('jog', 'joint_jog', 'read', 'goto', 'home'):
+            self._teach_log(f'unknown teach action {action!r}')
+            response.success = False; return response
+        if action in ('jog', 'goto', 'home') and self.kinematics_client is None:
+            self._teach_log('refused - kinematics (IK) not available')
+            response.success = False; return response
+        if getattr(self, '_teach_running', False):
+            self._teach_log('busy - previous teach move still running')
+            response.success = False; return response
+        self._teach_running = True
+        threading.Thread(target=self._run_teach, args=(action, cmd),
+                         daemon=True).start()
+        response.success = True
+        return response
+
+    def _run_teach(self, action, cmd):
+        """Worker for the arm-moving / readout teach actions. World jog/goto/home
+        use IK (goto_pose) and track the commanded pose in self._teach_pose;
+        joint_jog commands ONE servo and reads the resulting world pose back via
+        FK; read refreshes the joints+world readout without moving. All update
+        self._teach_pose (the coordinate 'save' captures) and self._teach_joints."""
+        try:
+            speed = max(0.1, 1.0 / float(self.p('motion_speed')))
+            aggression = float(self.p('aggression'))
+
+            # ---- joint-by-joint jog: command ONE servo, read world via FK ----
+            if action == 'joint_jog':
+                pulses = self.motion.get_arm_servo_positions()
+                if pulses is None:
+                    self._teach_log('joint_jog: cannot read servo positions '
+                                    '(bus_servo/get_state unavailable)')
+                    return
+                try:
+                    jid = int(cmd.get('joint', 0))
+                    delta = int(round(float(cmd.get('delta', 0))))
+                except Exception:
+                    jid, delta = 0, 0
+                if jid < 1 or jid > 5:
+                    self._teach_log(f'joint_jog: bad joint id {jid} (use 1..5)')
+                    return
+                new = self.motion.set_servo(
+                    jid, int(pulses[jid - 1]) + delta,
+                    max(0.2, 0.5 * speed / aggression))
+                pulses[jid - 1] = new
+                self._teach_joints = [int(p) for p in pulses]
+                wp = self._fk_world_pose(pulses)
+                if wp is not None:
+                    self._teach_pose = wp
+                sign = ('+%d' % delta) if delta >= 0 else str(delta)
+                self._teach_log(
+                    f'joint_jog servo{jid} {sign} -> {new} pulse; '
+                    f'joints={self._teach_joints}; '
+                    f'world={[round(v, 3) for v in (self._teach_pose or [])]}')
+                return
+
+            # ---- read-back: refresh joints + world readout without moving ----
+            if action == 'read':
+                pulses = self.motion.get_arm_servo_positions()
+                if pulses is None:
+                    self._teach_log('read: cannot read servo positions')
+                    return
+                self._teach_joints = [int(p) for p in pulses]
+                wp = self._fk_world_pose(pulses)
+                if wp is not None:
+                    self._teach_pose = wp
+                self._teach_log(
+                    f'read joints={self._teach_joints}; '
+                    f'world={[round(v, 3) for v in (self._teach_pose or [])]}')
+                return
+
+            # ---- world XYZ jog / goto / home via IK ----
+            step = abs(float(cmd.get('step', 0.01)))
+            if self._teach_pose is None:
+                self._teach_pose = [0.0, 0.20, 0.10]  # safe central seed
+            delta = [0.0, 0.0, 0.0]
+            if action == 'home':
+                self._teach_pose = [0.0, 0.20, 0.10]
+            elif action == 'goto':
+                cls = str(cmd.get('class', '')).strip()
+                p = self._resolve_place_position(cls)
+                if p is not None:
+                    self._teach_pose = [float(p[0]), float(p[1]), float(p[2])]
+                else:
+                    self._teach_log(f'goto: no saved bin for {cls!r} yet')
+            elif action == 'jog':
+                delta = [float(cmd.get('dx', 0.0)) * step,
+                         float(cmd.get('dy', 0.0)) * step,
+                         float(cmd.get('dz', 0.0)) * step]
+                for i in range(3):
+                    self._teach_pose[i] += delta[i]
+            # never let a teach pose drop below the descend safety floor.
+            self._teach_pose[2] = max(float(self.p('min_descend_z_m')),
+                                      self._teach_pose[2])
+            res = self.motion.goto_pose(
+                list(self._teach_pose), 80,
+                duration=max(0.4, 0.8 * speed / aggression),
+                parallel_base=True, pitch_range=(-90.0, 90.0))
+            if res is None:
+                self._teach_log(f'{action} pose '
+                                f'{[round(v, 3) for v in self._teach_pose]} '
+                                f'UNREACHABLE (IK) - not moved')
+                if action == 'jog':  # undo so _teach_pose stays reachable
+                    for i in range(3):
+                        self._teach_pose[i] -= delta[i]
+            else:
+                # res is the final servo-pulse row from the IK solution; mirror
+                # it to the joints readout so the UI shows both representations.
+                try:
+                    self._teach_joints = [int(round(v)) for v in res]
+                except Exception:
+                    pass
+                self._teach_log(f'{action} -> '
+                                f'{[round(v, 3) for v in self._teach_pose]}')
+        except Exception as e:
+            self._teach_log(f'{action} failed: {type(e).__name__}')
+            _stage('teach', 'move failed', exc=e)
+        finally:
+            self._teach_running = False
+            self._publish_teach_status()
+
+    def _teach_workspace(self, action, cmd, persist):
+        """Teach the workspace CENTRE and EDGES to (re)anchor the world map.
+
+        Writes ONLY white_area_pose_world's translation in transform.yaml (the
+        world origin the legacy pick adds to every detection) from the taught
+        centre, and sizes the operator overlay via the workspace_size_x/y
+        params from the taught edges. It NEVER touches extristric / corners /
+        plane - that camera geometry can only come from the AprilTag, so the
+        AprilTag CALIBRATE must have run at least once first. Returns (ok, msg).
+        """
+        if not hasattr(self, '_teach_edges') or self._teach_edges is None:
+            self._teach_edges = []
+        tp = getattr(self, '_teach_pose', None)
+
+        if action == 'clear_workspace':
+            self._teach_center = None
+            self._teach_edges = []
+            return True, 'staged centre + edges cleared'
+
+        if action == 'set_center':
+            if tp is None:
+                return False, 'no readout yet - jog to the mat centre, then Set Centre'
+            self._teach_center = [float(tp[0]), float(tp[1]), float(tp[2])]
+            return True, f'centre staged = {[round(v, 4) for v in self._teach_center]}'
+
+        if action == 'add_edge':
+            if tp is None:
+                return False, 'no readout yet - jog to an edge first'
+            self._teach_edges.append([float(tp[0]), float(tp[1]), float(tp[2])])
+            return True, (f'edge #{len(self._teach_edges)} staged = '
+                          f'{[round(v, 4) for v in self._teach_edges[-1]]}')
+
+        if action == 'save_workspace':
+            center = getattr(self, '_teach_center', None)
+            if center is None:
+                return False, 'set the centre first (jog to mat centre, Set Centre)'
+            cfg_path = os.path.join(self.config_path, self.config_file)
+            try:
+                with open(cfg_path, 'r') as f:
+                    data = yaml.safe_load(f) or {}
+            except Exception as e:
+                return False, (f'transform.yaml unreadable - run CALIBRATE '
+                               f'(AprilTag) first ({type(e).__name__})')
+            # We must NOT invent the camera geometry; require it to exist.
+            if 'extristric' not in data or 'corners' not in data:
+                return False, ('transform.yaml has no AprilTag geometry - run '
+                               'CALIBRATE first (centre/edges only re-anchor it)')
+            # guardrail: a centre far from the current origin is likely a mis-jog.
+            dxy = 0.0
+            try:
+                old = np.array(data.get('white_area_pose_world'))[:3, 3]
+                dxy = float(((center[0] - old[0]) ** 2 +
+                             (center[1] - old[1]) ** 2) ** 0.5)
+            except Exception:
+                dxy = 0.0
+            if dxy > 0.05 and not bool(cmd.get('force', False)):
+                return False, (f'taught centre is {dxy * 100:.1f} cm from the '
+                               f'current origin - re-send with Confirm to apply')
+            # write ONLY the world origin (identity rotation + taught centre),
+            # matching the vendor white_area_pose_world shape exactly.
+            data['white_area_pose_world'] = [
+                [1.0, 0.0, 0.0, float(center[0])],
+                [0.0, 1.0, 0.0, float(center[1])],
+                [0.0, 0.0, 1.0, float(center[2])],
+                [0.0, 0.0, 0.0, 1.0]]
+            try:
+                with open(cfg_path, 'w') as f:
+                    yaml.safe_dump(data, f)
+            except Exception as e:
+                return False, f'transform.yaml write failed ({type(e).__name__})'
+            extra = ''
+            if self._teach_edges:
+                sx = max(abs(e[0] - center[0]) for e in self._teach_edges) * 2.0
+                sy = max(abs(e[1] - center[1]) for e in self._teach_edges) * 2.0
+                sx = max(0.05, min(1.0, sx))
+                sy = max(0.05, min(1.0, sy))
+                try:
+                    self.set_parameters([
+                        rclpy.parameter.Parameter('workspace_size_x', value=float(sx)),
+                        rclpy.parameter.Parameter('workspace_size_y', value=float(sy))])
+                    if persist:
+                        self._merge_into_default(['workspace_size_x', 'workspace_size_y'])
+                    extra = (f'; overlay {sx:.3f}x{sy:.3f} m from '
+                             f'{len(self._teach_edges)} edge(s)')
+                except Exception as e:
+                    extra = f'; overlay size set FAILED ({type(e).__name__})'
+            # reload ROI + white_area_center live from the rewritten file.
+            self.start_get_roi = True
+            return True, (f'world origin re-anchored to '
+                          f'{[round(v, 4) for v in center]}{extra} '
+                          f'(persist={persist})')
+
+        return False, f'unknown workspace action {action!r}'
 
     def apply_and_persist_srv_callback(self, request, response):
         """Apply a JSON {param: value} map via set_parameters (which reuses
@@ -3010,12 +3433,28 @@ class ObjectSortingNodeV5(Node):
             user = json.loads(self.p('place_positions') or '{}')
             if isinstance(user, dict) and label in user:
                 pos = user[label]
-                if isinstance(pos, (list, tuple)) and len(pos) == 3:
+                # len >= 3: a taught bin stores [x, y, z, 'taught']; take XYZ.
+                if isinstance(pos, (list, tuple)) and len(pos) >= 3:
                     return [float(pos[0]), float(pos[1]), float(pos[2])]
                 _stage('place', f'place_positions[{label}] malformed: {pos!r}')
         except Exception as e:
             _stage('place', 'place_positions parse failed', exc=e)
         return copy.deepcopy(self.place_position.get(label))
+
+    def _is_taught_place(self, label):
+        """True if place_positions[label] is a hand-taught coordinate (tagged
+        with a 4th 'taught' element). Taught bins are real, physically-reached
+        arm-base coordinates, so _do_place drives straight to them and SKIPS the
+        kinematics scale/offset affine (that affine is a VISION-reach correction
+        for camera-derived picks; applying it to a taught bin shifts the drop
+        ~5% + a few mm off the saved coordinate)."""
+        try:
+            user = json.loads(self.p('place_positions') or '{}')
+            pos = user.get(label) if isinstance(user, dict) else None
+            return (isinstance(pos, (list, tuple)) and len(pos) >= 4
+                    and str(pos[3]) == 'taught')
+        except Exception:
+            return False
 
     def _do_place(self, label):
         speed = max(0.1, 1.0 / float(self.p('motion_speed')))
@@ -3026,19 +3465,26 @@ class ObjectSortingNodeV5(Node):
                             f'- set one in the tuner UI Places tab')
             return False
         yaw = self.calculate_place_grasp_yaw(position, 0)
-        config_data = self._calibration_cfg()
-        offset = tuple(config_data['kinematics']['offset'])
-        scale = tuple(config_data['kinematics']['scale'])
-        angle = math.degrees(math.atan2(position[1], position[0]))
-        if angle > 45:
-            position = [position[0] * scale[1], position[1] * scale[0], position[2] * scale[2]]
-            position = [position[0] - offset[1], position[1] + offset[0], position[2] + offset[2]]
-        elif angle < -45:
-            position = [position[0] * scale[1], position[1] * scale[0], position[2] * scale[2]]
-            position = [position[0] + offset[1], position[1] - offset[0], position[2] + offset[2]]
-        else:
-            position = [position[0] * scale[0], position[1] * scale[1], position[2] * scale[2]]
-            position = [position[0] + offset[0], position[1] + offset[1], position[2] + offset[2]]
+        # v5.1 bin-teach: a hand-taught bin is already a physically-reached
+        # arm-base coordinate, so drive straight to it. The kinematics
+        # scale/offset is a VISION-reach correction (applied to camera-derived
+        # picks in transport_thread ~_apply_kinematics_calibration); applying it
+        # to a taught bin re-corrects an already-correct point and lands ~5% +
+        # offset off the saved coordinate. Keep it for legacy/default zones.
+        if not self._is_taught_place(label):
+            config_data = self._calibration_cfg()
+            offset = tuple(config_data['kinematics']['offset'])
+            scale = tuple(config_data['kinematics']['scale'])
+            angle = math.degrees(math.atan2(position[1], position[0]))
+            if angle > 45:
+                position = [position[0] * scale[1], position[1] * scale[0], position[2] * scale[2]]
+                position = [position[0] - offset[1], position[1] + offset[0], position[2] + offset[2]]
+            elif angle < -45:
+                position = [position[0] * scale[1], position[1] * scale[0], position[2] * scale[2]]
+                position = [position[0] + offset[1], position[1] - offset[0], position[2] + offset[2]]
+            else:
+                position = [position[0] * scale[0], position[1] * scale[1], position[2] * scale[2]]
+                position = [position[0] + offset[0], position[1] + offset[1], position[2] + offset[2]]
         hover = [position[0], position[1], position[2] + 0.05]
         if self.motion.goto_pose(hover, 80,
                                  duration=max(0.5, 0.9 * speed / aggression),
@@ -3822,7 +4268,8 @@ class ObjectSortingNodeV5(Node):
             user_pp = json.loads(self.p('place_positions') or '{}')
             if isinstance(user_pp, dict):
                 for k, v in user_pp.items():
-                    if isinstance(v, (list, tuple)) and len(v) == 3:
+                    # len >= 3: taught bins store [x, y, z, 'taught']; take XYZ.
+                    if isinstance(v, (list, tuple)) and len(v) >= 3:
                         bins[k] = [float(v[0]), float(v[1]), float(v[2])]
             labels = getattr(self, 'target_labels', None) or {}
             for label, xyz in bins.items():
