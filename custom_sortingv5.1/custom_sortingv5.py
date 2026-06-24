@@ -2408,13 +2408,11 @@ class ObjectSortingNodeV5(Node):
         return None
 
     def _teach_seed_pose(self):
-        """Seed the world-jog pose from where the arm ACTUALLY is (FK of the
-        current servos) so the first jog starts from a reachable point; fall
-        back to the captured observe endpoint, then a safe central guess."""
-        pulses = self.motion.get_arm_servo_positions()
-        if pulses is not None:
-            self._teach_joints = [int(p) for p in pulses]
-            wp = self._fk_world_pose(pulses)
+        """Seed the world-jog pose. This arm can't report servo positions, so
+        prefer FK of the tracked joints (set by Home / a prior move); fall back
+        to the captured observe endpoint, then a safe central guess."""
+        if getattr(self, '_teach_joints', None) is not None:
+            wp = self._fk_world_pose(self._teach_joints)
             if wp is not None:
                 return wp
         ep = getattr(self.motion, 'last_endpoint_pose', None)
@@ -2531,12 +2529,18 @@ class ObjectSortingNodeV5(Node):
             speed = max(0.1, 1.0 / float(self.p('motion_speed')))
             aggression = float(self.p('aggression'))
 
-            # ---- joint-by-joint jog: command ONE servo, read world via FK ----
+            # ---- joint-by-joint jog: command ONE servo (OPEN-LOOP) ----------
+            # This arm's bus_servo/get_state never returns positions (the
+            # standard grasp is open-loop too), so we TRACK the commanded servo
+            # pulses in self._teach_joints instead of reading them. They are
+            # seeded by Home (or a successful world goto/jog); the live world
+            # readout comes from FK of the tracked pulses (FK works - it's how
+            # the init endpoint pose is captured).
             if action == 'joint_jog':
-                pulses = self.motion.get_arm_servo_positions()
-                if pulses is None:
-                    self._teach_log('joint_jog: no servo-position response for '
-                                    'servos 1-5 (bus_servo/get_state)')
+                if self._teach_joints is None:
+                    self._teach_log('joint_jog: joints not synced yet - press '
+                                    'Home first (this arm can\'t report servo '
+                                    'positions, so jogs are tracked from Home)')
                     return
                 try:
                     jid = int(cmd.get('joint', 0))
@@ -2546,29 +2550,28 @@ class ObjectSortingNodeV5(Node):
                 if jid < 1 or jid > 5:
                     self._teach_log(f'joint_jog: bad joint id {jid} (use 1..5)')
                     return
+                joints = [int(p) for p in self._teach_joints]
                 new = self.motion.set_servo(
-                    jid, int(pulses[jid - 1]) + delta,
+                    jid, joints[jid - 1] + delta,
                     max(0.2, 0.5 * speed / aggression))
-                pulses[jid - 1] = new
-                self._teach_joints = [int(p) for p in pulses]
-                wp = self._fk_world_pose(pulses)
+                joints[jid - 1] = new
+                self._teach_joints = joints
+                wp = self._fk_world_pose(joints)
                 if wp is not None:
                     self._teach_pose = wp
                 sign = ('+%d' % delta) if delta >= 0 else str(delta)
                 self._teach_log(
                     f'joint_jog servo{jid} {sign} -> {new} pulse; '
-                    f'joints={self._teach_joints}; '
+                    f'joints={joints}; '
                     f'world={[round(v, 3) for v in (self._teach_pose or [])]}')
                 return
 
-            # ---- read-back: refresh joints + world readout without moving ----
+            # ---- read-back: refresh the world readout from tracked joints ----
             if action == 'read':
-                pulses = self.motion.get_arm_servo_positions()
-                if pulses is None:
-                    self._teach_log('read: cannot read servo positions')
+                if self._teach_joints is None:
+                    self._teach_log('read: joints not synced - press Home first')
                     return
-                self._teach_joints = [int(p) for p in pulses]
-                wp = self._fk_world_pose(pulses)
+                wp = self._fk_world_pose(self._teach_joints)
                 if wp is not None:
                     self._teach_pose = wp
                 self._teach_log(
@@ -2580,13 +2583,13 @@ class ObjectSortingNodeV5(Node):
             # (always reachable; IK to a Cartesian guess like [0,0.2,0.1] has
             # no solution at pitch 80 and was failing every time).
             if action == 'home':
+                # commands the physical home config AND syncs the tracked joints
+                # to it, so joint jog has a known starting point afterwards.
                 self.go_home(interrupt=False)
-                pulses = self.motion.get_arm_servo_positions()
-                if pulses is not None:
-                    self._teach_joints = [int(p) for p in pulses]
-                    wp = self._fk_world_pose(pulses)
-                    if wp is not None:
-                        self._teach_pose = wp
+                self._teach_joints = [500, 520, 210, 50, 500]
+                wp = self._fk_world_pose(self._teach_joints)
+                if wp is not None:
+                    self._teach_pose = wp
                 self._teach_log(
                     f'home -> joints={self._teach_joints} '
                     f'world={[round(v, 3) for v in (self._teach_pose or [])]}')

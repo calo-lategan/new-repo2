@@ -2410,6 +2410,11 @@ class TunerUI:
         # ---- joint-by-joint jog -----------------------------------------
         jf = ttk.LabelFrame(parent, text='Joint jog (one servo at a time - always reachable)')
         jf.pack(fill='x', padx=8, pady=4)
+        ttk.Label(jf, foreground='#996600', wraplength=720, justify='left',
+                  text='Press HOME first (below) — this arm can’t report its '
+                       'servo angles, so jogs are tracked from the Home pose. '
+                       'After Home, each ± moves that servo by the joint step.'
+                  ).pack(anchor='w', padx=8, pady=(6, 2))
         joint_labels = [(1, 'base rotate'), (2, 'shoulder'), (3, 'elbow'),
                         (4, 'wrist pitch'), (5, 'wrist rotate')]
         for jid, hint in joint_labels:
@@ -2419,6 +2424,9 @@ class TunerUI:
                        command=lambda j=jid: self._on_teach_joint(j, -1)).pack(side='left', padx=2)
             ttk.Button(r, text='+', width=4,
                        command=lambda j=jid: self._on_teach_joint(j, +1)).pack(side='left', padx=2)
+        ttk.Button(jf, text='HOME (sync joints + go to home pose)',
+                   command=lambda: self._teach_send({'action': 'home'})
+                   ).pack(anchor='w', padx=8, pady=(4, 6))
 
         # ---- world XYZ jog ----------------------------------------------
         wf = ttk.LabelFrame(parent, text='World jog (straight-line X/Y/Z - uses IK)')
