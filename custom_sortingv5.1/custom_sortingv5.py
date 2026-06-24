@@ -1231,19 +1231,24 @@ class ObjectSortingNodeV5(Node):
             except Exception as e:
                 _stage('init', f'depth subscription failed for {topic}', exc=e)
         # Depth camera_info subscription so the plane fit has fx/fy/cx/cy.
-        # Round 17 PP.3: the Orbbec driver publishes camera_info with
-        # TRANSIENT_LOCAL durability (one-shot latched). A vanilla
-        # depth=1 subscription with default volatile QoS misses it,
-        # leaving _depth_cam_info None forever -> plane refit fails with
-        # "no_depth_caminfo_yet". Use TRANSIENT_LOCAL+RELIABLE so the
-        # latched message lands when we subscribe.
+        # v5.1 FIX: use VOLATILE (default) QoS, NOT TRANSIENT_LOCAL. The vendor
+        # (shape_recognition.py:203 - message_filters.Subscriber, default QoS =
+        # RELIABLE/VOLATILE) receives this exact topic fine on this hardware,
+        # which proves the publisher is VOLATILE. A TRANSIENT_LOCAL *subscriber*
+        # is QoS-INCOMPATIBLE with a VOLATILE publisher and receives NOTHING -
+        # that was the real cause of the persistent "no_depth_caminfo_yet" (the
+        # Round 17 PP.3 change assumed a latched/TRANSIENT_LOCAL publisher, which
+        # the hardware contradicts). VOLATILE is compatible with BOTH a VOLATILE
+        # and a TRANSIENT_LOCAL publisher, and camera_info is republished every
+        # frame, so nothing is missed.
         try:
             from rclpy.qos import (QoSProfile, ReliabilityPolicy,
-                                   DurabilityPolicy)
+                                   DurabilityPolicy, HistoryPolicy)
             qos_caminfo = QoSProfile(
-                depth=1,
+                depth=10,
+                history=HistoryPolicy.KEEP_LAST,
                 reliability=ReliabilityPolicy.RELIABLE,
-                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                durability=DurabilityPolicy.VOLATILE,
             )
             self.create_subscription(CameraInfo, '/depth_cam/depth/camera_info',
                                      self._depth_cam_info_callback,
@@ -3152,6 +3157,10 @@ class ObjectSortingNodeV5(Node):
                                 self.count_still = 0
                                 self.count_move = 0
                         for t in target_info:
+                            # v5.1 FIX (multi-instance lock): track whether THIS
+                            # iteration is the already-locked instance, so we can
+                            # stop right after it (see the break below).
+                            locked_this_t = False
                             if not self.target_labels.get(t[0], False):
                                 continue
                             if self.target is not None:
@@ -3162,6 +3171,7 @@ class ObjectSortingNodeV5(Node):
                                     continue
                                 target_miss = False
                                 self.target = t
+                                locked_this_t = True
                             if self.camera_type == 'USB_CAM':
                                 x, y = distortion_inverse_map.undistorted_to_distorted_pixel(
                                     t[2][0], t[2][1], self.intrinsic, self.distortion)
@@ -3227,6 +3237,16 @@ class ObjectSortingNodeV5(Node):
                             # pixel so the next frame's label-only match can
                             # pick the closest instance.
                             self._last_target_pixel = (t[2][0], t[2][1])
+                            # v5.1 FIX (multi-instance lock): once we've handled
+                            # the locked instance (reordered to be first = the one
+                            # nearest last frame's pixel), STOP. Previously the
+                            # loop ran on to a SECOND same-label instance (e.g. the
+                            # other red cube), overwrote self.target + last_position
+                            # with it, and the ~0.15 m jump reset count_still every
+                            # frame -> the still threshold was never reached and it
+                            # never fired. Track exactly ONE instance per frame.
+                            if locked_this_t:
+                                break
                         if target_miss:
                             self.target_miss_count += 1
                         if self.target_miss_count > 10:
