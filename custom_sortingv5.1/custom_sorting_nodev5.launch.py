@@ -177,9 +177,13 @@ def launch_setup(context):
         else:
             print(f'[launch] WARNING: profile file {candidate} not found, ignoring')
 
+    # v5.1 side-by-side: distinct entry-point names (custom_sortingv51 /
+    # tune_uiv51) so v5.1 deploys ALONGSIDE v5 without overwriting v5's ros2
+    # symlinks or console_scripts. install.sh registers these against this
+    # folder's code; v5 keeps its own custom_sortingv5 / tune_uiv5 entries.
     custom_sorting_v4_node = Node(
         package='app',
-        executable='custom_sortingv5',
+        executable='custom_sortingv51',
         output='screen',
         parameters=extra_params + [{
             'start': start,
@@ -197,7 +201,7 @@ def launch_setup(context):
 
     tune_ui_node = Node(
         package='app',
-        executable='tune_uiv5',
+        executable='tune_uiv51',
         output='screen',
         condition=IfCondition(auto_tune_ui),
     )
@@ -234,7 +238,7 @@ def launch_setup(context):
     # That way the user never needs to look up an IP, AND if they close
     # the GUI window they still have a working view in the browser.
     image_view_topic_value = image_view_topic.perform(context).strip()
-    chain_script = os.path.expanduser('~/jetarm_v5/image_view_chain.sh')
+    chain_script = os.path.expanduser('~/jetarm_v5_1/image_view_chain.sh')
     chain_present = os.path.exists(chain_script)
     if not chain_present:
         print(f'[launch] WARNING: {chain_script} not present - '

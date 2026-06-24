@@ -25,7 +25,7 @@
 #   7. Wait for the actual camera topic `/depth_cam/rgb/image_raw` to
 #      appear (this is what bringup's TimerAction gates - so we have to
 #      wait at LEAST 18s after the service comes back).
-#   8. ros2 launch app custom_sorting_nodev5.launch.py [args...]
+#   8. ros2 launch app custom_sorting_nodev51.launch.py [args...]
 #
 # Anything that goes wrong is printed in a [stage] format so you can
 # see exactly which step failed. Terminal stays open on error.
@@ -590,8 +590,8 @@ sudo -n jetson_clocks 2>/dev/null \
     || err perf "jetson_clocks failed (add sudoers rule or run manually)"
 ok perf "clocks pinned (or skipped if sudoers not set - add rule to avoid prompt)"
 
-stage launcher "ros2 launch app custom_sorting_nodev5.launch.py ${LAUNCH_ARGS[*]}"
-ros2 launch app custom_sorting_nodev5.launch.py "${LAUNCH_ARGS[@]}"
+stage launcher "ros2 launch app custom_sorting_nodev51.launch.py ${LAUNCH_ARGS[*]}"
+ros2 launch app custom_sorting_nodev51.launch.py "${LAUNCH_ARGS[@]}"
 RC=$?
 
 if [ $RC -ne 0 ]; then

@@ -49,7 +49,12 @@ BRANCH="${BRANCH:-main}"
 SRC_DIR="${SRC_DIR:-$HOME/jetarm_v5_src}"
 WS_DIR="${WS_DIR:-$HOME/ros2_ws}"
 PROFILES_DIR="${PROFILES_DIR:-$HOME/jetarm_v5_profiles}"
-LAUNCHER_DIR="${LAUNCHER_DIR:-$HOME/jetarm_v5}"
+# v5.1 side-by-side: its OWN launcher dir so installing v5.1 never touches v5's
+# ~/jetarm_v5/ (icon, launch scripts). v5 and v5.1 each get a separate one-click
+# icon; only one stack is launched at a time (a single arm). Shared, version-
+# agnostic dirs (~/jetarm_v5_profiles, ~/jetarm_v5/logs) are intentionally NOT
+# duplicated.
+LAUNCHER_DIR="${LAUNCHER_DIR:-$HOME/jetarm_v5_1}"
 APP_PKG="${APP_PKG:-$WS_DIR/src/app}"
 DO_SUDOERS=0
 DO_BUILD=1
@@ -452,15 +457,19 @@ link_file() {
 }
 
 stage "symlinking v4 sources into $APP_PKG/app/"
-link_file "$V4/custom_sortingv5.py" "$APP_PKG/app/custom_sortingv5.py"
-link_file "$V4/tune_uiv5.py"        "$APP_PKG/app/tune_uiv5.py"
+# v5.1 side-by-side: deploy under DISTINCT installed names (custom_sortingv51 /
+# tune_uiv51) so these symlinks + the entry_points below do NOT overwrite v5's.
+# The source files keep their v5 names; only the installed link name + the
+# console_scripts entry differ. The launch file references the v51 executables.
+link_file "$V4/custom_sortingv5.py" "$APP_PKG/app/custom_sortingv51.py"
+link_file "$V4/tune_uiv5.py"        "$APP_PKG/app/tune_uiv51.py"
 
 # --- 3. Symlink launch file ---------------------------------------------
 
 stage "symlinking launch file into $APP_PKG/launch/"
 mkdir -p "$APP_PKG/launch"
 link_file "$V4/custom_sorting_nodev5.launch.py" \
-          "$APP_PKG/launch/custom_sorting_nodev5.launch.py"
+          "$APP_PKG/launch/custom_sorting_nodev51.launch.py"
 
 # --- 4. Patch setup.py (idempotent) --------------------------------------
 
@@ -493,8 +502,11 @@ PY
 }
 
 stage "patching $SETUP_PY entry_points"
-patch_entry "custom_sortingv5 = app.custom_sortingv5:main"
-patch_entry "tune_uiv5 = app.tune_uiv5:main"
+# v5.1 side-by-side: register v51 entry points pointing at the v51 symlinks
+# above. v5's own installer registers custom_sortingv5 / tune_uiv5; both sets
+# coexist in setup.py so either icon launches its own version.
+patch_entry "custom_sortingv51 = app.custom_sortingv51:main"
+patch_entry "tune_uiv51 = app.tune_uiv51:main"
 
 # --- 5. Profiles ---------------------------------------------------------
 
@@ -578,8 +590,8 @@ fi
 
 stage "installing desktop shortcut"
 mkdir -p "$HOME/.local/share/applications" "$HOME/Desktop"
-DESKTOP_FILE="$HOME/Desktop/jetarm-sort-v5.desktop"
-APP_FILE="$HOME/.local/share/applications/jetarm-sort-v5.desktop"
+DESKTOP_FILE="$HOME/Desktop/jetarm-sort-v5.1.desktop"
+APP_FILE="$HOME/.local/share/applications/jetarm-sort-v5.1.desktop"
 
 # Pick a terminal that will load ~/.bashrc (which is what prints the
 # Hiwonder banner / sets CAMERA_TYPE etc.). gnome-terminal -- bash -i -c
@@ -589,7 +601,7 @@ APP_FILE="$HOME/.local/share/applications/jetarm-sort-v5.desktop"
 # After the launcher exits we drop into an interactive shell so the user
 # can read the log / re-run things.
 if command -v gnome-terminal >/dev/null 2>&1; then
-    EXEC_LINE="gnome-terminal --title='JetArm Sort v5' -- bash -i -c '\"$LAUNCHER_DIR/launch_v5.sh\"; exec bash -i'"
+    EXEC_LINE="gnome-terminal --title='JetArm Sort v5.1' -- bash -i -c '\"$LAUNCHER_DIR/launch_v5.sh\"; exec bash -i'"
     USE_TERMINAL_FIELD="false"
 elif command -v x-terminal-emulator >/dev/null 2>&1; then
     EXEC_LINE="x-terminal-emulator -e bash -i -c '\"$LAUNCHER_DIR/launch_v5.sh\"; exec bash -i'"
@@ -604,8 +616,8 @@ cat > "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=JetArm Sort v5
-Comment=Launch the v5 custom sorting stack with hot-swap models and live tuner
+Name=JetArm Sort v5.1
+Comment=Launch the v5.1 custom sorting stack with hot-swap models and live tuner
 Exec=$EXEC_LINE
 Terminal=$USE_TERMINAL_FIELD
 Icon=utilities-terminal
@@ -679,11 +691,11 @@ $(ok 'INSTALL COMPLETE')
 ================================================================
 Symlinks installed (no rebuild needed for Python edits):
 
-  $APP_PKG/app/custom_sortingv5.py
+  $APP_PKG/app/custom_sortingv51.py
     -> $V4/custom_sortingv5.py
-  $APP_PKG/app/tune_uiv5.py
+  $APP_PKG/app/tune_uiv51.py
     -> $V4/tune_uiv5.py
-  $APP_PKG/launch/custom_sorting_nodev5.launch.py
+  $APP_PKG/launch/custom_sorting_nodev51.launch.py
     -> $V4/custom_sorting_nodev5.launch.py
 
 Workspace built with --symlink-install, so install/ also points back at
@@ -703,7 +715,7 @@ Other files installed:
 
 To launch:
 
-  # one-click: double-click the "JetArm Sort v5" icon on your desktop
+  # one-click: double-click the "JetArm Sort v5.1" icon on your desktop
   # (right-click -> Allow Launching the first time on GNOME)
   #
   # or from a terminal:
@@ -715,8 +727,8 @@ To launch:
   # boot into a preset profile:
   $LAUNCHER_DIR/launch_v5.sh
 
-If the camera doesn't come up, see:
-  custom_sortingv5/QUICK_SETUP_HIWONDER.md  in $SRC_DIR
+If the camera doesn't come up, or to verify v5.1 on the arm, see:
+  custom_sortingv5.1/ON_ARM_TEST_CHECKLIST.md  in $SRC_DIR
 
 ================================================================
 EOF

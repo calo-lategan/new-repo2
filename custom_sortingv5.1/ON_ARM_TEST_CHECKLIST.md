@@ -9,21 +9,25 @@ Logs: `~/jetarm_v5/logs/v5_session_*.log` (grep tags in brackets, e.g. `[v4][ini
 
 ---
 
-## 0. Deploy v5.1 as the active version
-v5.1's `install.sh` now symlinks **v5.1's** code/launchers and seeds its
-profiles (its `V4` dir was fixed to point at `custom_sortingv5.1/`). You MUST
-re-run install.sh once so the ros2_ws symlinks and `~/jetarm_v5_profiles` point
-at v5.1 — a plain `reset --hard` + relaunch would keep running v5:
+## 0. Deploy v5.1 side-by-side with v5
+v5.1 installs ALONGSIDE v5 — a separate **"JetArm Sort v5.1"** icon, its own
+`~/jetarm_v5_1/` launcher, and distinct ROS entry points (`custom_sortingv51` /
+`tune_uiv51`). v5's icon and deployment are left intact as a fallback.
+install.sh adds new `setup.py` entries, so it triggers a colcon build (a few
+minutes):
 ```bash
 git -C ~/jetarm_v5_src fetch origin && git -C ~/jetarm_v5_src reset --hard origin/main
 bash ~/jetarm_v5_src/custom_sortingv5.1/install.sh
-~/jetarm_v5/launch_v5.sh
+~/jetarm_v5_1/launch_v5.sh      # or double-click the new "JetArm Sort v5.1" icon
 ```
-- [ ] `install.sh` logs `installed …/slow.yaml`, `…/medium.yaml`, `…/fast.yaml`
-      (plus `default.yaml`) into `~/jetarm_v5_profiles/`.
-- [ ] `ls -l ~/ros2_ws/src/app/app/custom_sortingv5.py` resolves into
-      **custom_sortingv5.1/** (confirms v5.1 is what actually runs).
-- [ ] Node, tuner UI, and the vendor `calibration` + `lab_manager` nodes all start.
+- [ ] A new **"JetArm Sort v5.1"** desktop icon appears, and the old **"JetArm
+      Sort v5"** icon is still present (still launches v5).
+- [ ] `install.sh` logs `installed …/{slow,medium,fast}.yaml` into
+      `~/jetarm_v5_profiles/` and seeds launchers into `~/jetarm_v5_1/`.
+- [ ] `ls -l ~/ros2_ws/src/app/app/custom_sortingv51.py` resolves into
+      **custom_sortingv5.1/** (and v5's `custom_sortingv5.py` symlink is untouched).
+- [ ] Launch v5.1; node, tuner UI, and the vendor `calibration` + `lab_manager`
+      nodes all start.
 - [ ] `ros2 node list` shows **`/lab_manager`** (NOT `/lab_config_manager`).  ← **A1**
 
 ## 1. Settings sanity (do this before blaming anything else)
