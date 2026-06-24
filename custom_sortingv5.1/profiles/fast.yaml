@@ -1,0 +1,21 @@
+# v5.1 FAST speed preset (partial profile).
+# Loaded via the node's load_profile service from the "Fast" button in the
+# tuner UI. Contains ONLY the speed-vs-accuracy knobs - engine, calibration,
+# depth and place-zone settings are deliberately omitted so loading a preset
+# never disturbs them. Values stay inside each tunable's declared range.
+# Standard ros2-params layout so it can also be passed via --params-file.
+/**:
+  ros__parameters:
+    motion_speed: 2.1
+    aggression: 1.7
+    hover_height: 0.04
+    approach_dwell: 0.0
+    gripper_close_duration: 0.25
+    gripper_settle: 0.3
+    grab_depth: 0.015
+    inference_max_hz: 20.0
+    count_still_threshold: 5
+    count_move_threshold: 5
+    lock_distance_thresh: 0.008
+    detection_avg_frames: 1
+    parallel_base_motion: true

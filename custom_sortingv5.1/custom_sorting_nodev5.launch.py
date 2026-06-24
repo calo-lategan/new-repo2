@@ -1,0 +1,301 @@
+import os
+from launch_ros.actions import Node
+from launch import LaunchDescription, LaunchService
+from launch.substitutions import LaunchConfiguration
+from ament_index_python.packages import get_package_share_directory
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.actions import (
+    IncludeLaunchDescription, DeclareLaunchArgument, OpaqueFunction,
+    ExecuteProcess, TimerAction,
+)
+from launch.conditions import IfCondition
+
+
+def launch_setup(context):
+    compiled = os.environ.get('need_compile', 'False')
+    # Boots paused so the user has to press START in the tuner UI.
+    start = LaunchConfiguration('start', default='false')
+    start_arg = DeclareLaunchArgument('start', default_value=start)
+    auto_tune_ui = LaunchConfiguration('tune_ui', default='true')
+    auto_tune_ui_arg = DeclareLaunchArgument(
+        'tune_ui', default_value=auto_tune_ui,
+        description='Spawn the v4 live tuner UI alongside the node.')
+    display = LaunchConfiguration('display', default='true')
+    display_arg = DeclareLaunchArgument('display', default_value=display)
+    broadcast = LaunchConfiguration('broadcast', default='false')
+    broadcast_arg = DeclareLaunchArgument('broadcast', default_value=broadcast)
+    # NOTE: this is only an INITIAL FALLBACK engine, used when no persisted
+    # config exists. At boot the node loads default.yaml then merges yolo.yaml
+    # on top (see _apply_default_profile_seed in custom_sortingv5.py) and those
+    # win over this launch arg, so an engine chosen + saved from the Detection
+    # tab is what actually loads on the next launch.
+    engine_path = LaunchConfiguration(
+        'engine_path',
+        default='/home/ubuntu/third_party_ros2/data/best_scaff2.engine')
+    engine_path_arg = DeclareLaunchArgument(
+        'engine_path', default_value=engine_path,
+        description='Initial fallback YOLO engine; default.yaml/yolo.yaml win. '
+                    'Hot-swap at runtime via the Detection tab.')
+
+    # Optional named profile to load on launch (looks in ~/jetarm_v5_profiles).
+    # The default profile (default.yaml) is auto-loaded by the node itself if
+    # present, so this arg is mainly for "boot into 'fast'", "boot into 'slow'".
+    profile = LaunchConfiguration('profile', default='')
+    profile_arg = DeclareLaunchArgument(
+        'profile', default_value=profile,
+        description='Profile name to load on startup (empty = default.yaml only).')
+
+    # Per-tunable shortcuts so you can override at the CLI without writing YAML.
+    motion_speed = LaunchConfiguration('motion_speed', default='1.5')
+    motion_speed_arg = DeclareLaunchArgument('motion_speed', default_value=motion_speed)
+    aggression = LaunchConfiguration('aggression', default='1.3')
+    aggression_arg = DeclareLaunchArgument('aggression', default_value=aggression)
+    servo_feedback = LaunchConfiguration('servo_feedback_enabled', default='true')
+    servo_feedback_arg = DeclareLaunchArgument(
+        'servo_feedback_enabled', default_value=servo_feedback)
+    vision_confirm = LaunchConfiguration('vision_confirm_pick', default='true')
+    vision_confirm_arg = DeclareLaunchArgument(
+        'vision_confirm_pick', default_value=vision_confirm)
+    self_calibrate = LaunchConfiguration('startup_self_calibrate', default='true')
+    self_calibrate_arg = DeclareLaunchArgument(
+        'startup_self_calibrate', default_value=self_calibrate)
+    debug = LaunchConfiguration('debug', default='false')
+    debug_arg = DeclareLaunchArgument(
+        'debug', default_value=debug,
+        description='Verbose stage logging from custom_sortingv5 + tune_uiv5.')
+
+    # Auto-open a desktop window showing the annotated camera feed. Default
+    # is on. Falls back gracefully if neither rqt_image_view nor image_view
+    # are available.
+    # Auto-open the image_view_chain (rqt -> image_view -> browser) at
+    # launch. The tuner UI buttons swap/replace the viewer after launch.
+    # Default is read from JETARM_V5_IMAGE_VIEW env var (set in
+    # ~/.jetarm_v5.env for persistence). Pass `image_view:=false`
+    # on the command line to override for one run.
+    _env_iv = os.environ.get('JETARM_V5_IMAGE_VIEW', 'true').strip().lower()
+    _default_iv = 'false' if _env_iv in ('false', '0', 'no', 'off') else 'true'
+    open_image_view = LaunchConfiguration('image_view', default=_default_iv)
+    open_image_view_arg = DeclareLaunchArgument(
+        'image_view', default_value=open_image_view,
+        description='Auto-open the image_view_chain on launch. Default '
+                    'from JETARM_V5_IMAGE_VIEW env (true). Pass '
+                    'image_view:=false to override.')
+    image_view_topic = LaunchConfiguration(
+        'image_view_topic', default='/custom_sortingv5/image_result')
+    image_view_topic_arg = DeclareLaunchArgument(
+        'image_view_topic', default_value=image_view_topic,
+        description='Topic to show in the auto-opened image viewer.')
+
+    # We INCLUDE sdk_launch and depth_camera_launch so our launch is
+    # self-sufficient: even if Hiwonder's start_app_node.service hasn't
+    # successfully brought everything up yet (or its sub-launches died),
+    # our launch will bring its own copies of the SDK + depth camera.
+    # bringup also launches these but both share the same package paths,
+    # and the ament-index resolution for orbbec_camera works AS LONG AS
+    # the service is running (which the launcher ensures via
+    # `systemctl start`). When bringup also tries to launch them, one
+    # side wins and the other quietly fails - which is what the working
+    # earlier versions relied on. Don't remove these includes again.
+    if compiled == 'True':
+        sdk_package_path = get_package_share_directory('sdk')
+        peripherals_package_path = get_package_share_directory('peripherals')
+        app_package_path = get_package_share_directory('app')
+    else:
+        sdk_package_path = '/home/ubuntu/ros2_ws/src/driver/sdk'
+        peripherals_package_path = '/home/ubuntu/ros2_ws/src/peripherals'
+        app_package_path = '/home/ubuntu/ros2_ws/src/app'
+    # v5.1 (C2 - camera-steal interlock): allow this launch to SKIP bringing up
+    # the Orbbec depth_camera. Default true (v5 owns the camera, the normal
+    # path). launch_v5.sh passes bringup_depth_camera:=false ONLY when it
+    # restarts the factory service (FORCE_SERVICE_RESTART), because that
+    # service's bringup opens the Orbbec itself - bringing it up here too would
+    # open the device twice and kill it. Gating the include makes the two paths
+    # mutually exclusive instead of relying on a "one side quietly loses" race.
+    bringup_depth_camera = LaunchConfiguration('bringup_depth_camera',
+                                               default='true')
+    bringup_depth_camera_arg = DeclareLaunchArgument(
+        'bringup_depth_camera', default_value=bringup_depth_camera,
+        description='Bring up the Orbbec depth_camera from this launch (true). '
+                    'Set false when the factory service already owns the '
+                    'camera, to avoid a double-open that steals the device.')
+    depth_camera_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(peripherals_package_path, 'launch/depth_camera.launch.py')),
+        condition=IfCondition(bringup_depth_camera),
+    )
+    sdk_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(sdk_package_path, 'launch/jetarm_sdk.launch.py')),
+    )
+    # v5: bring up the vendor AprilTag calibration node alongside us. It
+    # sits idle (services only fire on /calibration/enter+start) until the
+    # tuner UI's CALIBRATE button triggers it via the node's
+    # ~/run_calibration orchestrator. It writes the same transform.yaml the
+    # sorting node reads in get_roi(), so calibration == workspace accuracy.
+    calibration_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(app_package_path, 'launch/calibration_node.launch.py')),
+    )
+
+    # Round 15: also bring up the vendor LAB color-threshold manager so the
+    # Color tab in tune_uiv5 can talk to /lab_manager/* directly. It loads
+    # lab_config.yaml at boot, exposes 7 services + a mono8 mask preview.
+    #
+    # v5.1 FIX (A1 - critical): the vendor lab_manager.launch.py starts the
+    # node WITHOUT a name= remap, so it keeps its code-defined name
+    # 'lab_config_manager' (see LabConfigManagerNode('lab_config_manager') in
+    # lab_manager.py main()). Its private (~/) services therefore resolve to
+    # /lab_config_manager/enter, /get_range, ... and the mask preview to
+    # /lab_config_manager/image_result. But the Color tab (tune_uiv5.py) drives
+    # /lab_manager/* and subscribes to /lab_manager/image_result, so EVERY
+    # color-calibration call silently timed out and the mask never rendered.
+    # Define the node directly here with name='lab_manager' so the runtime
+    # service/topic names match the client. lab_config.yaml uses the /** param
+    # wildcard, so the rename does not affect parameter loading.
+    lab_manager_node = Node(
+        package='app',
+        executable='lab_manager',
+        name='lab_manager',
+        output='screen',
+        parameters=[os.path.join(app_package_path, 'config/lab_config.yaml')],
+    )
+
+    # --- Resolve the optional named profile to a YAML file path -----------
+    # If the user passed `profile:=fast`, look for ~/jetarm_v5_profiles/fast.yaml
+    # and pass it via parameters=[...]. The node also auto-loads default.yaml
+    # at startup independently, so the precedence ends up:
+    #   hardcoded defaults < default.yaml < profile.yaml < CLI overrides.
+    extra_params = []
+    profile_value = profile.perform(context).strip()
+    if profile_value:
+        candidate = os.path.expanduser(
+            f'~/jetarm_v5_profiles/{profile_value}.yaml'
+            if not profile_value.endswith('.yaml')
+            else f'~/jetarm_v5_profiles/{profile_value}')
+        if os.path.isfile(candidate):
+            extra_params.append(candidate)
+        else:
+            print(f'[launch] WARNING: profile file {candidate} not found, ignoring')
+
+    custom_sorting_v4_node = Node(
+        package='app',
+        executable='custom_sortingv5',
+        output='screen',
+        parameters=extra_params + [{
+            'start': start,
+            'display': display,
+            'broadcast': broadcast,
+            'engine_path': engine_path,
+            'motion_speed': motion_speed,
+            'aggression': aggression,
+            'servo_feedback_enabled': servo_feedback,
+            'vision_confirm_pick': vision_confirm,
+            'startup_self_calibrate': self_calibrate,
+            'debug': debug,
+        }]
+    )
+
+    tune_ui_node = Node(
+        package='app',
+        executable='tune_uiv5',
+        output='screen',
+        condition=IfCondition(auto_tune_ui),
+    )
+
+    # web_video_server: serves http://<host>:8080/stream?topic=... for the
+    # browser viewer. Was previously brought up by Hiwonder's factory
+    # start_app_node.service, which we now permanently disable on launch
+    # - so we have to start it ourselves.
+    web_video_server_node = Node(
+        package='web_video_server',
+        executable='web_video_server',
+        name='web_video_server',
+        output='log',
+        parameters=[{
+            'port': 8080,
+            'default_stream_type': 'mjpeg',
+            'verbose': False,
+            # default_transport=raw: same reason as the rqt/image_view
+            # spawn. Don't let web_video_server negotiate the broken
+            # compressed/theora plugins against depth_cam's publisher.
+            # Harmless on web_video_server versions that ignore it.
+            'default_transport': 'raw',
+        }],
+    )
+
+    # --- Auto-opened desktop image viewer (with browser fallback) ---------
+    # Delegate to the image_view_chain.sh wrapper which:
+    #   1. Tries rqt_image_view <topic>
+    #   2. Falls back to `ros2 run image_view image_view`
+    #   3. When the GUI viewer exits (closed by user OR failed to spawn),
+    #      auto-opens the system browser at
+    #         http://<jetson-ip>:8080/stream?topic=<topic>
+    #      using hostname -I to figure out the IP.
+    # That way the user never needs to look up an IP, AND if they close
+    # the GUI window they still have a working view in the browser.
+    image_view_topic_value = image_view_topic.perform(context).strip()
+    chain_script = os.path.expanduser('~/jetarm_v5/image_view_chain.sh')
+    chain_present = os.path.exists(chain_script)
+    if not chain_present:
+        print(f'[launch] WARNING: {chain_script} not present - '
+              f'image viewer auto-open disabled. Re-run install.sh or '
+              f'see INSTALL.md.')
+
+    image_viewer_action = None
+    if chain_present:
+        # Delay 6s so the node has booted, the YOLO engine has warmed up,
+        # and the ~/image_result topic is being published. Otherwise the
+        # viewer opens a window that just says "no image".
+        # 8s (was 6s) so web_video_server has time to bind :8080 before
+        # the chain script's probe_web_server hits the URL.
+        image_viewer_action = TimerAction(
+            period=8.0,
+            actions=[
+                ExecuteProcess(
+                    cmd=[chain_script, image_view_topic_value],
+                    output='screen',
+                    condition=IfCondition(open_image_view),
+                )
+            ],
+        )
+
+    actions = [
+        start_arg,
+        auto_tune_ui_arg,
+        display_arg,
+        broadcast_arg,
+        engine_path_arg,
+        profile_arg,
+        motion_speed_arg,
+        aggression_arg,
+        servo_feedback_arg,
+        vision_confirm_arg,
+        self_calibrate_arg,
+        debug_arg,
+        open_image_view_arg,
+        image_view_topic_arg,
+        bringup_depth_camera_arg,
+        sdk_launch,
+        depth_camera_launch,
+        calibration_launch,
+        lab_manager_node,
+        custom_sorting_v4_node,
+        tune_ui_node,
+        web_video_server_node,
+    ]
+    if image_viewer_action is not None:
+        actions.append(image_viewer_action)
+    return actions
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        OpaqueFunction(function=launch_setup)
+    ])
+
+
+if __name__ == '__main__':
+    ld = generate_launch_description()
+    ls = LaunchService()
+    ls.include_launch_description(ld)
+    ls.run()

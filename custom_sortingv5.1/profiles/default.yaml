@@ -1,0 +1,149 @@
+# Default profile loaded automatically by custom_sortingv5 on startup.
+# install.sh seeds this to ~/jetarm_v5_profiles/default.yaml.
+#
+# This is the single boot source of truth. The tuner UI writes here:
+#   - every tab's "Save & Apply" MERGES that tab's keys into this file
+#   - "SAVE ALL AS DEFAULT" (top bar) rewrites every key from current state
+# At boot the node loads THIS file only. (The legacy yolo.yaml overlay was
+# removed - it shipped a stale sample that clobbered saved model keys on every
+# relaunch, so yolo.yaml is now ignored at boot.) A model/engine chosen on the
+# Detection tab still persists because "Save & Apply" merges the model keys
+# straight into this file.
+#
+# Format is the standard ROS2 params YAML so it can also be passed to the
+# launch file via parameters=[...] / --params-file.
+#
+# v5: single YOLO model only (no OpenCV/LAB). Model config (engine + YOLO
+# knobs + enabled classes) is managed on the tuner UI Detection tab. Grasp is
+# standard close-to-pulse by default; the force-limited contact-stop is an
+# opt-in BETA (compliance_grasp_enabled) with per-class max strength.
+
+/**:
+  ros__parameters:
+    # ---- Model (YOLO-only) ----
+    engine_path: /home/ubuntu/third_party_ros2/data/best_scaff2.engine
+    # Task hint for ultralytics. 'auto' lets it read engine metadata (the
+    # normal path). Set to 'obb' for engines that were built without the task
+    # metadata field (ultralytics will warn "Unable to automatically guess
+    # model task" otherwise). Other valid values: detect | segment | pose | classify.
+    engine_task: auto
+    # Production sorting baseline: decently-high confidence, few detections,
+    # moderate NMS (items don't overlap), inference rate capped for efficiency.
+    yolo_conf_thresh: 0.60
+    yolo_iou_thresh: 0.45
+    yolo_max_det: 5
+    inference_max_hz: 15.0
+    # JSON list of class IDs to keep ('[]' = all classes).
+    yolo_enabled_classes: '[]'
+
+    # ---- Detection lock gating ----
+    # Round 17 NN.3: vendor-exact thresholds. Round 16 loosened these as a
+    # workaround for the index-drift bug; NN.1 fixes the bug structurally
+    # (lock on label, not on instance index), so we restore vendor parity.
+    lock_distance_thresh: 0.005
+    count_still_threshold: 10
+    count_move_threshold: 10
+    detection_avg_frames: 1
+
+    # ---- Manual offsets (calibration-free nudge; 0 = no change) ----
+    # Pixel-space: move the overlay boxes onto the objects (also corrects
+    # the pixel fed to the world projection used for picking).
+    detection_offset_x: 0
+    detection_offset_y: 0
+    # World-space (metres): shift where the arm actually lands. Sliders live
+    # on the Calibrate tab alongside Workspace scale.
+    grip_offset_x: 0.0
+    grip_offset_y: 0.0
+    # Workspace scale (Z): how big/small the world-map is. 1.0 = no change.
+    workspace_scale: 1.0
+    # Physical workspace dimensions (metres). The yellow overlay rectangle is
+    # drawn at this world size around the AprilTag centre so you can size it
+    # to match your physical mat.
+    workspace_size_x: 0.30
+    workspace_size_y: 0.30
+    # Calibration overlay state: off | manual | flash. Set by the UI and the
+    # vendor calibration flow; safe to leave 'off' as the boot default.
+    calibrate_overlay_mode: 'off'
+    calibrate_flash_secs: 6.0
+
+    # ---- Depth integration (Round 11) ----
+    # Use measured per-object depth as the projection height so the arm
+    # descends to the actual top of each object. Falls back to the table
+    # plane (0.03 m) when depth is unavailable.
+    use_depth_for_z: true
+    depth_window_px: 5
+    # Sanity gate: drop detections whose median depth is outside [min, max]
+    # (filters hands above and reflections below the workspace plane).
+    # Once a table plane is fit (Round 12 Y2), the gate becomes
+    # height-above-plane and depth_min_z_m is largely unused.
+    depth_min_z_m: -0.02
+    depth_max_z_m: 0.20
+    # ---- Round 12 (calibration overhaul) ----
+    # Paint a JET-colormapped depth heatmap inside the workspace overlay
+    # so you can SEE whether depth is reading the cubes and is aligned
+    # with the RGB image. Cheap; only when overlay is on.
+    overlay_depth_view: false
+    # ---- Round 14 AA (LAB color calibration - vendor lab_manager parity) ----
+    # No tunables here - LAB ranges live in their own lab_config.yaml
+    # (vendor schema) so vendor sorting apps read the same file.
+    # The Color tab in the UI drives /custom_sortingv5/lab_* services
+    # to live-edit / stash / save those ranges.
+
+    # ---- Grasp orientation ----
+    # Prefer clamping on the SHORT OBB axis (narrow waist) for elongated
+    # objects; vendor min-yaw for near-square objects.
+    grasp_prefer_short_axis: true
+    grasp_short_axis_min_ratio: 0.10
+    # v5.1 (B4): degrees added to the OBB angle to correct a 90/180-deg
+    # physical gripper-mounting offset (0 = no change). ultralytics OBB makes
+    # `w` the long side and r its angle, so the short-axis clamp is correct in
+    # software; set this on the arm only if the jaws grab the wrong axis.
+    grasp_yaw_offset_deg: 0
+    # v5.1 (A2): fail the pick instead of placing a possibly-empty gripper when
+    # a compliance grasp can't confirm contact. Set false ONLY if this arm's
+    # gripper servo never reports position (else every grasp would fail).
+    grasp_fail_on_no_feedback: true
+    # v5.1 (A4): retreat to a fixed safe transit pose before the horizontal
+    # move to the drop zone (collision safety).
+    safe_transit_enabled: true
+
+    # ---- Motion ----
+    motion_speed: 1.5
+    aggression: 1.3
+    hover_height: 0.06
+    approach_dwell: 0.1
+    parallel_base_motion: true
+
+    # ---- Gripping (standard one-shot: hover->align->descend->close->settle->lift) ----
+    gripper_open_pulse: 200
+    gripper_close_pulse: 540
+    gripper_close_duration: 0.35
+    gripper_settle: 0.5
+    grab_depth: 0.02
+
+    # ---- Force-limited grasp BETA (opt-in; off by default) ----
+    compliance_grasp_enabled: false
+    # Per-class max hold strength (max close pulse). '{}' = use close pulse.
+    grasp_strength: '{}'
+    grasp_step_pulse: 15
+    grasp_step_dwell: 0.10
+    grasp_stall_pulse: 8
+    grasp_timeout: 2.0
+    grasp_max_temp: 65
+    # Test-grip dwell (sec): how long the arm holds the OPEN test pose
+    # before closing, so the operator can place an object between the jaws.
+    test_grip_dwell: 3.0
+
+    # ---- Inference ----
+    inference_warmup: true
+    hot_log_inference_ms: false
+
+    # ---- Per-class place targets (world x,y,z). Edited in the UI Places tab. ----
+    # Round 16 JJ: pre-assigned drop zones for the current engine's classes
+    # so sorting is testable out of the box. scaff -> hazardous-waste zone;
+    # each cube colour -> its own distinct grid spot. Override in Places tab.
+    place_positions: '{"scaff": [-0.076, 0.16, 0.015], "red cube": [0.064, 0.23, 0.015], "green cube": [-0.006, 0.23, 0.015], "light blue cube": [-0.076, 0.23, 0.015], "dark blue cube": [-0.006, 0.16, 0.015]}'
+
+    # Free-form per-class overrides as JSON. Supported keys: motion_speed,
+    # aggression, gripper_close_pulse, gripper_settle, grab_depth, grasp_*.
+    target_overrides: '{}'

@@ -1,0 +1,20 @@
+# v5.1 MEDIUM speed preset (partial profile).
+# Loaded via the node's load_profile service from the "Medium" button. These
+# values match the boot defaults in default.yaml, so "Medium" restores the
+# standard balanced behaviour. Speed-vs-accuracy knobs only - engine,
+# calibration, depth and place zones are untouched.
+/**:
+  ros__parameters:
+    motion_speed: 1.5
+    aggression: 1.3
+    hover_height: 0.06
+    approach_dwell: 0.1
+    gripper_close_duration: 0.35
+    gripper_settle: 0.5
+    grab_depth: 0.02
+    inference_max_hz: 15.0
+    count_still_threshold: 10
+    count_move_threshold: 10
+    lock_distance_thresh: 0.005
+    detection_avg_frames: 1
+    parallel_base_motion: true

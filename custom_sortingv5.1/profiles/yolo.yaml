@@ -1,0 +1,16 @@
+# DEPRECATED reference file - NOT loaded by the node any more.
+#
+# v5 now uses default.yaml as the SINGLE boot source of truth; the model
+# config (engine + YOLO knobs + enabled classes) is saved there by the tuner
+# UI's Detection-tab "Save & Apply" / "Save ALL as default". yolo.yaml is no
+# longer seeded by install.sh nor read at boot - it used to be overlaid on
+# default.yaml and a stale copy would revert your saved knobs on relaunch.
+# Kept only as a schema reference of the model keys.
+
+engine_path: /home/ubuntu/third_party_ros2/data/best_scaff2.engine
+yolo_conf_thresh: 0.60
+yolo_iou_thresh: 0.45
+yolo_max_det: 5
+inference_max_hz: 15.0
+# JSON string: class IDs to keep. '[]' = all classes the model exposes.
+yolo_enabled_classes: '[]'
