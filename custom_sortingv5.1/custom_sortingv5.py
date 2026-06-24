@@ -526,7 +526,7 @@ class MotionController:
             return future.result()
         return None
 
-    def get_servo_state(self, servo_id, fields=('position',)):
+    def get_servo_state(self, servo_id, fields=('position',), timeout=0.6):
         if self.bus_servo_state_client is None:
             return {}
         req = GetBusServoState.Request()
@@ -537,7 +537,7 @@ class MotionController:
         cmd.get_voltage = 1 if 'voltage' in fields else 0
         req.cmd = [cmd]
         future = self.bus_servo_state_client.call_async(req)
-        res = self._await_future(future, timeout=0.6)
+        res = self._await_future(future, timeout=timeout)
         if res is None or not res.state:
             return {}
         s = res.state[0]
@@ -551,29 +551,22 @@ class MotionController:
         return out
 
     def get_arm_servo_positions(self):
-        """v5.1 bin-teach: read arm servos 1..5 in ONE bulk call ->
-        [p1, p2, p3, p4, p5] pulses (or None). The underlying vendor
-        get_bus_servo_state handler loops over request.cmd, so a single
-        request with five GetBusServoCmd entries returns all five states
-        in one round trip (much lower latency than five serial reads)."""
+        """v5.1 bin-teach: read arm servos 1..5 -> [p1, p2, p3, p4, p5] pulses
+        (or None). Uses the PROVEN single-servo get_servo_state path five times
+        in series. (An earlier one-shot bulk request with five GetBusServoCmd
+        entries returned fewer than five states on this driver build, so
+        joint-jog failed with 'cannot read servo positions' even though the
+        service was up.)"""
         if self.bus_servo_state_client is None:
             return None
-        req = GetBusServoState.Request()
-        cmds = []
+        pulses = []
         for sid in (1, 2, 3, 4, 5):
-            c = GetBusServoCmd()
-            c.id = int(sid)
-            c.get_position = 1
-            cmds.append(c)
-        req.cmd = cmds
-        future = self.bus_servo_state_client.call_async(req)
-        res = self._await_future(future, timeout=0.8)
-        if res is None or len(res.state) < 5:
-            return None
-        try:
-            return [int(s.position[0]) for s in res.state]
-        except Exception:
-            return None
+            st = self.get_servo_state(sid, fields=('position',), timeout=1.5)
+            p = st.get('position') if isinstance(st, dict) else None
+            if p is None:
+                return None
+            pulses.append(int(p))
+        return pulses
 
     def set_servo(self, servo_id, pulse, duration):
         """v5.1 bin-teach: command ONE arm servo to an absolute pulse,
@@ -2414,6 +2407,24 @@ class ObjectSortingNodeV5(Node):
             _stage('teach', 'FK world readout failed', exc=e)
         return None
 
+    def _teach_seed_pose(self):
+        """Seed the world-jog pose from where the arm ACTUALLY is (FK of the
+        current servos) so the first jog starts from a reachable point; fall
+        back to the captured observe endpoint, then a safe central guess."""
+        pulses = self.motion.get_arm_servo_positions()
+        if pulses is not None:
+            self._teach_joints = [int(p) for p in pulses]
+            wp = self._fk_world_pose(pulses)
+            if wp is not None:
+                return wp
+        ep = getattr(self.motion, 'last_endpoint_pose', None)
+        if ep is not None:
+            try:
+                return [float(ep[0, 3]), float(ep[1, 3]), float(ep[2, 3])]
+            except Exception:
+                pass
+        return [0.12, 0.0, 0.18]
+
     def teach_srv_callback(self, request, response):
         """v5.1 manual bin-teach + workspace teach. JSON command in data_str:
           {"action":"joint_jog","joint":3,"delta":10}  -> jog ONE servo by pulses
@@ -2524,8 +2535,8 @@ class ObjectSortingNodeV5(Node):
             if action == 'joint_jog':
                 pulses = self.motion.get_arm_servo_positions()
                 if pulses is None:
-                    self._teach_log('joint_jog: cannot read servo positions '
-                                    '(bus_servo/get_state unavailable)')
+                    self._teach_log('joint_jog: no servo-position response for '
+                                    'servos 1-5 (bus_servo/get_state)')
                     return
                 try:
                     jid = int(cmd.get('joint', 0))
@@ -2565,49 +2576,81 @@ class ObjectSortingNodeV5(Node):
                     f'world={[round(v, 3) for v in (self._teach_pose or [])]}')
                 return
 
-            # ---- world XYZ jog / goto / home via IK ----
-            step = abs(float(cmd.get('step', 0.01)))
-            if self._teach_pose is None:
-                self._teach_pose = [0.0, 0.20, 0.10]  # safe central seed
-            delta = [0.0, 0.0, 0.0]
+            # ---- home: command the physical home servo config DIRECTLY -----
+            # (always reachable; IK to a Cartesian guess like [0,0.2,0.1] has
+            # no solution at pitch 80 and was failing every time).
             if action == 'home':
-                self._teach_pose = [0.0, 0.20, 0.10]
-            elif action == 'goto':
+                self.go_home(interrupt=False)
+                pulses = self.motion.get_arm_servo_positions()
+                if pulses is not None:
+                    self._teach_joints = [int(p) for p in pulses]
+                    wp = self._fk_world_pose(pulses)
+                    if wp is not None:
+                        self._teach_pose = wp
+                self._teach_log(
+                    f'home -> joints={self._teach_joints} '
+                    f'world={[round(v, 3) for v in (self._teach_pose or [])]}')
+                return
+
+            # ---- world XYZ jog / goto via IK -------------------------------
+            # Use the DEFAULT pitch range (-180,180) like _do_place (the
+            # (-90,90) grab range was rejecting reachable drop points), and for
+            # goto mirror _do_place's hover-then-descend so teach-goto reaches
+            # exactly what placement reaches.
+            dur = max(0.4, 0.8 * speed / aggression)
+            if action == 'goto':
                 cls = str(cmd.get('class', '')).strip()
                 p = self._resolve_place_position(cls)
-                if p is not None:
-                    self._teach_pose = [float(p[0]), float(p[1]), float(p[2])]
-                else:
+                if p is None:
                     self._teach_log(f'goto: no saved bin for {cls!r} yet')
-            elif action == 'jog':
-                delta = [float(cmd.get('dx', 0.0)) * step,
-                         float(cmd.get('dy', 0.0)) * step,
-                         float(cmd.get('dz', 0.0)) * step]
-                for i in range(3):
-                    self._teach_pose[i] += delta[i]
-            # never let a teach pose drop below the descend safety floor.
-            self._teach_pose[2] = max(float(self.p('min_descend_z_m')),
-                                      self._teach_pose[2])
-            res = self.motion.goto_pose(
-                list(self._teach_pose), 80,
-                duration=max(0.4, 0.8 * speed / aggression),
-                parallel_base=True, pitch_range=(-90.0, 90.0))
-            if res is None:
-                self._teach_log(f'{action} pose '
-                                f'{[round(v, 3) for v in self._teach_pose]} '
-                                f'UNREACHABLE (IK) - not moved')
-                if action == 'jog':  # undo so _teach_pose stays reachable
-                    for i in range(3):
-                        self._teach_pose[i] -= delta[i]
-            else:
-                # res is the final servo-pulse row from the IK solution; mirror
-                # it to the joints readout so the UI shows both representations.
+                    return
+                target = [float(p[0]), float(p[1]), float(p[2])]
+                hover = [target[0], target[1], target[2] + 0.05]
+                if self.motion.goto_pose(hover, 80, duration=dur,
+                                         parallel_base=True) is None:
+                    self._teach_log(f'goto {[round(v, 3) for v in target]} '
+                                    f'hover UNREACHABLE (IK) - not moved')
+                    return
+                res = self.motion.goto_pose(
+                    target, 80, duration=max(0.35, 0.6 * speed / aggression),
+                    parallel_base=False)
+                if res is None:
+                    self._teach_pose = hover
+                    self._teach_log(f'goto {[round(v, 3) for v in target]} '
+                                    f'descend UNREACHABLE (IK) - left at hover')
+                    return
+                self._teach_pose = target
                 try:
                     self._teach_joints = [int(round(v)) for v in res]
                 except Exception:
                     pass
-                self._teach_log(f'{action} -> '
-                                f'{[round(v, 3) for v in self._teach_pose]}')
+                self._teach_log(f'goto -> {[round(v, 3) for v in target]}')
+                return
+
+            # action == 'jog'
+            if self._teach_pose is None:
+                self._teach_pose = self._teach_seed_pose()
+            step = abs(float(cmd.get('step', 0.01)))
+            delta = [float(cmd.get('dx', 0.0)) * step,
+                     float(cmd.get('dy', 0.0)) * step,
+                     float(cmd.get('dz', 0.0)) * step]
+            for i in range(3):
+                self._teach_pose[i] += delta[i]
+            self._teach_pose[2] = max(float(self.p('min_descend_z_m')),
+                                      self._teach_pose[2])
+            res = self.motion.goto_pose(list(self._teach_pose), 80,
+                                        duration=dur, parallel_base=True)
+            if res is None:
+                self._teach_log(f'jog {[round(v, 3) for v in self._teach_pose]} '
+                                f'UNREACHABLE (IK) - not moved')
+                for i in range(3):
+                    self._teach_pose[i] -= delta[i]
+            else:
+                try:
+                    self._teach_joints = [int(round(v)) for v in res]
+                except Exception:
+                    pass
+                self._teach_log(f'jog -> {[round(v, 3) for v in self._teach_pose]}')
         except Exception as e:
             self._teach_log(f'{action} failed: {type(e).__name__}')
             _stage('teach', 'move failed', exc=e)
