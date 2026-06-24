@@ -1207,6 +1207,16 @@ class ObjectSortingNodeV5(Node):
         self._latest_depth = None
         self._latest_depth_ts = 0.0
         self._depth_topic = ''
+        # v5.1 FIX (depth alignment): only use the depth-world path when the
+        # depth stream is COLOUR-ALIGNED to the RGB frame. This Orbbec only
+        # publishes RAW depth (640x400) on a different FOV than the RGB
+        # (640x480), and _depth_at samples depth at the RGB pixel - so on the
+        # raw stream the depth value is for the WRONG physical point, which
+        # corrupts the depth-derived world position (observed as X~0.30 m and
+        # negative Z). When depth is not aligned we fall back to the legacy
+        # AprilTag homography (correct for this fixed camera). Only the
+        # /depth_cam/depth_to_color stream sets this True.
+        self._depth_is_aligned = False
         self._depth_first_logged = False
         self._depth_cam_info = None
         # Round 12 Y1: depth->color TF (depth_cam_link -> depth_cam_color_frame).
@@ -2675,7 +2685,13 @@ class ObjectSortingNodeV5(Node):
                     and vendor_utils is not None
                     and self.table_plane is not None
                     and self._depth_available
-                    and self._latest_depth is not None):
+                    and self._latest_depth is not None
+                    # v5.1 FIX: only trust depth for the world position when it
+                    # is colour-aligned to the RGB frame. Raw/unaligned depth
+                    # samples the wrong pixel and corrupts X/Y/Z (X~0.30m, neg
+                    # Z); fall back to the legacy AprilTag path, which is correct
+                    # for this fixed camera.
+                    and getattr(self, '_depth_is_aligned', False)):
                 z_at = self._depth_at(px, py)
                 if z_at is not None:
                     # _depth_at returns height-above-plane when plane is
@@ -3455,6 +3471,7 @@ class ObjectSortingNodeV5(Node):
         if src_topic and src_topic != self._depth_topic:
             if self._depth_topic == '' or src_topic == ALIGNED:
                 self._depth_topic = src_topic
+                self._depth_is_aligned = (src_topic == ALIGNED)
                 _stage('camera', 'depth source = %s (colour-aligned=%s)'
                                  % (src_topic, src_topic == ALIGNED))
             else:
