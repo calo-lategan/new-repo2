@@ -807,6 +807,11 @@ class ObjectSortingNodeV5(Node):
         # Range widened in Round 11: ±0.50 m covers significant tag drift.
         ('grip_offset_x', 0.0, (-0.5, 0.5)),
         ('grip_offset_y', 0.0, (-0.5, 0.5)),
+        # v5.1: world-Z nudge for the GRAB height (metres). +raises the grab,
+        # -lowers it. The depth path is off on this rig, so the grab height is
+        # otherwise a fixed table-plane constant; this lifts the grasp off the
+        # table without depth. Applies to PICKS only (place uses its own z).
+        ('grip_offset_z', 0.0, (-0.1, 0.1)),
         # Workspace XY scale (the user's "Z" - how big the world-map appears).
         # Multiplies the projected world XY around (0,0) AFTER grip_offset,
         # so 1.05 stretches the workspace 5% outward from centre. 1.0 = no
@@ -3118,6 +3123,9 @@ class ObjectSortingNodeV5(Node):
         # the next pick / overlay tick.
         position[0] += float(self.p('grip_offset_x'))
         position[1] += float(self.p('grip_offset_y'))
+        # v5.1: world-Z nudge (metres). +raises the grab off the table.
+        # Not scaled by workspace_scale (that's an XY map scale).
+        position[2] += float(self.p('grip_offset_z'))
         # Workspace scale: stretch/shrink around world origin AFTER the
         # offset so "shift by N m" means a fixed distance regardless of
         # scale. 1.0 = no change.

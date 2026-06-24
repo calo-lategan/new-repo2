@@ -2368,6 +2368,14 @@ class TunerUI:
         except Exception:
             self._teach_places = {}
         self._teach_bins_rows = {}
+        try:
+            o = self.client.get_values(['grip_offset_x', 'grip_offset_y', 'grip_offset_z'])
+        except Exception:
+            o = {}
+        self._pick_off = {
+            'grip_offset_x': float(o.get('grip_offset_x', 0.0) or 0.0),
+            'grip_offset_y': float(o.get('grip_offset_y', 0.0) or 0.0),
+            'grip_offset_z': float(o.get('grip_offset_z', 0.0) or 0.0)}
         JS = ('TkDefaultFont', 9)
         ttk.Label(parent, foreground='#226666', wraplength=720, justify='left',
                   text='Move the arm to a bin, read its coordinate, then Save it '
@@ -2493,6 +2501,77 @@ class TunerUI:
         self.teach_force_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(kf, text='Confirm re-anchor (apply even if far from current origin)',
                         variable=self.teach_force_var).pack(anchor='w', padx=8, pady=(2, 6))
+
+        # ---- pick alignment: line up the grab with the camera -----------
+        af = ttk.LabelFrame(parent, text='Pick alignment — line up the grab with what the camera sees')
+        af.pack(fill='x', padx=8, pady=4)
+        ttk.Label(af, foreground='#555', wraplength=720, justify='left',
+                  text='If the arm grabs off-target, nudge the world offset here. '
+                       '+X moves the grab further RIGHT, +Y further away, +Z lifts '
+                       'it OFF the table. It applies to the NEXT pick — run sorting, '
+                       'watch a grab, nudge, repeat, then Save. These are PICK '
+                       'offsets (grab side), separate from the bins (place side). '
+                       'e.g. a grab landing +7 cm right & too low: X about -0.07, '
+                       'Z about +0.03.'
+                  ).pack(anchor='w', padx=8, pady=(6, 2))
+        self.pick_off_var = tk.StringVar(value='offset  x=+0.000  y=+0.000  z=+0.000 m')
+        ttk.Label(af, textvariable=self.pick_off_var, font=('TkDefaultFont', 10, 'bold'),
+                  foreground='#2e6e2e').pack(anchor='w', padx=8, pady=(0, 2))
+        sr = ttk.Frame(af); sr.pack(fill='x', padx=8, pady=2)
+        ttk.Label(sr, text='step (m):').pack(side='left')
+        self.pick_off_step = ttk.Entry(sr, width=8, justify='right')
+        self.pick_off_step.insert(0, '0.005'); self.pick_off_step.pack(side='left', padx=(2, 8))
+        for axis, hint in (('x', 'left – / right +'), ('y', 'near – / far +'),
+                           ('z', 'lower – / lift +')):
+            r = ttk.Frame(af); r.pack(fill='x', padx=8, pady=2)
+            ttk.Label(r, text=f'{axis.upper()}  {hint}', width=16).pack(side='left')
+            ttk.Button(r, text='–', width=4,
+                       command=lambda a=axis: self._on_pick_offset(a, -1)).pack(side='left', padx=2)
+            ttk.Button(r, text='+', width=4,
+                       command=lambda a=axis: self._on_pick_offset(a, +1)).pack(side='left', padx=2)
+        br = ttk.Frame(af); br.pack(fill='x', padx=8, pady=(4, 6))
+        ttk.Button(br, text='Save alignment',
+                   command=self._on_pick_offset_save).pack(side='left', padx=3)
+        ttk.Button(br, text='Zero',
+                   command=self._on_pick_offset_zero).pack(side='left', padx=3)
+        self._update_pick_off_label()
+
+    def _pick_off_step(self):
+        try:
+            return abs(float(self.pick_off_step.get()))
+        except Exception:
+            return 0.005
+
+    def _update_pick_off_label(self):
+        o = self._pick_off
+        self.pick_off_var.set('offset  x={:+.3f}  y={:+.3f}  z={:+.3f} m'.format(
+            o['grip_offset_x'], o['grip_offset_y'], o['grip_offset_z']))
+
+    def _on_pick_offset(self, axis, sign):
+        key = {'x': 'grip_offset_x', 'y': 'grip_offset_y', 'z': 'grip_offset_z'}[axis]
+        lim = 0.1 if axis == 'z' else 0.5
+        newv = round(max(-lim, min(lim, self._pick_off[key] + sign * self._pick_off_step())), 4)
+        self._pick_off[key] = newv
+        self._update_pick_off_label()
+        threading.Thread(target=lambda: self.client.set_value(key, float(newv)),
+                         daemon=True).start()
+
+    def _on_pick_offset_save(self):
+        params = dict(self._pick_off)
+        threading.Thread(target=lambda: self.client.apply_and_persist(params, True),
+                         daemon=True).start()
+        messagebox.showinfo('Saved', 'Pick alignment saved to default.yaml:\n  '
+                            + '   '.join(f'{k.split("_")[-1]}={v:+.3f}'
+                                         for k, v in params.items()))
+
+    def _on_pick_offset_zero(self):
+        for k in self._pick_off:
+            self._pick_off[k] = 0.0
+        self._update_pick_off_label()
+        def go():
+            for k in ('grip_offset_x', 'grip_offset_y', 'grip_offset_z'):
+                self.client.set_value(k, 0.0)
+        threading.Thread(target=go, daemon=True).start()
 
     def _teach_send(self, cmd, persist=False):
         """Fire a ~/teach command on a worker thread (never block Tk).

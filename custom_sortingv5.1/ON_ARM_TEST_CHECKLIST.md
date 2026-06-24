@@ -158,6 +158,20 @@ Fixes placement landing in the wrong spot. STOP sorting first; the arm moves.
 - [ ] Confirm `transform.yaml` still has its original `extristric` / `corners` /
       `plane` (only `white_area_pose_world` should change) — detection ROI intact.
 
+## Pick alignment (grab lands off-target)
+On the **Bin Teach** tab, "Pick alignment" panel. These are PICK (grab) offsets,
+separate from the bins.
+- [ ] Run sorting and watch a grab. If it lands, e.g., +7 cm to the right and
+      too low (pushes into the table):
+- [ ] Nudge **X –** until the grab centres left-right (a +7 cm-right error ≈
+      `grip_offset_x = -0.07`), and **Z +** until it stops driving into the table
+      (≈ `grip_offset_z = +0.03`). Each nudge applies to the **next** pick.
+- [ ] Re-run a grab after each nudge; when it grabs dead-on, press **Save
+      alignment** (persists `grip_offset_x/y/z` to default.yaml).
+- [ ] Confirm depth is NOT the Z cause here: the pick logs `worldpos=legacy/table`
+      and the grab height is a fixed constant, so the Z fix is `grip_offset_z`,
+      not the depth camera.
+
 ## If a pick fires but the arm doesn't move
 Look downstream (unchanged logic, but now fed correct world coords): `_do_pick`
 IK reachability, `_apply_kinematics_calibration` offsets from `calibration.yaml`,
