@@ -2387,6 +2387,9 @@ class ObjectSortingNodeV5(Node):
                 'teach_edges': len(getattr(self, '_teach_edges', []) or []),
                 'teach_running': bool(getattr(self, '_teach_running', False)),
                 'last_teach_msg': str(getattr(self, '_last_teach_msg', '') or ''),
+                # current per-class bin map so the UI's "Saved bins" list (with
+                # a Go button each) stays live after every save.
+                'place_positions': self.p('place_positions'),
             })))
         except Exception:
             pass

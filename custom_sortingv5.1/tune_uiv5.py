@@ -674,6 +674,7 @@ class TunerUI:
                 if hasattr(self, 'teach_pose_var'):
                     try:
                         self._update_teach_readout(cnames)
+                        self._refresh_teach_bins(cnames)
                     except Exception:
                         pass
                 # Live grip telemetry on the Grip tab.
@@ -724,6 +725,15 @@ class TunerUI:
         tt = self.client.latest_teach
         if not tt:
             return
+        # keep the Saved-bins map fresh (the node republishes it after each save)
+        pp = tt.get('place_positions')
+        if pp is not None:
+            try:
+                d = json.loads(pp or '{}')
+                if isinstance(d, dict):
+                    self._teach_places = d
+            except Exception:
+                pass
         pose = tt.get('teach_pose')
         if pose and len(pose) == 3:
             self.teach_pose_var.set(
@@ -747,6 +757,39 @@ class TunerUI:
         msg = str(tt.get('last_teach_msg', '') or '')
         self.teach_msg_var.set(
             'status: ' + ('MOVING... ' if running else '') + (msg or 'idle'))
+
+    def _refresh_teach_bins(self, class_names):
+        """Keep the Bin Teach tab's 'Saved bins' list (one Go button + the live
+        coordinate per class) in sync with the model classes + the current bin
+        map (self._teach_places, refreshed from ~/teach_status)."""
+        names = sorted(class_names.values()) if class_names else []
+        if list(self._teach_bins_rows.keys()) != names:
+            for w in self._teach_bins_inner.winfo_children():
+                w.destroy()
+            self._teach_bins_rows = {}
+            if not names:
+                ttk.Label(self._teach_bins_inner, foreground='#888',
+                          text='(waiting for engine load...)').pack(anchor='w')
+                return
+            for name in names:
+                row = ttk.Frame(self._teach_bins_inner); row.pack(fill='x', pady=2)
+                ttk.Button(row, text='Go', width=5,
+                           command=lambda nm=name: self._on_teach_goto_class(nm)
+                           ).pack(side='left', padx=(0, 8))
+                ttk.Label(row, text=name, width=16).pack(side='left')
+                cv = tk.StringVar(value='(default)')
+                ttk.Label(row, textvariable=cv, foreground='#3366aa').pack(side='left')
+                self._teach_bins_rows[name] = cv
+        places = getattr(self, '_teach_places', {}) or {}
+        for name, cv in self._teach_bins_rows.items():
+            v = places.get(name)
+            if isinstance(v, (list, tuple)) and len(v) >= 3:
+                taught = len(v) >= 4 and str(v[3]) == 'taught'
+                cv.set('{:.3f}, {:.3f}, {:.3f}   {}'.format(
+                    float(v[0]), float(v[1]), float(v[2]),
+                    '(taught)' if taught else '(set)'))
+            else:
+                cv.set('(default — Go still works)')
 
     def _build(self):
         if self.calib_only:
@@ -990,7 +1033,7 @@ class TunerUI:
         # Places tab — per-class targets (place position + grip strength).
         self._build_places_tab(places_body, current.get('place_positions', '{}'))
         # Bin Teach tab — jog the arm to each bin, read the coordinate, save it.
-        self._build_teach_tab(teach_body)
+        self._build_teach_tab(teach_body, current.get('place_positions', '{}'))
         # Round 15: three independent calibration tabs.
         self._build_position_tab(position_body, current)
         self._build_color_tab(color_body, current)
@@ -2312,12 +2355,19 @@ class TunerUI:
     # ---- Places tab (per-class targets: place position + grip strength) ----
 
     # ------------------------------------------------------------------ bin teach
-    def _build_teach_tab(self, parent):
+    def _build_teach_tab(self, parent, current_places_json='{}'):
         """Manual bin teaching. Jog the arm to each physical bin (joint-by-joint
         or world XYZ), read the live coordinate, and SAVE it per class so the
         cube lands exactly there. Also teach the workspace centre/edges to
         re-anchor the world map. All motion goes through the node ~/teach
         service (refused while sorting/calibrating)."""
+        try:
+            self._teach_places = json.loads(current_places_json or '{}')
+            if not isinstance(self._teach_places, dict):
+                self._teach_places = {}
+        except Exception:
+            self._teach_places = {}
+        self._teach_bins_rows = {}
         JS = ('TkDefaultFont', 9)
         ttk.Label(parent, foreground='#226666', wraplength=720, justify='left',
                   text='Move the arm to a bin, read its coordinate, then Save it '
@@ -2399,6 +2449,20 @@ class TunerUI:
         ttk.Checkbutton(sf, text='persist to default.yaml (survives relaunch)',
                         variable=self.teach_persist_var).pack(anchor='w', padx=8, pady=(0, 6))
 
+        # ---- saved bins: jump to an existing bin to fine-tune ------------
+        bf = ttk.LabelFrame(parent, text='Saved bins — Go, then fine-tune & re-save')
+        bf.pack(fill='x', padx=8, pady=4)
+        ttk.Label(bf, foreground='#555', wraplength=720, justify='left',
+                  text='Press Go to drive the arm to a bin you already set, then '
+                       'nudge with the jog buttons and Save again — no need to '
+                       'hand-jog from scratch. "(default)" bins have no taught '
+                       'coordinate yet; Go still drives to the built-in spot.'
+                  ).pack(anchor='w', padx=8, pady=(6, 2))
+        self._teach_bins_inner = ttk.Frame(bf)
+        self._teach_bins_inner.pack(fill='x', padx=8, pady=4)
+        ttk.Label(self._teach_bins_inner, foreground='#888',
+                  text='(waiting for engine load...)').pack(anchor='w')
+
         # ---- workspace centre / edges -----------------------------------
         kf = ttk.LabelFrame(parent, text='Workspace map (centre + edges → world origin)')
         kf.pack(fill='x', padx=8, pady=4)
@@ -2459,6 +2523,13 @@ class TunerUI:
         if not cls:
             messagebox.showinfo('Pick a class', 'Choose a class to go to its bin.')
             return
+        self._teach_send({'action': 'goto', 'class': cls})
+
+    def _on_teach_goto_class(self, cls):
+        """Drive to a saved bin from the 'Saved bins' list, and mirror the class
+        into the dropdown so the next 'Save here -> bin' re-saves THIS bin after
+        you fine-tune it."""
+        self.teach_class_var.set(cls)
         self._teach_send({'action': 'goto', 'class': cls})
 
     def _on_teach_save(self):

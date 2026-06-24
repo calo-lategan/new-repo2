@@ -143,6 +143,9 @@ Fixes placement landing in the wrong spot. STOP sorting first; the arm moves.
       dropdown, **Save here → bin** (confirm). Status shows
       `SAVE <class> = [x, y, z, 'taught']`.
 - [ ] **Go to bin** for that class drives the arm back to the saved spot.
+- [ ] **Saved bins** list shows a row per class with its coordinate + a **Go**
+      button. Press **Go** on a set bin → arm drives there; nudge with jog; **Save
+      here → bin** again to fine-tune. The row's coordinate updates after the save.
 - [ ] START sorting and drop that class — it lands **at the taught bin** (not the
       old forward-grid spot, and with no affine offset). Repeat per class incl.
       `scaff` → waste bin.
