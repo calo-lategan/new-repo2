@@ -120,6 +120,10 @@
     gripper_close_duration: 0.35
     gripper_settle: 0.5
     grab_depth: 0.02
+    # v5.1 (depth-accurate grasp height): safety floor for the descend Z so a
+    # bad depth reading can't drive the gripper into the table. Raise if the
+    # arm dips too low; lower toward the table-plane Z if it stops short.
+    min_descend_z_m: -0.02
 
     # ---- Force-limited grasp BETA (opt-in; off by default) ----
     compliance_grasp_enabled: false

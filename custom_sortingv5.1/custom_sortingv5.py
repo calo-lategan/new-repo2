@@ -857,6 +857,12 @@ class ObjectSortingNodeV5(Node):
         ('gripper_close_duration', 0.35, (0.1, 2.0)),
         ('gripper_settle', 0.5, (0.0, 1.5)),
         ('grab_depth', 0.02, (0.0, 0.05)),
+        # v5.1 (depth-accurate grasp height): hard safety floor for the descend
+        # Z. The pick descends to (object-top depth Z - grab_depth); this clamps
+        # the result so a noisy/wrong depth reading can never drive the gripper
+        # below this world Z into the table. Raise it if the arm ever dips too
+        # low; lower it (toward the table-plane Z) only if it stops short.
+        ('min_descend_z_m', -0.02, (-0.10, 0.10)),
         # ---- Force-limited grasp (BETA, opt-in) ----
         # Default OFF: the standard close-to-pulse grasp runs. When the
         # operator flips compliance_grasp_enabled (UI button), the close
@@ -2722,6 +2728,11 @@ class ObjectSortingNodeV5(Node):
             position = white_area_center[:3, 3] + world_pose
             position[2] = height
         position = self._apply_world_offsets(position)
+        # v5.1: record whether the depth/vendor path set Z (object height above
+        # the table, varies per object) or the legacy table-height fallback was
+        # used, so the pick log can show which - and you can confirm depth-Z is
+        # live and varying.
+        self._last_worldpos_depth = used_vendor
         return position, projection_matrix
 
     def calculate_pick_grasp_yaw(self, position, target, target_info,
@@ -2860,7 +2871,26 @@ class ObjectSortingNodeV5(Node):
         self.motion.set_wrist(yaw, 0.5 * speed)
         self.motion.set_gripper(open_pulse, 0.2 * speed)
         self.motion._sleep(approach_dwell)
-        descend = [position[0], position[1], position[2] - grab_depth]
+        # v5.1 (depth-accurate grasp height): descend to the object-top Z
+        # (position[2] - which on the depth/vendor path is the measured height
+        # above the table, so it varies per object) minus grab_depth, but CLAMP
+        # to a safe floor (min_descend_z_m) so a noisy/wrong depth reading can
+        # never drive the gripper into the table. Logs the object-top Z, the
+        # grab_depth and the final descend Z so you can verify depth-Z is live
+        # (and tune grab_depth per class - e.g. the thin scaff - via the Places
+        # tab / target_overrides).
+        descend_z = position[2] - grab_depth
+        min_dz = float(self.p('min_descend_z_m'))
+        clamped = descend_z < min_dz
+        if clamped:
+            descend_z = min_dz
+        _stage('pick', 'descend obj_top_z=%.3f grab_depth=%.3f -> z=%.3f%s '
+                       '(worldpos=%s)' % (
+                           position[2], grab_depth, descend_z,
+                           ' [CLAMPED to floor]' if clamped else '',
+                           'depth' if getattr(self, '_last_worldpos_depth', False)
+                           else 'legacy/table'))
+        descend = [position[0], position[1], descend_z]
         if self.motion.goto_pose(descend, pitch,
                                  duration=max(0.35, 0.7 * speed / aggression),
                                  parallel_base=False,
