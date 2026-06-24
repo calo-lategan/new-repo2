@@ -507,7 +507,13 @@ class MotionController:
     def _sleep(self, dt):
         end = time.time() + dt
         while time.time() < end and not self._abort and rclpy.ok():
-            time.sleep(min(0.02, end - time.time()))
+            # v5.1 FIX (crash): clamp to >= 0. The `while time.time() < end`
+            # check can pass with end-now a sub-microsecond positive, then time
+            # advances past `end` before this line evaluates `end - time.time()`
+            # -> negative -> time.sleep(negative) -> "ValueError: sleep length
+            # must be non-negative", which crashed the transport cycle
+            # intermittently (caught by transport_thread's except, self-recovered).
+            time.sleep(max(0.0, min(0.02, end - time.time())))
 
     def _await_future(self, future, timeout=3.0):
         # Safe to use *only* from a thread that is NOT the executor thread
