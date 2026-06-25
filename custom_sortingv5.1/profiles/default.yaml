@@ -54,7 +54,13 @@
     # on the Calibrate tab alongside Workspace scale.
     grip_offset_x: 0.0
     grip_offset_y: 0.0
-    # Workspace scale (Z): how big/small the world-map is. 1.0 = no change.
+    # v5.1: world-Z grab nudge (metres). +raises the grab off the table.
+    # Keep 0.0 unless the grab is consistently too high/low.
+    grip_offset_z: 0.0
+    # Workspace scale: per-axis world-XY multiplier about the origin. KEEP AT
+    # 1.0 - the AprilTag calibration dictates the world map; any other value
+    # shifts every detection (far objects more than near). For a constant
+    # offset use grip_offset_x, NOT this.
     workspace_scale: 1.0
     # Physical workspace dimensions (metres). The yellow overlay rectangle is
     # drawn at this world size around the AprilTag centre so you can size it
