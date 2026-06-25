@@ -99,7 +99,10 @@
     # Prefer clamping on the SHORT OBB axis (narrow waist) for elongated
     # objects; vendor min-yaw for near-square objects.
     grasp_prefer_short_axis: true
-    grasp_short_axis_min_ratio: 0.10
+    # 0.30 so only genuinely elongated objects (the thin scaff, ratio ~0.8) use
+    # the short-axis clamp; near-square cubes fall back to vendor min-|yaw| and
+    # don't over-rotate the wrist. (Was 0.10 - cubes crossed it on OBB noise.)
+    grasp_short_axis_min_ratio: 0.30
     # v5.1 (B4): degrees added to the OBB angle to correct a 90/180-deg
     # physical gripper-mounting offset (0 = no change). ultralytics OBB makes
     # `w` the long side and r its angle, so the short-axis clamp is correct in
@@ -126,10 +129,11 @@
     gripper_close_duration: 0.35
     gripper_settle: 0.5
     grab_depth: 0.02
-    # v5.1 (depth-accurate grasp height): safety floor for the descend Z so a
-    # bad depth reading can't drive the gripper into the table. Raise if the
-    # arm dips too low; lower toward the table-plane Z if it stops short.
-    min_descend_z_m: -0.02
+    # Descend floor (metres). 0.01 = the vendor grab height (0.03 table height -
+    # 0.02 grab_depth), so descend_z = max(obj_top_z - grab_depth, 0.01) can
+    # NEVER go negative / into the table. Lower per-class via target_overrides
+    # (grab_depth) for the thin scaff; raise if the arm still dips.
+    min_descend_z_m: 0.01
 
     # ---- Force-limited grasp BETA (opt-in; off by default) ----
     compliance_grasp_enabled: false

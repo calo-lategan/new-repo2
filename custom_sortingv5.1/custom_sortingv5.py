@@ -839,7 +839,7 @@ class ObjectSortingNodeV5(Node):
         # tiebreak by min |yaw|. Only kicks in for aspect ratio
         # |w-h|/max(w,h) >= grasp_short_axis_min_ratio (squares stay vendor).
         ('grasp_prefer_short_axis', True, None),
-        ('grasp_short_axis_min_ratio', 0.10, (0.02, 0.5)),
+        ('grasp_short_axis_min_ratio', 0.30, (0.02, 0.5)),
         # v5.1 (B4): hardware-tunable gripper yaw offset (degrees) added to the
         # OBB angle before computing the grasp yaw. ultralytics OBB defines `w`
         # as the LONG side and `r` (radians, normalized to [-45,135)) as the
@@ -895,7 +895,7 @@ class ObjectSortingNodeV5(Node):
         # the result so a noisy/wrong depth reading can never drive the gripper
         # below this world Z into the table. Raise it if the arm ever dips too
         # low; lower it (toward the table-plane Z) only if it stops short.
-        ('min_descend_z_m', -0.02, (-0.10, 0.10)),
+        ('min_descend_z_m', 0.01, (-0.10, 0.10)),
         # ---- Force-limited grasp (BETA, opt-in) ----
         # Default OFF: the standard close-to-pulse grasp runs. When the
         # operator flips compliance_grasp_enabled (UI button), the close
@@ -3117,21 +3117,19 @@ class ObjectSortingNodeV5(Node):
         scale = tuple(cfg.get('pixel', {}).get('scale', (1.0, 1.0, 1.0)))
         for i in range(3):
             position[i] = position[i] * scale[i] + offset[i]
-        # Manual world nudge (default 0): shift the final pick position so
-        # the arm lands on the object, compensating calibration drift when
-        # the AprilTag can't be re-run. Read live so the slider applies on
-        # the next pick / overlay tick.
+        # Manual world nudge (default 0): the ONLY post-AprilTag correction -
+        # an additive metres shift in X/Y for residual calibration drift.
+        # VENDOR-FAITHFUL: NO workspace_scale multiply. That v5-only fudge scaled
+        # world XY about the origin, so it shifted every detection by an amount
+        # that grew with distance from centre (it "fixed" near objects while
+        # throwing far ones off). Removed so the world map is dictated purely by
+        # the AprilTag extrinsic + the calibration.yaml pixel/kinematics affines;
+        # a constant residual is corrected ONLY by grip_offset_x/y. grip_offset_z
+        # is applied AFTER the kinematics affine in transport_thread (true metres,
+        # not scaled). workspace_scale stays a declared param but no longer
+        # affects picks.
         position[0] += float(self.p('grip_offset_x'))
         position[1] += float(self.p('grip_offset_y'))
-        # v5.1: world-Z nudge (metres). +raises the grab off the table.
-        # Not scaled by workspace_scale (that's an XY map scale).
-        position[2] += float(self.p('grip_offset_z'))
-        # Workspace scale: stretch/shrink around world origin AFTER the
-        # offset so "shift by N m" means a fixed distance regardless of
-        # scale. 1.0 = no change.
-        ws = float(self.p('workspace_scale'))
-        position[0] *= ws
-        position[1] *= ws
         return position
 
     def get_object_world_position(self, position, intrinsic, extristric,
@@ -3469,7 +3467,12 @@ class ObjectSortingNodeV5(Node):
         # NOT drop it - we log and continue rather than returning False.
         if bool(self.p('safe_transit_enabled')) and not self.motion.aborted:
             self.motion.set_wrist(500, 0.3 * speed)
-            if self.motion.goto_pose([0.11, 0.0, 0.09], 73,
+            # Vendor carry pose branches on chassis (pick_and_place.py:115/117):
+            # Slide_Rails carries HIGHER at z=0.15 (its tuned, stable IK family);
+            # other chassis at z=0.09. Using the low 0.09 pose on a Slide_Rails arm
+            # forced an awkward IK family and risked a lurch/flip on the traverse.
+            carry_z = 0.15 if os.environ.get('CHASSIS_TYPE') == 'Slide_Rails' else 0.09
+            if self.motion.goto_pose([0.11, 0.0, carry_z], 73,
                                      duration=max(0.4, 0.8 * speed / aggression),
                                      parallel_base=parallel_base) is None:
                 _stage('pick', 'safe-transit IK miss (object held, continuing)')
@@ -3605,6 +3608,10 @@ class ObjectSortingNodeV5(Node):
                 if position[0] > 0.22:
                     position[2] += 0.01
                 position = self._apply_kinematics_calibration(position)
+                # grip_offset_z (manual Z nudge, default 0) applied AFTER the
+                # kinematics affine, so it's a true metres offset on the final
+                # grab height rather than being scaled by the kinematics factor.
+                position[2] += float(self.p('grip_offset_z'))
                 label = target[0]
                 _stage('transport', f'BEGIN pick {label} at '
                                     f'({position[0]:.3f},{position[1]:.3f},{position[2]:.3f}) '
@@ -3673,6 +3680,18 @@ class ObjectSortingNodeV5(Node):
                     time.sleep(0.5); continue
                 self.start_get_roi = False
                 _stage('sorting-loop', 'ROI built - detection branch is now live')
+            # PERF (OBB headroom): process each inference result ONCE.
+            # inference.latest() returns the same (frame, results, ts) until a new
+            # inference completes; without this the loop re-ran full detection +
+            # locking on the SAME frame ~1000x/s (1ms sleep), starving the OBB
+            # worker of CPU (inference fell behind -> stale frames, loop_lag_ms
+            # climbing to 100-250ms) and inflating count_still (it incremented per
+            # spin, not per frame -> instant/jittery locks). Skipping stale repeats
+            # frees that CPU for the model and makes count_still/count_move
+            # accumulate per INFERENCE frame, matching the vendor cadence.
+            if ts == getattr(self, '_last_proc_inf_ts', None):
+                time.sleep(0.005); continue
+            self._last_proc_inf_ts = ts
             try:
                 roi = self.roi.copy() if len(self.roi) else []
                 intrinsic = self.intrinsic
@@ -4151,11 +4170,14 @@ class ObjectSortingNodeV5(Node):
         # Status line top-left so the user can read live values.
         gx = float(self.p('grip_offset_x'))
         gy = float(self.p('grip_offset_y'))
-        ws = float(self.p('workspace_scale'))
+        gz = float(self.p('grip_offset_z'))
         header = ('MANUAL CALIBRATE' if mode == 'manual' else
                   'CALIBRATED (auto)')
+        # Show the actual fine-tune knobs (grip_offset x/y/z). workspace_scale is
+        # no longer applied to picks (world = AprilTag + calibration affines), so
+        # it's deliberately not shown here - keep it at 1.0.
         cv2.putText(bgr,
-                    f'{header}  X={gx:+.3f}m  Y={gy:+.3f}m  scale={ws:.3f}',
+                    f'{header}  grip dX={gx:+.3f} dY={gy:+.3f} dZ={gz:+.3f} m',
                     (8, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                     (0, 255, 255), 2)
         # Need camera intrinsics + extrinsics + workspace centre to project.

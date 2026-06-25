@@ -158,6 +158,18 @@ Fixes placement landing in the wrong spot. STOP sorting first; the arm moves.
 - [ ] Confirm `transform.yaml` still has its original `extristric` / `corners` /
       `plane` (only `white_area_pose_world` should change) — detection ROI intact.
 
+## Factory restore + vision/position alignment (this round)
+Full procedure in `RESTORE_AND_CALIBRATION.md`. Quick checks:
+- [ ] Re-seed config: `cp ~/jetarm_v5_src/custom_sortingv5.1/profiles/default.yaml ~/jetarm_v5_profiles/default.yaml`; boot log shows the factory values and `CHASSIS_TYPE='Slide_Rails'`.
+- [ ] `scaff` bin is back to `[-0.076,0.16,0.015]` (NOT the home pose `[0.127,0,0.182]`); all 5 classes on the vendor colour grid.
+- [ ] **Clean AprilTag CALIBRATE** (after `restart_v5.sh`): `[roi] loaded plane` normal ≈ `[0,0,-1]` (reject sideways planes).
+- [ ] **No grasp into table:** pick log shows `descend … -> z` ≥ 0.01, never negative; no "descend IK failed" on in-reach objects.
+- [ ] **No flip:** after grab the arm rises to the carry pose (`[0.11,0,0.15]` on Slide_Rails) and traverses without a back-flip; no `multiple access on port` in the boot log (if seen → USB/serial issue, reseat).
+- [ ] **No wrist over-rotation:** a horizontal cube → gripper aligns to the radial approach only (no spurious 90°); the thin scaff → jaws clamp across its narrow axis.
+- [ ] **Vision ↔ grab aligned:** the projected aim sits on the object after calibration; any constant residual is removed with `grip_offset_x` only (NOT `workspace_scale`, which stays 1.0).
+- [ ] **OBB headroom:** with sorting running, `loop_lag_ms` is low/stable (no climb to 200ms+) and `inference_age_ms` stays small — the loop now processes each inference frame once.
+- [ ] Each class sorts to its factory-grid bin; fine-tune exact spots with Bin Teach if your physical bins differ.
+
 ## Pick alignment (grab lands off-target)
 On the **Bin Teach** tab, "Pick alignment" panel. These are PICK (grab) offsets,
 separate from the bins.
