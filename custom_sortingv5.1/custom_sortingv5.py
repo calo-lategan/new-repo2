@@ -3149,6 +3149,14 @@ class ObjectSortingNodeV5(Node):
         Fallback (no depth / no plane / no endpoint / vendor utils not
         importable) keeps the legacy pixels_to_world path that's worked
         since Round 10. _apply_world_offsets runs at the end either way."""
+        # v5.1: enter() nulls white_area_center + the extrinsic and triggers an
+        # ASYNC ROI rebuild, but enable_sorting starts the sorting loop the same
+        # instant - so for a brief window the calibration isn't loaded yet.
+        # Return cleanly (the callers skip the detection) instead of crashing
+        # the loop with 'NoneType is not subscriptable' on white_area_center[:3,3]
+        # every START (observed reliably on-arm).
+        if white_area_center is None or extristric is None:
+            return None, None
         # Always build projection_matrix for the caller (used by
         # calculate_pixel_length downstream).
         projection_matrix = np.row_stack(
@@ -3736,6 +3744,8 @@ class ObjectSortingNodeV5(Node):
                                 t[2] = (x, y)
                             position, projection_matrix = self.get_object_world_position(
                                 t[2], intrinsic, self.extristric, self.white_area_center)
+                            if position is None:
+                                continue  # calibration mid-reload; skip this frame
                             result = self.calculate_pick_grasp_yaw(position, t, target_info,
                                                                     intrinsic, projection_matrix)
                             if result is not None and self.target is None:
@@ -4304,6 +4314,8 @@ class ObjectSortingNodeV5(Node):
                 world, _ = self.get_object_world_position(
                     (px, py), self.intrinsic, self.extristric,
                     self.white_area_center, height=height)
+                if world is None:
+                    continue  # calibration mid-reload; skip the aim marker
                 aim = self._project_world_to_pixel(world)
                 if aim is None:
                     continue   # behind camera; skip the marker

@@ -18,6 +18,15 @@
 
 set -u
 
+# Never let git block on an interactive credential/host prompt. Without push
+# credentials on the device, `git push` over https would otherwise HANG waiting
+# for a username/password on a stdin that the UI subprocess never provides -
+# stalling until the 120 s timeout and freezing the tuner. These make a missing
+# credential fail FAST with a clear error instead (rc=4), and the device-auth
+# setup is in UPDATE_JETARM.md.
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new}"
+
 # Round 13 R13.2: self-locate the repo by walking up from this script's
 # own path, so a manual run without REPO= still works regardless of
 # where the repo was cloned (~/jetarm_v5_src on the JetArm installer).
