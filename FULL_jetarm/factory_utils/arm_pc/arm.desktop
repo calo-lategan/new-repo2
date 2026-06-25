@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Arm
+Comment=Arm Program
+Encoding=UTF-8
+Exec=zsh /home/ubuntu/factory_utils/arm_pc/arm.sh
+Terminal=false
+MultipleArgs=false
+Categories=Application;Development;
+StartupNotify=true
+Icon=/home/ubuntu/factory_utils/arm_pc/resources/6dof_rgb.png
+

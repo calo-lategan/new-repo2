@@ -1,0 +1,9 @@
+# v5 ui session 2026-06-23_20-38-05 pid=75161
+20:38:13 [ui][plane_refit] failed
+20:38:14 [ui][color] loaded red: min=[9, 146, 146] max=[160, 187, 207]
+20:38:21 [ui][color] enter failed
+20:38:25 [ui][color] enter failed
+20:38:27 [ui][color] loaded red: min=[9, 146, 146] max=[160, 187, 207]
+20:38:36 [ui][calibrate] CALIBRATE button pressed
+20:38:38 [ui][calibrate] OK source=vendor
+20:38:52 [ui][plane_refit] failed

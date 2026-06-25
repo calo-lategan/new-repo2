@@ -1,0 +1,3 @@
+#!/bin/bash
+xhost +
+docker exec -u ubuntu -w /home/ubuntu jetarm /bin/zsh -c "source ~/.zshrc; cd ~/jetarm; ./.sync_typerc.sh "

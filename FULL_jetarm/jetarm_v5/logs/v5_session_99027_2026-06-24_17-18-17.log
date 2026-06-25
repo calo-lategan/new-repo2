@@ -1,0 +1,48 @@
+# v5 session 2026-06-24_17-18-17 pid=99027
+17:18:23 [v4][main] starting custom_sortingv5
+17:18:23 [v4][init] constructing node 'custom_sortingv5'
+17:18:23 [v4][init] config_path=/home/ubuntu/ros2_ws/src/stepper/config/ (CHASSIS_TYPE='Slide_Rails')
+17:18:23 [v4][init] waiting for kinematics/set_pose_target service...
+17:18:24 [v4][init] kinematics/set_pose_target ready
+17:18:24 [v4][init] bus_servo/get_state ready (full feedback enabled)
+17:18:24 [v4][inference] worker thread starting
+17:18:24 [v4][init] inference worker started (engine=/home/ubuntu/third_party_ros2/data/scaff_cube_best.engine)
+17:18:24 [v4][engine-load] starting load: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine
+17:18:24 [v4][init] camera subscriptions created (always-on) - topic /depth_cam/rgb/image_raw + camera_info
+17:18:24 [v4][init] depth subscribed (candidate): /depth_cam/depth_to_color
+17:18:24 [v4][init] depth subscribed (candidate): /depth_cam/depth/image_raw
+17:18:24 [v4][main] spinning executor (4 threads)
+17:18:24 [v4][startup] spawning sorting + transport threads
+17:18:24 [v4][sorting-loop] thread started, waiting for enter+frames
+17:18:24 [v4][svc] set_target red=True
+17:18:24 [v4][svc] set_target green=True
+17:18:24 [v4][svc] set_target blue=True
+17:18:24 [v4][svc] set_target scaff=True
+17:18:24 [v4][init] captured endpoint pose t=[0.1271, 0.0000, 0.1821]
+17:18:24 [v4][startup] v4 init finish
+17:18:24 [v4][engine-load] YOLO() constructed in 0.03s task=obb (raw='obb', override='obb')
+17:18:25 [v4][svc] enable_sorting -> False
+17:18:26 [v4][camera] depth source = /depth_cam/depth/image_raw (colour-aligned=False)
+17:18:26 [v4][camera] FIRST DEPTH FRAME on /depth_cam/depth/image_raw: shape=(400, 640) dtype=uint16
+17:18:26 [v4][camera] FIRST FRAME received: (480, 640, 3) enc=rgb8
+17:18:26 [v4][camera] first camera_info received: fx=453.0 fy=453.0 cx=328.3 cy=243.4
+17:18:26 [v4][init] depth->color TF resolved + composed into hand2cam
+17:18:27 [v4][engine-load] warmup pass done in 2.15s
+17:18:27 [v4][engine-load] engine active: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine (total load 2.18s, swap #1)
+17:18:27 [v4][engine-load] class names from model.names: ['scaff', 'light blue cube', 'dark blue cube', 'red cube', 'green cube']
+17:18:27 [v4][inference] first inference complete (72 ms)
+17:18:27 [v4][sorting-loop] first inference result reached the loop
+17:18:27 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/stepper/config/transform.yaml
+17:18:27 [v4][roi]   loaded plane: [-0.011507965768355638, -0.08931540962994815, -0.9959369078041586, 0.22084294504687252]
+17:18:27 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+17:18:27 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+17:18:27 [v4][roi]   extrinsic plane shift done
+17:18:27 [v4][roi]   projected 4 corners to image pixels
+17:18:27 [v4][roi]   computed roi (y=83..389 x=128..526) on intrinsic shape=(3, 3)
+17:18:27 [v4][sorting-loop] ROI built - detection branch is now live
+17:18:29 [v4][publish] first frame published: shape=(480, 640, 3) step=1920 contig=True qos=reliable/depth10 topic=/custom_sortingv5/image_result
+17:18:29 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=36.3 pub_fps=4.0 frames=182 result_subs=1 roi=ok intrinsic=ok inference_age_ms=143 target=none transport=False sorting_thread=alive
+17:18:34 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=53.3 pub_fps=30.2 frames=448 result_subs=1 roi=ok intrinsic=ok inference_age_ms=71 target=none transport=False sorting_thread=alive
+17:18:39 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=50.6 pub_fps=30.4 frames=701 result_subs=1 roi=ok intrinsic=ok inference_age_ms=138 target=none transport=False sorting_thread=alive
+17:18:41 [v4][main] KeyboardInterrupt - shutting down
+17:18:41 [v4][inference] worker thread stopped

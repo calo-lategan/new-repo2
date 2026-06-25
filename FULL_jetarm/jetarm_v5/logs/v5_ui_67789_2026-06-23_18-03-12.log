@@ -1,0 +1,21 @@
+# v5 ui session 2026-06-23_18-03-12 pid=67789
+18:03:22 [ui][color] loaded red: min=[0, 140, 131] max=[55, 255, 255]
+18:03:42 [ui][calibrate] CALIBRATE button pressed
+18:03:47 [ui][calibrate] OK source=vendor
+18:03:54 [ui][plane_refit] failed
+18:07:03 [ui][push_logs] running /home/ubuntu/jetarm_v5_src/tools/push_logs.sh REPO=/home/ubuntu/jetarm_v5_src
+18:08:54 [ui][push_logs] running /home/ubuntu/jetarm_v5_src/tools/push_logs.sh REPO=/home/ubuntu/jetarm_v5_src
+18:09:03 [ui][push_logs] crashed
+18:09:03 EXCEPTION: TimeoutExpired: Command '['bash', '/home/ubuntu/jetarm_v5_src/tools/push_logs.sh']' timed out after 120 seconds
+Traceback (most recent call last):
+  File "/home/ubuntu/ros2_ws/build/app/app/tune_uiv5.py", line 1440, in go
+    res = subprocess.run(['bash', script], env=env,
+  File "/usr/lib/python3.10/subprocess.py", line 505, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+  File "/usr/lib/python3.10/subprocess.py", line 1154, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+  File "/usr/lib/python3.10/subprocess.py", line 2022, in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+  File "/usr/lib/python3.10/subprocess.py", line 1198, in _check_timeout
+    raise TimeoutExpired(
+subprocess.TimeoutExpired: Command '['bash', '/home/ubuntu/jetarm_v5_src/tools/push_logs.sh']' timed out after 120 seconds

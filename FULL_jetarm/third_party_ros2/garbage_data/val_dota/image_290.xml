@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_290</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_290.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>StorageBattery</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>436</x0><y0>192</y0><x1>336</x1><y1>196</y1><x2>332</x2><y2>88</y2><x3>432</x3><y3>84</y3></bndbox>
+  </object>
+</annotation>

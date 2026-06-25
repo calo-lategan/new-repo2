@@ -1,0 +1,22 @@
+<?xml version="1.0" ?>
+<annotation>
+    <folder>JPEGImages</folder>
+    <filename>image_171.jpg</filename>
+    <size>
+        <width>640</width>
+        <height>640</height>
+        <depth>3</depth>
+    </size>
+    <object>
+        <name>4</name>
+        <pose>Unspecified</pose>
+        <truncated>0</truncated>
+        <difficult>0</difficult>
+        <bndbox>
+            <xmin>246</xmin>
+            <ymin>340</ymin>
+            <xmax>383</xmax>
+            <ymax>472</ymax>
+        </bndbox>
+    </object>
+</annotation>

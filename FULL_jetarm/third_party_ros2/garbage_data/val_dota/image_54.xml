@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_54</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_54.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>Marker</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>494</x0><y0>246</y0><x1>413</x1><y1>285</y1><x2>356</x2><y2>166</y2><x3>437</x3><y3>127</y3></bndbox>
+  </object>
+</annotation>

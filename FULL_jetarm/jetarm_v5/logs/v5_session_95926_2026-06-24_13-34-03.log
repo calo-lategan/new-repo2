@@ -1,0 +1,157 @@
+# v5 session 2026-06-24_13-34-03 pid=95926
+13:34:09 [v4][main] starting custom_sortingv5
+13:34:09 [v4][init] constructing node 'custom_sortingv5'
+13:34:10 [v4][init] config_path=/home/ubuntu/ros2_ws/src/stepper/config/ (CHASSIS_TYPE='Slide_Rails')
+13:34:11 [v4][init] waiting for kinematics/set_pose_target service...
+13:34:11 [v4][init] kinematics/set_pose_target ready
+13:34:11 [v4][init] bus_servo/get_state ready (full feedback enabled)
+13:34:11 [v4][init] inference worker started (engine=/home/ubuntu/third_party_ros2/data/scaff_cube_best.engine)
+13:34:11 [v4][inference] worker thread starting
+13:34:11 [v4][engine-load] starting load: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine
+13:34:11 [v4][init] camera subscriptions created (always-on) - topic /depth_cam/rgb/image_raw + camera_info
+13:34:11 [v4][init] depth subscribed (candidate): /depth_cam/depth_to_color
+13:34:11 [v4][engine-load] YOLO() constructed in 0.01s task=obb (raw='obb', override='obb')
+13:34:11 [v4][init] depth subscribed (candidate): /depth_cam/depth/image_raw
+13:34:11 [v4][main] spinning executor (4 threads)
+13:34:11 [v4][startup] spawning sorting + transport threads
+13:34:11 [v4][sorting-loop] thread started, waiting for enter+frames
+13:34:11 [v4][camera] first camera_info received: fx=453.0 fy=453.0 cx=328.3 cy=243.4
+13:34:11 [v4][svc] set_target red=True
+13:34:11 [v4][camera] FIRST FRAME received: (480, 640, 3) enc=rgb8
+13:34:11 [v4][svc] set_target green=True
+13:34:11 [v4][camera] depth source = /depth_cam/depth/image_raw (colour-aligned=False)
+13:34:11 [v4][init] captured endpoint pose t=[0.1271, 0.0000, 0.1821]
+13:34:11 [v4][svc] set_target blue=True
+13:34:11 [v4][svc] set_target scaff=True
+13:34:11 [v4][camera] FIRST DEPTH FRAME on /depth_cam/depth/image_raw: shape=(400, 640) dtype=uint16
+13:34:11 [v4][startup] v4 init finish
+13:34:12 [v4][init] depth->color TF resolved + composed into hand2cam
+13:34:12 [v4][svc] enable_sorting -> False
+13:34:14 [v4][publish] first frame published: shape=(480, 640, 3) step=1920 contig=True qos=reliable/depth10 topic=/custom_sortingv5/image_result
+13:34:14 [v4][engine-load] warmup pass done in 3.53s
+13:34:14 [v4][engine-load] engine active: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine (total load 3.54s, swap #1)
+13:34:14 [v4][engine-load] class names from model.names: ['scaff', 'light blue cube', 'dark blue cube', 'red cube', 'green cube']
+13:34:14 [v4][inference] first inference complete (60 ms)
+13:34:14 [v4][sorting-loop] first inference result reached the loop
+13:34:14 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/stepper/config/transform.yaml
+13:34:14 [v4][roi]   loaded plane: [-0.0034880954030786972, -0.07402865465086637, -0.9972500145304797, 0.21692724794133972]
+13:34:14 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+13:34:14 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+13:34:14 [v4][roi]   extrinsic plane shift done
+13:34:14 [v4][roi]   projected 4 corners to image pixels
+13:34:14 [v4][roi]   computed roi (y=75..393 x=169..573) on intrinsic shape=(3, 3)
+13:34:14 [v4][sorting-loop] ROI built - detection branch is now live
+13:34:16 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=42.6 pub_fps=10.8 frames=213 result_subs=1 roi=ok intrinsic=ok inference_age_ms=113 target=none transport=False sorting_thread=alive
+13:34:21 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=52.6 pub_fps=30.2 frames=476 result_subs=1 roi=ok intrinsic=ok inference_age_ms=144 target=none transport=False sorting_thread=alive
+13:34:26 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=44.8 pub_fps=30.4 frames=700 result_subs=1 roi=ok intrinsic=ok inference_age_ms=52 target=none transport=False sorting_thread=alive
+13:34:31 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=51.8 pub_fps=30.2 frames=959 result_subs=1 roi=ok intrinsic=ok inference_age_ms=91 target=none transport=False sorting_thread=alive
+13:34:35 [v4][enter] enter requested (camera subs were already alive)
+13:34:35 [v4][svc] enable_sorting -> True
+13:34:35 [v4][sorting-loop] LOCKED on light blue cube pixel=(214, 129) world=(0.306,0.058,-0.007)
+13:34:35 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/stepper/config/transform.yaml
+13:34:35 [v4][roi]   loaded plane: [-0.0034880954030786972, -0.07402865465086637, -0.9972500145304797, 0.21692724794133972]
+13:34:35 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+13:34:35 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+13:34:35 [v4][roi]   extrinsic plane shift done
+13:34:35 [v4][roi]   projected 4 corners to image pixels
+13:34:35 [v4][roi]   computed roi (y=75..393 x=169..573) on intrinsic shape=(3, 3)
+13:34:35 [v4][sorting-loop] ROI built - detection branch is now live
+13:34:36 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=52.2 pub_fps=30.2 frames=1220 result_subs=1 roi=ok intrinsic=ok inference_age_ms=152 target=light blue cube transport=False sorting_thread=alive
+13:34:37 [v4][sorting-loop] FIRING TRANSPORT label=light blue cube pos=(0.306,0.058,-0.007) yaw=557
+13:34:37 [v4][transport] BEGIN pick light blue cube at (0.306,0.062,0.003) yaw_pulse=557
+13:34:40 [v4][pick] descend obj_top_z=0.003 grab_depth=0.030 -> z=-0.020 [CLAMPED to floor] (worldpos=depth)
+13:34:41 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=53.0 pub_fps=30.6 frames=1485 result_subs=1 roi=ok intrinsic=ok inference_age_ms=93 target=light blue cube transport=True sorting_thread=alive
+13:34:46 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=56.6 pub_fps=30.2 frames=1768 result_subs=1 roi=ok intrinsic=ok inference_age_ms=156 target=light blue cube transport=True sorting_thread=alive
+13:34:46 [v4][pick] pick light blue cube complete (standard)
+13:34:46 [v4][transport] pick OK in 9.40s
+13:34:51 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=53.4 pub_fps=30.4 frames=2035 result_subs=1 roi=ok intrinsic=ok inference_age_ms=107 target=light blue cube transport=True sorting_thread=alive
+13:34:51 [v4][transport] place OK in 5.29s
+13:34:53 [v4][sorting-loop] LOCKED on light blue cube pixel=(201, 127) world=(0.308,0.065,-0.008)
+13:34:53 [v4][svc] enable_sorting -> False
+13:34:56 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=55.4 pub_fps=30.0 frames=2312 result_subs=1 roi=ok intrinsic=ok inference_age_ms=172 target=light blue cube transport=False sorting_thread=alive
+13:34:59 [v4][svc] enable_sorting -> False
+13:34:59 [v4][calibrate] sorting force-stopped; starting calibration
+13:35:00 [v4][calibrate] finished; rebuilding ROI from new transform.yaml
+13:35:00 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/stepper/config/transform.yaml
+13:35:00 [v4][roi]   loaded plane: [-0.0196625565618413, -0.10774791051285862, -0.9939837884239185, 0.21956103330314308]
+13:35:00 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+13:35:00 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+13:35:00 [v4][roi]   extrinsic plane shift done
+13:35:01 [v4][roi]   projected 4 corners to image pixels
+13:35:01 [v4][roi]   computed roi (y=90..396 x=155..554) on intrinsic shape=(3, 3)
+13:35:01 [v4][sorting-loop] ROI built - detection branch is now live
+13:35:01 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=40.6 pub_fps=28.5 frames=2519 result_subs=1 roi=ok intrinsic=ok inference_age_ms=161 target=none transport=False sorting_thread=alive
+13:35:06 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=12.1 pub_fps=14.5 frames=2579 result_subs=1 roi=ok intrinsic=ok inference_age_ms=61 target=none transport=False sorting_thread=alive
+13:35:08 [v4][calibrate] plane fit: [-0.002728131368699974, -0.09281602232013153, -0.9956795384559752, 0.22080127260798973]
+13:35:08 [v4][calibrate] plane refit: persisted
+13:35:08 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/stepper/config/transform.yaml
+13:35:09 [v4][roi]   loaded plane: [-0.002728131368699974, -0.09281602232013153, -0.9956795384559752, 0.22080127260798973]
+13:35:09 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+13:35:09 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+13:35:09 [v4][roi]   extrinsic plane shift done
+13:35:09 [v4][roi]   projected 4 corners to image pixels
+13:35:09 [v4][roi]   computed roi (y=90..396 x=155..554) on intrinsic shape=(3, 3)
+13:35:09 [v4][sorting-loop] ROI built - detection branch is now live
+13:35:11 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=43.4 pub_fps=29.6 frames=2793 result_subs=1 roi=ok intrinsic=ok inference_age_ms=57 target=none transport=False sorting_thread=alive
+13:35:15 [v4][svc] enable_sorting -> False
+13:35:16 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=46.8 pub_fps=30.2 frames=3027 result_subs=1 roi=ok intrinsic=ok inference_age_ms=103 target=none transport=False sorting_thread=alive
+13:35:21 [v4][publish] result_subs changed: 1 -> 0
+13:35:21 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=54.2 pub_fps=21.4 frames=3298 result_subs=0 roi=ok intrinsic=ok inference_age_ms=178 target=none transport=False sorting_thread=alive
+13:35:26 [v4][publish] result_subs changed: 0 -> 1
+13:35:26 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=48.2 pub_fps=28.2 frames=3539 result_subs=1 roi=ok intrinsic=ok inference_age_ms=106 target=none transport=False sorting_thread=alive
+13:35:31 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=53.8 pub_fps=30.2 frames=3808 result_subs=1 roi=ok intrinsic=ok inference_age_ms=161 target=none transport=False sorting_thread=alive
+13:35:36 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=50.6 pub_fps=30.4 frames=4061 result_subs=1 roi=ok intrinsic=ok inference_age_ms=77 target=none transport=False sorting_thread=alive
+13:35:41 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=51.6 pub_fps=30.2 frames=4319 result_subs=1 roi=ok intrinsic=ok inference_age_ms=136 target=none transport=False sorting_thread=alive
+13:35:41 [v4][calibrate] plane fit: [-0.0037127819808205516, -0.10160490575177217, -0.9948179021193458, 0.2204605712688469]
+13:35:41 [v4][calibrate] plane refit: persisted
+13:35:41 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/stepper/config/transform.yaml
+13:35:41 [v4][roi]   loaded plane: [-0.0037127819808205516, -0.10160490575177217, -0.9948179021193458, 0.2204605712688469]
+13:35:41 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+13:35:41 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+13:35:41 [v4][roi]   extrinsic plane shift done
+13:35:41 [v4][roi]   projected 4 corners to image pixels
+13:35:41 [v4][roi]   computed roi (y=90..396 x=155..554) on intrinsic shape=(3, 3)
+13:35:41 [v4][sorting-loop] ROI built - detection branch is now live
+13:35:46 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=54.6 pub_fps=30.4 frames=4592 result_subs=1 roi=ok intrinsic=ok inference_age_ms=66 target=none transport=False sorting_thread=alive
+13:35:51 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=48.0 pub_fps=30.4 frames=4832 result_subs=1 roi=ok intrinsic=ok inference_age_ms=114 target=none transport=False sorting_thread=alive
+13:35:56 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=52.1 pub_fps=30.2 frames=5093 result_subs=1 roi=ok intrinsic=ok inference_age_ms=53 target=none transport=False sorting_thread=alive
+13:36:01 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=39.4 pub_fps=30.4 frames=5290 result_subs=1 roi=ok intrinsic=ok inference_age_ms=89 target=none transport=False sorting_thread=alive
+13:36:06 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=47.9 pub_fps=30.2 frames=5530 result_subs=1 roi=ok intrinsic=ok inference_age_ms=146 target=none transport=False sorting_thread=alive
+13:36:09 [v4][enter] enter requested (camera subs were already alive)
+13:36:09 [v4][svc] enable_sorting -> True
+13:36:09 [v4][sorting-loop] LOCKED on light blue cube pixel=(202, 129) world=(0.307,0.065,-0.002)
+13:36:09 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/stepper/config/transform.yaml
+13:36:09 [v4][roi]   loaded plane: [-0.0037127819808205516, -0.10160490575177217, -0.9948179021193458, 0.2204605712688469]
+13:36:09 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+13:36:09 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+13:36:09 [v4][roi]   extrinsic plane shift done
+13:36:09 [v4][roi]   projected 4 corners to image pixels
+13:36:09 [v4][roi]   computed roi (y=90..396 x=155..554) on intrinsic shape=(3, 3)
+13:36:09 [v4][sorting-loop] ROI built - detection branch is now live
+13:36:10 [v4][sorting-loop] FIRING TRANSPORT label=light blue cube pos=(0.307,0.065,-0.002) yaw=562
+13:36:10 [v4][transport] BEGIN pick light blue cube at (0.307,0.069,0.008) yaw_pulse=562
+13:36:11 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=54.1 pub_fps=30.5 frames=5800 result_subs=1 roi=ok intrinsic=ok inference_age_ms=61 target=light blue cube transport=True sorting_thread=alive
+13:36:14 [v4][pick] descend obj_top_z=0.008 grab_depth=0.030 -> z=-0.020 [CLAMPED to floor] (worldpos=depth)
+13:36:16 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=53.0 pub_fps=30.2 frames=6065 result_subs=1 roi=ok intrinsic=ok inference_age_ms=107 target=light blue cube transport=True sorting_thread=alive
+13:36:20 [v4][pick] pick light blue cube complete (standard)
+13:36:20 [v4][transport] pick OK in 9.40s
+13:36:20 [v4][svc] enable_sorting -> False
+13:36:20 [v4][transport] place FAIL in 0.65s
+13:36:21 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=52.2 pub_fps=30.4 frames=6326 result_subs=1 roi=ok intrinsic=ok inference_age_ms=167 target=none transport=False sorting_thread=alive
+13:36:24 [v4][svc] enable_sorting -> False
+13:36:24 [v4][calibrate] sorting force-stopped; starting calibration
+13:36:26 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=41.8 pub_fps=30.2 frames=6535 result_subs=1 roi=ok intrinsic=ok inference_age_ms=170 target=none transport=False sorting_thread=alive
+13:36:26 [v4][calibrate] finished; rebuilding ROI from new transform.yaml
+13:36:26 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/stepper/config/transform.yaml
+13:36:26 [v4][roi]   loaded plane: [-0.010112789924278812, -0.07569144807306097, -0.9970800048985791, 0.21695526432383616]
+13:36:26 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+13:36:26 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+13:36:26 [v4][roi]   extrinsic plane shift done
+13:36:26 [v4][roi]   projected 4 corners to image pixels
+13:36:26 [v4][roi]   computed roi (y=77..389 x=126..528) on intrinsic shape=(3, 3)
+13:36:26 [v4][sorting-loop] ROI built - detection branch is now live
+13:36:31 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=14.4 pub_fps=19.3 frames=6607 result_subs=1 roi=ok intrinsic=ok inference_age_ms=140 target=none transport=False sorting_thread=alive
+13:36:36 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=39.8 pub_fps=26.9 frames=6805 result_subs=1 roi=ok intrinsic=ok inference_age_ms=179 target=none transport=False sorting_thread=alive
+13:36:41 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=48.6 pub_fps=30.4 frames=7048 result_subs=1 roi=ok intrinsic=ok inference_age_ms=104 target=none transport=False sorting_thread=alive
+13:36:46 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=52.0 pub_fps=30.2 frames=7308 result_subs=1 roi=ok intrinsic=ok inference_age_ms=146 target=none transport=False sorting_thread=alive
+13:36:48 [v4][main] KeyboardInterrupt - shutting down

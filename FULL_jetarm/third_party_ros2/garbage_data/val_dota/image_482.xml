@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_482</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_482.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>OralLiquidBottle</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>370</x0><y0>244</y0><x1>259</x1><y1>279</y1><x2>234</x2><y2>198</y2><x3>345</x3><y3>164</y3></bndbox>
+  </object>
+</annotation>

@@ -1,0 +1,21 @@
+# v5 ui session 2026-06-23_14-50-33 pid=63709
+14:51:07 [ui][calibrate] CALIBRATE button pressed
+14:51:11 [ui][calibrate] OK source=vendor
+14:52:32 [ui][calibrate] CALIBRATE button pressed
+14:52:34 [ui][calibrate] OK source=vendor
+14:53:02 [ui][calibrate] CALIBRATE button pressed
+14:53:04 [ui][calibrate] OK source=vendor
+14:53:38 [ui][calibrate] CALIBRATE button pressed
+14:53:40 [ui][calibrate] OK source=vendor
+14:53:43 [ui][plane_refit] failed
+14:53:48 [ui][plane_refit] failed
+14:54:28 [ui][calibrate] CALIBRATE button pressed
+14:54:30 [ui][calibrate] OK source=vendor
+14:54:32 [ui][plane_refit] failed
+14:54:37 [ui][calibrate] CALIBRATE button pressed
+14:54:39 [ui][calibrate] OK source=inline
+14:57:05 [ui][calibrate] CALIBRATE button pressed
+14:57:08 [ui][calibrate] OK source=inline
+14:57:09 [ui][plane_refit] failed
+14:57:13 [ui][plane_refit] failed
+14:59:49 [ui][push_logs] script missing in /home/ubuntu/new-repo2

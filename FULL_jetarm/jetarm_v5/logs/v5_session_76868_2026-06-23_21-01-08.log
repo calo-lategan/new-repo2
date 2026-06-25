@@ -1,0 +1,85 @@
+# v5 session 2026-06-23_21-01-08 pid=76868
+21:01:15 [v4][main] starting custom_sortingv5
+21:01:15 [v4][init] constructing node 'custom_sortingv5'
+21:01:15 [v4][init] waiting for kinematics/set_pose_target service...
+21:01:15 [v4][init] kinematics/set_pose_target ready
+21:01:15 [v4][init] bus_servo/get_state ready (full feedback enabled)
+21:01:15 [v4][inference] worker thread starting
+21:01:15 [v4][init] inference worker started (engine=/home/ubuntu/third_party_ros2/data/scaff_cube_best.engine)
+21:01:15 [v4][engine-load] starting load: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine
+21:01:15 [v4][init] camera subscriptions created (always-on) - topic /depth_cam/rgb/image_raw + camera_info
+21:01:15 [v4][init] depth subscribed: /depth_cam/depth_to_color
+21:01:15 [v4][main] spinning executor (4 threads)
+21:01:15 [v4][startup] spawning sorting + transport threads
+21:01:15 [v4][sorting-loop] thread started, waiting for enter+frames
+21:01:15 [v4][svc] set_target red=True
+21:01:15 [v4][svc] set_target green=True
+21:01:15 [v4][svc] set_target blue=True
+21:01:15 [v4][svc] set_target scaff=True
+21:01:15 [v4][startup] v4 init finish
+21:01:15 [v4][engine-load] YOLO() constructed in 0.06s task=obb (raw='obb', override='obb')
+21:01:16 [v4][camera] FIRST FRAME received: (480, 640, 3) enc=rgb8
+21:01:16 [v4][camera] first camera_info received: fx=453.0 fy=453.0 cx=328.3 cy=243.4
+21:01:16 [v4][publish] first frame published: shape=(480, 640, 3) step=1920 contig=True qos=reliable/depth10 topic=/custom_sortingv5/image_result
+21:01:16 [v4][init] depth->color TF resolved + composed into hand2cam
+21:01:19 [v4][engine-load] warmup pass done in 3.70s
+21:01:19 [v4][engine-load] engine active: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine (total load 3.76s, swap #1)
+21:01:19 [v4][engine-load] class names from model.names: ['scaff', 'light blue cube', 'dark blue cube', 'red cube', 'green cube']
+21:01:19 [v4][inference] first inference complete (31 ms)
+21:01:19 [v4][sorting-loop] first inference result reached the loop
+21:01:19 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/app/config/transform.yaml
+21:01:19 [v4][roi]   loaded plane: [-0.015408908686640967, -0.08243832166670331, -0.996477038698767, 0.21877395196631844]
+21:01:19 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+21:01:19 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+21:01:19 [v4][roi]   extrinsic plane shift done
+21:01:19 [v4][roi]   projected 4 corners to image pixels
+21:01:19 [v4][roi]   computed roi (y=0..513 x=21..544) on intrinsic shape=(3, 3)
+21:01:19 [v4][sorting-loop] ROI built - detection branch is now live
+21:01:20 [v4][svc] enable_sorting -> False
+21:01:20 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=37.8 pub_fps=23.8 frames=189 result_subs=0 roi=ok intrinsic=ok inference_age_ms=115 target=none transport=False sorting_thread=alive
+21:01:25 [v4][publish] result_subs changed: 0 -> 1
+21:01:25 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=48.6 pub_fps=30.2 frames=432 result_subs=1 roi=ok intrinsic=ok inference_age_ms=74 target=none transport=False sorting_thread=alive
+21:01:30 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=51.2 pub_fps=30.4 frames=688 result_subs=1 roi=ok intrinsic=ok inference_age_ms=56 target=none transport=False sorting_thread=alive
+21:01:35 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=54.2 pub_fps=30.2 frames=959 result_subs=1 roi=ok intrinsic=ok inference_age_ms=93 target=none transport=False sorting_thread=alive
+21:01:40 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=51.0 pub_fps=30.2 frames=1214 result_subs=1 roi=ok intrinsic=ok inference_age_ms=107 target=none transport=False sorting_thread=alive
+21:01:45 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=55.7 pub_fps=30.5 frames=1493 result_subs=1 roi=ok intrinsic=ok inference_age_ms=63 target=none transport=False sorting_thread=alive
+21:01:50 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=53.6 pub_fps=30.3 frames=1760 result_subs=1 roi=ok intrinsic=ok inference_age_ms=57 target=none transport=False sorting_thread=alive
+21:01:55 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=51.6 pub_fps=30.2 frames=2018 result_subs=1 roi=ok intrinsic=ok inference_age_ms=68 target=none transport=False sorting_thread=alive
+21:02:00 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=53.7 pub_fps=30.4 frames=2287 result_subs=1 roi=ok intrinsic=ok inference_age_ms=88 target=none transport=False sorting_thread=alive
+21:02:05 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=49.5 pub_fps=30.2 frames=2534 result_subs=1 roi=ok intrinsic=ok inference_age_ms=76 target=none transport=False sorting_thread=alive
+21:02:10 [v4][svc] enable_sorting -> False
+21:02:10 [v4][calibrate] sorting force-stopped; starting calibration
+21:02:10 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=48.5 pub_fps=30.2 frames=2778 result_subs=1 roi=ok intrinsic=ok inference_age_ms=128 target=none transport=False sorting_thread=alive
+21:02:11 [v4][calibrate] finished; rebuilding ROI from new transform.yaml
+21:02:11 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/app/config/transform.yaml
+21:02:11 [v4][roi]   loaded plane: [-0.004463572633386076, -0.07888332624479708, -0.9968738623115282, 0.21744399303069167]
+21:02:11 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+21:02:11 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+21:02:11 [v4][roi]   extrinsic plane shift done
+21:02:11 [v4][roi]   projected 4 corners to image pixels
+21:02:11 [v4][roi]   computed roi (y=74..393 x=170..573) on intrinsic shape=(3, 3)
+21:02:11 [v4][sorting-loop] ROI built - detection branch is now live
+21:02:15 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=18.3 pub_fps=21.7 frames=2870 result_subs=1 roi=ok intrinsic=ok inference_age_ms=163 target=none transport=False sorting_thread=alive
+21:02:20 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=38.7 pub_fps=28.3 frames=3061 result_subs=1 roi=ok intrinsic=ok inference_age_ms=91 target=none transport=False sorting_thread=alive
+21:02:25 [v4][calibrate] plane refit failed: no_depth_subscription
+21:02:25 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=53.3 pub_fps=30.4 frames=3328 result_subs=1 roi=ok intrinsic=ok inference_age_ms=52 target=none transport=False sorting_thread=alive
+21:02:30 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=51.1 pub_fps=30.2 frames=3583 result_subs=1 roi=ok intrinsic=ok inference_age_ms=64 target=none transport=False sorting_thread=alive
+21:02:35 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=51.2 pub_fps=30.4 frames=3839 result_subs=1 roi=ok intrinsic=ok inference_age_ms=80 target=none transport=False sorting_thread=alive
+21:02:40 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=54.4 pub_fps=30.2 frames=4111 result_subs=1 roi=ok intrinsic=ok inference_age_ms=38 target=none transport=False sorting_thread=alive
+21:02:45 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=49.8 pub_fps=30.2 frames=4360 result_subs=1 roi=ok intrinsic=ok inference_age_ms=134 target=none transport=False sorting_thread=alive
+21:02:50 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=54.4 pub_fps=30.4 frames=4632 result_subs=1 roi=ok intrinsic=ok inference_age_ms=103 target=none transport=False sorting_thread=alive
+21:02:55 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=50.2 pub_fps=30.4 frames=4883 result_subs=1 roi=ok intrinsic=ok inference_age_ms=81 target=none transport=False sorting_thread=alive
+21:03:00 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=50.8 pub_fps=30.2 frames=5137 result_subs=1 roi=ok intrinsic=ok inference_age_ms=67 target=none transport=False sorting_thread=alive
+21:03:05 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=54.7 pub_fps=30.4 frames=5411 result_subs=1 roi=ok intrinsic=ok inference_age_ms=57 target=none transport=False sorting_thread=alive
+21:03:10 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=47.6 pub_fps=30.2 frames=5649 result_subs=1 roi=ok intrinsic=ok inference_age_ms=134 target=none transport=False sorting_thread=alive
+21:03:15 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=51.8 pub_fps=30.4 frames=5908 result_subs=1 roi=ok intrinsic=ok inference_age_ms=62 target=none transport=False sorting_thread=alive
+21:03:20 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=49.2 pub_fps=30.2 frames=6154 result_subs=1 roi=ok intrinsic=ok inference_age_ms=48 target=none transport=False sorting_thread=alive
+21:03:25 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=40.2 pub_fps=30.2 frames=6355 result_subs=1 roi=ok intrinsic=ok inference_age_ms=96 target=none transport=False sorting_thread=alive
+21:03:30 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=51.8 pub_fps=30.2 frames=6614 result_subs=1 roi=ok intrinsic=ok inference_age_ms=68 target=none transport=False sorting_thread=alive
+21:03:35 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=51.4 pub_fps=30.4 frames=6871 result_subs=1 roi=ok intrinsic=ok inference_age_ms=82 target=none transport=False sorting_thread=alive
+21:03:40 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=49.0 pub_fps=30.2 frames=7116 result_subs=1 roi=ok intrinsic=ok inference_age_ms=59 target=none transport=False sorting_thread=alive
+21:03:45 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=51.2 pub_fps=30.4 frames=7372 result_subs=1 roi=ok intrinsic=ok inference_age_ms=80 target=none transport=False sorting_thread=alive
+21:03:50 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=49.2 pub_fps=30.2 frames=7618 result_subs=1 roi=ok intrinsic=ok inference_age_ms=103 target=none transport=False sorting_thread=alive
+21:03:55 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=54.3 pub_fps=30.4 frames=7890 result_subs=1 roi=ok intrinsic=ok inference_age_ms=51 target=none transport=False sorting_thread=alive
+21:04:00 [v4][publish] result_subs changed: 1 -> 0
+21:04:00 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=43.0 pub_fps=30.0 frames=8105 result_subs=0 roi=ok intrinsic=ok inference_age_ms=62 target=none transport=False sorting_thread=alive

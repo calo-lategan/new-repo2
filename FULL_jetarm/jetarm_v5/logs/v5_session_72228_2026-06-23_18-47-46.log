@@ -1,0 +1,70 @@
+# v5 session 2026-06-23_18-47-46 pid=72228
+18:47:51 [v4][main] starting custom_sortingv5
+18:47:51 [v4][init] constructing node 'custom_sortingv5'
+18:47:51 [v4][init] waiting for kinematics/set_pose_target service...
+18:47:51 [v4][init] kinematics/set_pose_target ready
+18:47:51 [v4][init] bus_servo/get_state ready (full feedback enabled)
+18:47:51 [v4][inference] worker thread starting
+18:47:51 [v4][init] inference worker started (engine=/home/ubuntu/third_party_ros2/data/scaff_cube_best.engine)
+18:47:51 [v4][engine-load] starting load: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine
+18:47:51 [v4][engine-load] YOLO() constructed in 0.00s task=obb (raw='obb', override='obb')
+18:47:51 [v4][init] camera subscriptions created (always-on) - topic /depth_cam/rgb/image_raw + camera_info
+18:47:51 [v4][init] depth subscribed: /depth_cam/depth_to_color
+18:47:51 [v4][main] spinning executor (4 threads)
+18:47:51 [v4][startup] spawning sorting + transport threads
+18:47:51 [v4][sorting-loop] thread started, waiting for enter+frames
+18:47:51 [v4][svc] set_target red=True
+18:47:51 [v4][svc] set_target green=True
+18:47:51 [v4][svc] set_target blue=True
+18:47:51 [v4][camera] FIRST FRAME received: (480, 640, 3) enc=rgb8
+18:47:51 [v4][svc] set_target scaff=True
+18:47:51 [v4][startup] v4 init finish
+18:47:51 [v4][camera] first camera_info received: fx=453.0 fy=453.0 cx=328.3 cy=243.4
+18:47:51 [v4][publish] first frame published: shape=(480, 640, 3) step=1920 contig=True qos=reliable/depth10 topic=/custom_sortingv5/image_result
+18:47:52 [v4][init] depth->color TF resolved + composed into hand2cam
+18:47:53 [v4][engine-load] warmup pass done in 1.79s
+18:47:53 [v4][engine-load] engine active: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine (total load 1.80s, swap #1)
+18:47:53 [v4][engine-load] class names from model.names: ['scaff', 'light blue cube', 'dark blue cube', 'red cube', 'green cube']
+18:47:53 [v4][engine-load] class 'dark blue cube' has NO place target - _do_place will refuse it; set one in the Places tab
+18:47:53 [v4][engine-load] class 'green cube' has NO place target - _do_place will refuse it; set one in the Places tab
+18:47:53 [v4][engine-load] class 'light blue cube' has NO place target - _do_place will refuse it; set one in the Places tab
+18:47:53 [v4][engine-load] class 'red cube' has NO place target - _do_place will refuse it; set one in the Places tab
+18:47:53 [v4][inference] first inference complete (43 ms)
+18:47:53 [v4][sorting-loop] first inference result reached the loop
+18:47:53 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/app/config/transform.yaml
+18:47:53 [v4][roi]   loaded plane: [-0.015408908686640967, -0.08243832166670331, -0.996477038698767, 0.21877395196631844]
+18:47:53 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+18:47:53 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+18:47:53 [v4][roi]   extrinsic plane shift done
+18:47:53 [v4][roi]   projected 4 corners to image pixels
+18:47:53 [v4][roi]   computed roi (y=0..513 x=21..544) on intrinsic shape=(3, 3)
+18:47:53 [v4][sorting-loop] ROI built - detection branch is now live
+18:47:56 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=48.6 pub_fps=29.2 frames=243 result_subs=0 roi=ok intrinsic=ok inference_age_ms=24 target=none transport=False sorting_thread=alive
+18:48:01 [v4][publish] result_subs changed: 0 -> 1
+18:48:01 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=49.0 pub_fps=28.4 frames=488 result_subs=1 roi=ok intrinsic=ok inference_age_ms=75 target=none transport=False sorting_thread=alive
+18:48:06 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=49.9 pub_fps=30.3 frames=738 result_subs=1 roi=ok intrinsic=ok inference_age_ms=54 target=none transport=False sorting_thread=alive
+18:48:11 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=50.5 pub_fps=30.3 frames=990 result_subs=1 roi=ok intrinsic=ok inference_age_ms=99 target=none transport=False sorting_thread=alive
+18:48:16 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=56.6 pub_fps=30.4 frames=1273 result_subs=1 roi=ok intrinsic=ok inference_age_ms=59 target=none transport=False sorting_thread=alive
+18:48:21 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=50.6 pub_fps=30.2 frames=1526 result_subs=1 roi=ok intrinsic=ok inference_age_ms=76 target=none transport=False sorting_thread=alive
+18:48:26 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=53.8 pub_fps=30.4 frames=1795 result_subs=1 roi=ok intrinsic=ok inference_age_ms=71 target=none transport=False sorting_thread=alive
+18:48:31 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=52.1 pub_fps=30.3 frames=2056 result_subs=1 roi=ok intrinsic=ok inference_age_ms=104 target=none transport=False sorting_thread=alive
+18:48:36 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=50.3 pub_fps=30.3 frames=2307 result_subs=1 roi=ok intrinsic=ok inference_age_ms=100 target=none transport=False sorting_thread=alive
+18:48:41 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=54.0 pub_fps=30.4 frames=2577 result_subs=1 roi=ok intrinsic=ok inference_age_ms=71 target=none transport=False sorting_thread=alive
+18:48:46 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=48.4 pub_fps=30.2 frames=2819 result_subs=1 roi=ok intrinsic=ok inference_age_ms=42 target=none transport=False sorting_thread=alive
+18:48:51 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=53.0 pub_fps=30.4 frames=3084 result_subs=1 roi=ok intrinsic=ok inference_age_ms=80 target=none transport=False sorting_thread=alive
+18:48:56 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=49.2 pub_fps=30.2 frames=3330 result_subs=1 roi=ok intrinsic=ok inference_age_ms=61 target=none transport=False sorting_thread=alive
+18:49:01 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=50.6 pub_fps=30.4 frames=3583 result_subs=1 roi=ok intrinsic=ok inference_age_ms=104 target=none transport=False sorting_thread=alive
+18:49:06 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=52.7 pub_fps=30.1 frames=3847 result_subs=1 roi=ok intrinsic=ok inference_age_ms=111 target=none transport=False sorting_thread=alive
+18:49:11 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=48.3 pub_fps=30.3 frames=4088 result_subs=1 roi=ok intrinsic=ok inference_age_ms=120 target=none transport=False sorting_thread=alive
+18:49:16 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=48.8 pub_fps=30.4 frames=4332 result_subs=1 roi=ok intrinsic=ok inference_age_ms=44 target=none transport=False sorting_thread=alive
+18:49:21 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=51.6 pub_fps=30.4 frames=4590 result_subs=1 roi=ok intrinsic=ok inference_age_ms=48 target=none transport=False sorting_thread=alive
+18:49:23 [v4][camera] cv_bridge output publish failed
+18:49:23 [v4][camera] EXCEPTION: RCLError: Failed to publish: publisher's context is invalid, at ./src/rcl/publisher.c:389
+Traceback (most recent call last):
+  File "/home/ubuntu/ros2_ws/build/app/app/custom_sortingv5.py", line 3034, in _publish_image
+    self.result_publisher.publish(msg)
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/publisher.py", line 70, in publish
+    self.__publisher.publish(msg)
+rclpy._rclpy_pybind11.RCLError: Failed to publish: publisher's context is invalid, at ./src/rcl/publisher.c:389
+18:49:23 [v4][main] KeyboardInterrupt - shutting down
+18:49:23 [v4][inference] worker thread stopped

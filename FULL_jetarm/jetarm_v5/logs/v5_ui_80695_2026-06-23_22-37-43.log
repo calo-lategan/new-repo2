@@ -1,0 +1,18 @@
+# v5 ui session 2026-06-23_22-37-43 pid=80695
+22:37:59 [ui][color] loaded red: min=[9, 146, 146] max=[160, 187, 207]
+22:38:38 [ui][calib_window] spawned gnome-terminal -> depth
+22:39:07 [ui][push_logs] running /home/ubuntu/jetarm_v5_src/tools/push_logs.sh REPO=/home/ubuntu/jetarm_v5_src
+22:41:07 [ui][push_logs] crashed
+22:41:07 EXCEPTION: TimeoutExpired: Command '['bash', '/home/ubuntu/jetarm_v5_src/tools/push_logs.sh']' timed out after 120 seconds
+Traceback (most recent call last):
+  File "/home/ubuntu/ros2_ws/build/app/app/tune_uiv5.py", line 1678, in go
+    res = subprocess.run(['bash', script], env=env,
+  File "/usr/lib/python3.10/subprocess.py", line 505, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+  File "/usr/lib/python3.10/subprocess.py", line 1154, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+  File "/usr/lib/python3.10/subprocess.py", line 2022, in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+  File "/usr/lib/python3.10/subprocess.py", line 1198, in _check_timeout
+    raise TimeoutExpired(
+subprocess.TimeoutExpired: Command '['bash', '/home/ubuntu/jetarm_v5_src/tools/push_logs.sh']' timed out after 120 seconds

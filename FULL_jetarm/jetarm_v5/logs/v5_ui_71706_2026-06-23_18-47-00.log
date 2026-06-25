@@ -1,0 +1,12 @@
+# v5 ui session 2026-06-23_18-47-00 pid=71706
+18:47:09 [ui][uncaught] NameError: name 'calibrate_tab' is not defined
+Traceback (most recent call last):
+  File "/home/ubuntu/ros2_ws/install/app/lib/app/tune_uiv5", line 33, in <module>
+    sys.exit(load_entry_point('app', 'console_scripts', 'tune_uiv5')())
+  File "/home/ubuntu/ros2_ws/build/app/app/tune_uiv5.py", line 2575, in main
+    ui = TunerUI(client)
+  File "/home/ubuntu/ros2_ws/build/app/app/tune_uiv5.py", line 514, in __init__
+    self._build()
+  File "/home/ubuntu/ros2_ws/build/app/app/tune_uiv5.py", line 839, in _build
+    self._add_calibrate_save_bar(calibrate_tab, calib_keys)
+NameError: name 'calibrate_tab' is not defined

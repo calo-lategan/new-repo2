@@ -1,0 +1,9 @@
+# v5 ui session 2026-06-24_13-03-34 pid=94356
+13:03:50 [ui][color] loaded red: min=[0, 140, 131] max=[55, 255, 255]
+13:05:17 [ui][calibrate] CALIBRATE button pressed
+13:05:21 [ui][calibrate] OK source=vendor
+13:05:30 [ui][plane_refit] OK
+13:05:43 [ui][calibrate] CALIBRATE button pressed
+13:05:45 [ui][calibrate] OK source=vendor
+13:06:06 [ui][calibrate] CALIBRATE button pressed
+13:06:08 [ui][calibrate] OK source=vendor

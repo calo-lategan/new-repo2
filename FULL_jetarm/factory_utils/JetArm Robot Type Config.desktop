@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=JetArm Robot Type Config
+Comment=JetArm Robot Type Config
+Encoding=UTF-8
+Exec=python3 /home/ubuntu/factory_utils/robot_type_config/main.py
+Terminal=false
+MultipleArgs=false
+Categories=Application;Development;
+StartupNotify=true
+Icon=/home/ubuntu/factory_utils/robot_type_config/icon.png
+

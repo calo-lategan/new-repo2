@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_715</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_715.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>Toothbrush</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>261</x0><y0>203</y0><x1>374</x1><y1>240</y1><x2>346</x2><y2>324</y2><x3>233</x3><y3>286</y3></bndbox>
+  </object>
+</annotation>

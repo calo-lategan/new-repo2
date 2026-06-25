@@ -1,0 +1,11 @@
+# Files >= 95M (heavy binaries whose CONTENT was NOT copied)
+
+  757637540  /home/ubuntu/third_party_ros2/Open3D/build/librealsense/src/ext_librealsense-build/librealsense2.a
+  757637540  /home/ubuntu/third_party_ros2/Open3D/build/librealsense/lib/librealsense2.a
+  495801497  /home/ubuntu/third_party_ros2/Open3D/3rdparty_downloads/filament/d1d873d27f43ba0cee1674a555cc0f18daac3008.tar.gz
+  445289744  /home/ubuntu/third_party_ros2/Open3D/build/lib/Release/libOpen3D.so
+  248506838  /home/ubuntu/third_party_ros2/Open3D/.git/objects/pack/pack-9a4c58b7741d1a26cd6412ef7c040c1f0bbf9d0b.pack
+  144972346  /home/ubuntu/ros2_ws/src/large_models_examples/large_models_examples/resources/models/FastSAM-x.pt
+  139262215  /home/ubuntu/ros2_ws/src/large_models_examples/.git/objects/pack/pack-f06558f8c644171b83bf91fb9f76a06faa68e8be.pack
+  117102880  /home/ubuntu/large_models/.git/objects/pack/pack-d9cff79a744300147dbe1a470750930e779b02ee.pack
+  105600124  /home/ubuntu/third_party_ros2/Open3D/build/uvatlas/src/ext_uvatlas-build/CMakeFiles/UVAtlas.dir/cmake_pch.hxx.gch

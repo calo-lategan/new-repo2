@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_37</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_37.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>Marker</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>338</x0><y0>86</y0><x1>465</x1><y1>120</y1><x2>441</x2><y2>210</y2><x3>314</x3><y3>176</y3></bndbox>
+  </object>
+</annotation>

@@ -1,0 +1,9 @@
+# v5 ui session 2026-06-24_13-34-02 pid=95933
+13:34:14 [ui][color] loaded red: min=[0, 140, 131] max=[55, 255, 255]
+13:34:59 [ui][calibrate] CALIBRATE button pressed
+13:35:02 [ui][calibrate] OK source=vendor
+13:35:08 [ui][plane_refit] OK
+13:35:11 [ui][calib_window] spawned gnome-terminal -> depth
+13:35:41 [ui][plane_refit] OK
+13:35:56 [ui][color] enter OK (start)
+13:36:24 [ui][calibrate] CALIBRATE button pressed

@@ -1,0 +1,22 @@
+<?xml version="1.0" ?>
+<annotation>
+    <folder>JPEGImages</folder>
+    <filename>TNT_0392.jpg</filename>
+    <size>
+        <width>4096</width>
+        <height>2730</height>
+        <depth>3</depth>
+    </size>
+    <object>
+        <name>0</name>
+        <pose>Unspecified</pose>
+        <truncated>0</truncated>
+        <difficult>0</difficult>
+        <bndbox>
+            <xmin>2008</xmin>
+            <ymin>1169</ymin>
+            <xmax>2706</xmax>
+            <ymax>1778</ymax>
+        </bndbox>
+    </object>
+</annotation>

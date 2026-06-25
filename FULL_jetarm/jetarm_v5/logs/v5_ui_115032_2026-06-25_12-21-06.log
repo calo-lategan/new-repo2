@@ -1,0 +1,9 @@
+# v5 ui session 2026-06-25_12-21-06 pid=115032
+12:21:16 [ui][color] loaded red: min=[0, 140, 131] max=[55, 255, 255]
+12:22:41 [ui][calibrate] CALIBRATE button pressed
+12:22:45 [ui][calibrate] OK source=vendor
+12:25:11 [ui][calibrate] CALIBRATE button pressed
+12:25:23 [ui][calibrate] timed out waiting for heartbeat
+12:25:24 [ui][calibrate] CALIBRATE button pressed
+12:25:36 [ui][calibrate] timed out waiting for heartbeat
+12:25:41 [ui][calibrate] CALIBRATE button pressed

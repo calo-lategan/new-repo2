@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_687</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_687.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>Umbrella</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>358</x0><y0>208</y0><x1>233</x1><y1>213</y1><x2>230</x2><y2>126</y2><x3>355</x3><y3>121</y3></bndbox>
+  </object>
+</annotation>

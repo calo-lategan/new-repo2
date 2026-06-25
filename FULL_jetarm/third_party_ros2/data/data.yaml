@@ -1,0 +1,11 @@
+path: /home/ubuntu/third_party_ros2/data
+train: /home/ubuntu/third_party_ros2/data/images/train
+val: /home/ubuntu/third_party_ros2/data/images/val
+test: /home/ubuntu/third_party_ros2/data/images/test
+nc: 5
+names:
+  0: scaff
+  1: light blue cube
+  2: dark blue cube
+  3: red cube
+  4: green cube

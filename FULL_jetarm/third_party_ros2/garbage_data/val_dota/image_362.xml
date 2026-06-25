@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_362</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_362.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>Ketchup</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>288</x0><y0>86</y0><x1>371</x1><y1>143</y1><x2>301</x2><y2>245</y2><x3>218</x3><y3>188</y3></bndbox>
+  </object>
+</annotation>

@@ -1,0 +1,34 @@
+<?xml version="1.0" ?>
+<annotation>
+    <folder>JPEGImages</folder>
+    <filename>TNT_0651.jpg</filename>
+    <size>
+        <width>4096</width>
+        <height>2730</height>
+        <depth>3</depth>
+    </size>
+    <object>
+        <name>3</name>
+        <pose>Unspecified</pose>
+        <truncated>0</truncated>
+        <difficult>0</difficult>
+        <bndbox>
+            <xmin>1489</xmin>
+            <ymin>870</ymin>
+            <xmax>2184</xmax>
+            <ymax>1336</ymax>
+        </bndbox>
+    </object>
+    <object>
+        <name>2</name>
+        <pose>Unspecified</pose>
+        <truncated>0</truncated>
+        <difficult>0</difficult>
+        <bndbox>
+            <xmin>3190</xmin>
+            <ymin>2486</ymin>
+            <xmax>3750</xmax>
+            <ymax>2728</ymax>
+        </bndbox>
+    </object>
+</annotation>

@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_152</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_152.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>BananaPeel</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>336</x0><y0>354</y0><x1>206</x1><y1>379</y1><x2>188</x2><y2>282</y2><x3>317</x3><y3>257</y3></bndbox>
+  </object>
+</annotation>

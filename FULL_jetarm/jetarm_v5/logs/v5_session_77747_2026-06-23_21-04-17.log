@@ -1,0 +1,170 @@
+# v5 session 2026-06-23_21-04-17 pid=77747
+21:04:23 [v4][main] starting custom_sortingv5
+21:04:23 [v4][init] constructing node 'custom_sortingv5'
+21:04:23 [v4][init] waiting for kinematics/set_pose_target service...
+21:04:24 [v4][init] kinematics/set_pose_target ready
+21:04:24 [v4][init] bus_servo/get_state ready (full feedback enabled)
+21:04:24 [v4][inference] worker thread starting
+21:04:24 [v4][init] inference worker started (engine=/home/ubuntu/third_party_ros2/data/scaff_cube_best.engine)
+21:04:24 [v4][engine-load] starting load: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine
+21:04:24 [v4][init] camera subscriptions created (always-on) - topic /depth_cam/rgb/image_raw + camera_info
+21:04:24 [v4][init] depth subscribed: /depth_cam/depth_to_color
+21:04:24 [v4][main] spinning executor (4 threads)
+21:04:24 [v4][startup] spawning sorting + transport threads
+21:04:24 [v4][sorting-loop] thread started, waiting for enter+frames
+21:04:24 [v4][svc] set_target red=True
+21:04:24 [v4][svc] set_target green=True
+21:04:24 [v4][svc] set_target blue=True
+21:04:24 [v4][svc] set_target scaff=True
+21:04:24 [v4][startup] v4 init finish
+21:04:24 [v4][engine-load] YOLO() constructed in 0.03s task=obb (raw='obb', override='obb')
+21:04:25 [v4][svc] enable_sorting -> False
+21:04:26 [v4][camera] FIRST FRAME received: (480, 640, 3) enc=rgb8
+21:04:26 [v4][publish] first frame published: shape=(480, 640, 3) step=1920 contig=True qos=reliable/depth10 topic=/custom_sortingv5/image_result
+21:04:26 [v4][camera] first camera_info received: fx=453.0 fy=453.0 cx=328.3 cy=243.4
+21:04:26 [v4][init] depth->color TF resolved + composed into hand2cam
+21:04:26 [v4][engine-load] warmup pass done in 1.95s
+21:04:26 [v4][engine-load] engine active: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine (total load 1.98s, swap #1)
+21:04:26 [v4][engine-load] class names from model.names: ['scaff', 'light blue cube', 'dark blue cube', 'red cube', 'green cube']
+21:04:26 [v4][inference] first inference complete (18 ms)
+21:04:26 [v4][sorting-loop] first inference result reached the loop
+21:04:26 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/app/config/transform.yaml
+21:04:26 [v4][roi]   loaded plane: [-0.004463572633386076, -0.07888332624479708, -0.9968738623115282, 0.21744399303069167]
+21:04:26 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+21:04:26 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+21:04:26 [v4][roi]   extrinsic plane shift done
+21:04:26 [v4][roi]   projected 4 corners to image pixels
+21:04:26 [v4][roi]   computed roi (y=74..393 x=170..573) on intrinsic shape=(3, 3)
+21:04:26 [v4][sorting-loop] ROI built - detection branch is now live
+21:04:29 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=32.0 pub_fps=19.4 frames=160 result_subs=1 roi=ok intrinsic=ok inference_age_ms=108 target=none transport=False sorting_thread=alive
+21:04:33 [v4][svc] enable_sorting -> False
+21:04:33 [v4][calibrate] sorting force-stopped; starting calibration
+21:04:34 [v4][calibrate] finished; rebuilding ROI from new transform.yaml
+21:04:34 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/app/config/transform.yaml
+21:04:34 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=48.5 pub_fps=29.9 frames=403 result_subs=1 roi=ok intrinsic=ok inference_age_ms=138 target=none transport=False sorting_thread=alive
+21:04:34 [v4][roi]   loaded plane: [-0.004463572633386076, -0.07888332624479708, -0.9968738623115282, 0.21744399303069167]
+21:04:34 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+21:04:34 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+21:04:34 [v4][roi]   extrinsic plane shift done
+21:04:34 [v4][roi]   projected 4 corners to image pixels
+21:04:34 [v4][roi]   computed roi (y=74..393 x=170..573) on intrinsic shape=(3, 3)
+21:04:34 [v4][sorting-loop] ROI built - detection branch is now live
+21:04:39 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=19.1 pub_fps=21.8 frames=499 result_subs=1 roi=ok intrinsic=ok inference_age_ms=136 target=none transport=False sorting_thread=alive
+21:04:44 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=48.4 pub_fps=29.5 frames=739 result_subs=1 roi=ok intrinsic=ok inference_age_ms=88 target=none transport=False sorting_thread=alive
+21:04:47 [v4][enter] enter requested (camera subs were already alive)
+21:04:47 [v4][svc] enable_sorting -> True
+21:04:47 [v4][sorting-loop] UNHANDLED exception — loop continuing
+21:04:47 [v4][sorting-loop] EXCEPTION: TypeError: 'NoneType' object is not subscriptable
+Traceback (most recent call last):
+  File "/home/ubuntu/ros2_ws/build/app/app/custom_sortingv5.py", line 3005, in sorting_loop
+    position, projection_matrix = self.get_object_world_position(
+  File "/home/ubuntu/ros2_ws/build/app/app/custom_sortingv5.py", line 2581, in get_object_world_position
+    position = white_area_center[:3, 3] + world_pose
+TypeError: 'NoneType' object is not subscriptable
+21:04:47 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/app/config/transform.yaml
+21:04:47 [v4][roi]   loaded plane: [-0.004463572633386076, -0.07888332624479708, -0.9968738623115282, 0.21744399303069167]
+21:04:47 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+21:04:47 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+21:04:47 [v4][roi]   extrinsic plane shift done
+21:04:47 [v4][roi]   projected 4 corners to image pixels
+21:04:47 [v4][roi]   computed roi (y=74..393 x=170..573) on intrinsic shape=(3, 3)
+21:04:47 [v4][sorting-loop] ROI built - detection branch is now live
+21:04:48 [v4][sorting-loop] LOCKED on red cube pixel=(212, 347) world=(0.143,0.062,0.026)
+21:04:48 [v4][sorting-loop] TRACK red cube e_dist=0.0005 (thresh=0.005) still=1/4 move=0/8
+21:04:48 [v4][sorting-loop] TRACK red cube e_dist=0.2205 (thresh=0.005) still=0/4 move=1/8
+21:04:48 [v4][sorting-loop] TRACK red cube e_dist=0.1535 (thresh=0.005) still=0/4 move=2/8
+21:04:49 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=52.3 pub_fps=30.3 frames=1001 result_subs=1 roi=ok intrinsic=ok inference_age_ms=77 target=red cube transport=False sorting_thread=alive
+21:04:54 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=46.7 pub_fps=30.3 frames=1234 result_subs=1 roi=ok intrinsic=ok inference_age_ms=81 target=red cube transport=False sorting_thread=alive
+21:04:56 [v4][sorting-loop] TRACK red cube e_dist=0.0005 (thresh=0.005) still=1/4 move=0/8
+21:04:56 [v4][sorting-loop] TRACK red cube e_dist=0.2199 (thresh=0.005) still=0/4 move=1/8
+21:04:56 [v4][sorting-loop] TRACK red cube e_dist=0.1535 (thresh=0.005) still=0/4 move=2/8
+21:04:59 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=51.2 pub_fps=30.4 frames=1490 result_subs=1 roi=ok intrinsic=ok inference_age_ms=52 target=red cube transport=False sorting_thread=alive
+21:05:04 [v4][sorting-loop] TRACK red cube e_dist=0.0005 (thresh=0.005) still=1/4 move=0/8
+21:05:04 [v4][sorting-loop] TRACK red cube e_dist=0.2199 (thresh=0.005) still=0/4 move=1/8
+21:05:04 [v4][sorting-loop] TRACK red cube e_dist=0.1535 (thresh=0.005) still=0/4 move=2/8
+21:05:04 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=45.8 pub_fps=30.2 frames=1719 result_subs=1 roi=ok intrinsic=ok inference_age_ms=69 target=red cube transport=False sorting_thread=alive
+21:05:09 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=48.2 pub_fps=30.4 frames=1960 result_subs=1 roi=ok intrinsic=ok inference_age_ms=72 target=red cube transport=False sorting_thread=alive
+21:05:11 [v4][sorting-loop] TRACK red cube e_dist=0.0010 (thresh=0.005) still=1/4 move=0/8
+21:05:11 [v4][sorting-loop] TRACK red cube e_dist=0.2199 (thresh=0.005) still=0/4 move=1/8
+21:05:11 [v4][sorting-loop] TRACK red cube e_dist=0.1539 (thresh=0.005) still=0/4 move=2/8
+21:05:14 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=51.4 pub_fps=30.4 frames=2217 result_subs=1 roi=ok intrinsic=ok inference_age_ms=74 target=red cube transport=False sorting_thread=alive
+21:05:18 [v4][sorting-loop] TRACK red cube e_dist=0.0010 (thresh=0.005) still=1/4 move=0/8
+21:05:18 [v4][sorting-loop] TRACK red cube e_dist=0.2194 (thresh=0.005) still=0/4 move=1/8
+21:05:18 [v4][sorting-loop] TRACK red cube e_dist=0.1539 (thresh=0.005) still=0/4 move=2/8
+21:05:19 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=47.5 pub_fps=30.2 frames=2455 result_subs=1 roi=ok intrinsic=ok inference_age_ms=73 target=red cube transport=False sorting_thread=alive
+21:05:24 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=52.6 pub_fps=30.2 frames=2718 result_subs=1 roi=ok intrinsic=ok inference_age_ms=83 target=red cube transport=False sorting_thread=alive
+21:05:25 [v4][sorting-loop] TRACK red cube e_dist=0.0005 (thresh=0.005) still=1/8 move=0/8
+21:05:25 [v4][sorting-loop] TRACK red cube e_dist=0.2205 (thresh=0.005) still=0/8 move=1/8
+21:05:25 [v4][sorting-loop] TRACK red cube e_dist=0.1539 (thresh=0.005) still=0/8 move=2/8
+21:05:29 [v4][svc] apply_and_persist (persist=True)
+21:05:29 [v4][param] yolo_conf_thresh -> 0.4859773371104815 QUEUED (sorting on, applies when off)
+21:05:29 [v4][param] yolo_iou_thresh -> 0.2971671388101983 QUEUED (sorting on, applies when off)
+21:05:29 [v4][param] inference_max_hz -> 0.0 QUEUED (sorting on, applies when off)
+21:05:29 [v4][param] yolo_max_det -> 8 QUEUED (sorting on, applies when off)
+21:05:29 [v4][engine-swap] queued swap -> /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine
+21:05:29 [v4][engine-swap] queued reload -> /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine
+21:05:29 [v4][param] yolo_enabled_classes -> [] APPLIED
+21:05:29 [v4][engine-load] starting load: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine
+21:05:29 [v4][engine-load] releasing previous model
+21:05:29 [v4][engine-load] torch.cuda.empty_cache() done
+21:05:29 [v4][svc] merged ['lock_distance_thresh', 'publish_max_hz', 'publish_scale', 'count_still_threshold', 'count_move_threshold', 'detection_avg_frames', 'grasp_max_temp', 'publish_jpeg_quality', 'yolo_conf_thresh', 'yolo_iou_thresh', 'inference_max_hz', 'grasp_short_axis_min_ratio', 'yolo_max_det', 'detection_offset_x', 'detection_offset_y', 'engine_path', 'engine_task', 'yolo_enabled_classes'] into /home/ubuntu/jetarm_v5_profiles/default.yaml
+21:05:29 [v4][svc] apply_and_persist applied ['lock_distance_thresh', 'publish_max_hz', 'publish_scale', 'count_still_threshold', 'count_move_threshold', 'detection_avg_frames', 'grasp_max_temp', 'publish_jpeg_quality', 'yolo_conf_thresh', 'yolo_iou_thresh', 'inference_max_hz', 'grasp_short_axis_min_ratio', 'yolo_max_det', 'detection_offset_x', 'detection_offset_y', 'engine_path', 'engine_task', 'yolo_enabled_classes']
+21:05:29 [v4][engine-load] YOLO() constructed in 0.00s task=obb (raw='obb', override='obb')
+21:05:29 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=49.4 pub_fps=30.0 frames=2965 result_subs=1 roi=ok intrinsic=ok inference_age_ms=454 target=red cube transport=False sorting_thread=alive
+21:05:29 [v4][engine-load] warmup pass done in 0.32s
+21:05:29 [v4][engine-load] engine active: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine (total load 0.32s, swap #2)
+21:05:29 [v4][engine-load] class names from model.names: ['scaff', 'light blue cube', 'dark blue cube', 'red cube', 'green cube']
+21:05:32 [v4][sorting-loop] TRACK red cube e_dist=0.0011 (thresh=0.005) still=1/8 move=0/8
+21:05:32 [v4][sorting-loop] TRACK red cube e_dist=0.2194 (thresh=0.005) still=0/8 move=1/8
+21:05:32 [v4][sorting-loop] TRACK red cube e_dist=0.1539 (thresh=0.005) still=0/8 move=2/8
+21:05:34 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=45.4 pub_fps=30.4 frames=3192 result_subs=1 roi=ok intrinsic=ok inference_age_ms=77 target=red cube transport=False sorting_thread=alive
+21:05:39 [v4][sorting-loop] TRACK red cube e_dist=0.0000 (thresh=0.005) still=1/4 move=0/8
+21:05:39 [v4][sorting-loop] TRACK red cube e_dist=0.2205 (thresh=0.005) still=0/4 move=1/8
+21:05:39 [v4][sorting-loop] TRACK red cube e_dist=0.1539 (thresh=0.005) still=0/4 move=2/8
+21:05:39 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=51.7 pub_fps=30.2 frames=3451 result_subs=1 roi=ok intrinsic=ok inference_age_ms=74 target=red cube transport=False sorting_thread=alive
+21:05:44 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=48.5 pub_fps=30.4 frames=3693 result_subs=1 roi=ok intrinsic=ok inference_age_ms=61 target=red cube transport=False sorting_thread=alive
+21:05:45 [v4][sorting-loop] TRACK red cube e_dist=0.0010 (thresh=0.005) still=1/4 move=0/8
+21:05:45 [v4][sorting-loop] TRACK red cube e_dist=0.2190 (thresh=0.005) still=0/4 move=1/8
+21:05:45 [v4][sorting-loop] TRACK red cube e_dist=0.1535 (thresh=0.005) still=0/4 move=2/8
+21:05:49 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=49.5 pub_fps=30.2 frames=3940 result_subs=1 roi=ok intrinsic=ok inference_age_ms=71 target=red cube transport=False sorting_thread=alive
+21:05:52 [v4][sorting-loop] TRACK red cube e_dist=0.0005 (thresh=0.005) still=1/4 move=0/8
+21:05:52 [v4][sorting-loop] TRACK red cube e_dist=0.2195 (thresh=0.005) still=0/4 move=1/8
+21:05:52 [v4][sorting-loop] TRACK red cube e_dist=0.1535 (thresh=0.005) still=0/4 move=2/8
+21:05:54 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=49.7 pub_fps=30.4 frames=4189 result_subs=1 roi=ok intrinsic=ok inference_age_ms=102 target=red cube transport=False sorting_thread=alive
+21:05:59 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=46.2 pub_fps=30.2 frames=4420 result_subs=1 roi=ok intrinsic=ok inference_age_ms=42 target=red cube transport=False sorting_thread=alive
+21:05:59 [v4][sorting-loop] TRACK red cube e_dist=0.0000 (thresh=0.005) still=1/4 move=0/8
+21:05:59 [v4][sorting-loop] TRACK red cube e_dist=0.2199 (thresh=0.005) still=0/4 move=1/8
+21:05:59 [v4][sorting-loop] TRACK red cube e_dist=0.1539 (thresh=0.005) still=0/4 move=2/8
+21:06:02 [v4][svc] enable_sorting -> False
+21:06:02 [v4][param] flushing queued YOLO knobs: yolo_conf_thresh=0.4859773371104815, yolo_iou_thresh=0.2971671388101983, inference_max_hz=0.0, yolo_max_det=8
+21:06:04 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=53.0 pub_fps=30.4 frames=4685 result_subs=1 roi=ok intrinsic=ok inference_age_ms=78 target=red cube transport=False sorting_thread=alive
+21:06:06 [v4][svc] enable_sorting -> False
+21:06:09 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=49.7 pub_fps=30.3 frames=4933 result_subs=1 roi=ok intrinsic=ok inference_age_ms=96 target=red cube transport=False sorting_thread=alive
+21:06:14 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=52.4 pub_fps=30.4 frames=5195 result_subs=1 roi=ok intrinsic=ok inference_age_ms=56 target=red cube transport=False sorting_thread=alive
+21:06:19 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=55.2 pub_fps=30.2 frames=5471 result_subs=1 roi=ok intrinsic=ok inference_age_ms=96 target=red cube transport=False sorting_thread=alive
+21:06:24 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=52.0 pub_fps=30.4 frames=5731 result_subs=1 roi=ok intrinsic=ok inference_age_ms=50 target=red cube transport=False sorting_thread=alive
+21:06:27 [v4][svc] enable_sorting -> False
+21:06:29 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=55.2 pub_fps=30.2 frames=6007 result_subs=1 roi=ok intrinsic=ok inference_age_ms=72 target=red cube transport=False sorting_thread=alive
+21:06:34 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=51.6 pub_fps=30.4 frames=6265 result_subs=1 roi=ok intrinsic=ok inference_age_ms=58 target=red cube transport=False sorting_thread=alive
+21:06:39 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=52.6 pub_fps=30.2 frames=6528 result_subs=1 roi=ok intrinsic=ok inference_age_ms=49 target=red cube transport=False sorting_thread=alive
+21:06:40 [v4][calibrate] plane refit failed: no_depth_subscription
+21:06:44 [v4][heartbeat] enter=True sorting=False cam=LIVE ai=LIVE cam_fps=55.4 pub_fps=30.4 frames=6805 result_subs=1 roi=ok intrinsic=ok inference_age_ms=51 target=red cube transport=False sorting_thread=alive
+21:06:45 [v4][enter] enter requested (camera subs were already alive)
+21:06:45 [v4][svc] enable_sorting -> True
+21:06:45 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/app/config/transform.yaml
+21:06:45 [v4][roi]   loaded plane: [-0.004463572633386076, -0.07888332624479708, -0.9968738623115282, 0.21744399303069167]
+21:06:45 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+21:06:45 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+21:06:45 [v4][roi]   extrinsic plane shift done
+21:06:45 [v4][roi]   projected 4 corners to image pixels
+21:06:45 [v4][roi]   computed roi (y=74..393 x=170..573) on intrinsic shape=(3, 3)
+21:06:45 [v4][sorting-loop] ROI built - detection branch is now live
+21:06:45 [v4][sorting-loop] LOCKED on red cube pixel=(211, 347) world=(0.143,0.062,0.026)
+21:06:47 [v4][sorting-loop] TRACK red cube e_dist=0.0000 (thresh=0.005) still=1/4 move=0/8
+21:06:47 [v4][sorting-loop] TRACK red cube e_dist=0.2195 (thresh=0.005) still=0/4 move=1/8
+21:06:47 [v4][sorting-loop] TRACK red cube e_dist=0.1535 (thresh=0.005) still=0/4 move=2/8
+21:06:49 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=49.6 pub_fps=30.2 frames=7053 result_subs=1 roi=ok intrinsic=ok inference_age_ms=54 target=red cube transport=False sorting_thread=alive
+21:06:54 [v4][sorting-loop] TRACK red cube e_dist=0.0010 (thresh=0.005) still=1/4 move=0/8
+21:06:54 [v4][sorting-loop] TRACK red cube e_dist=0.2194 (thresh=0.005) still=0/4 move=1/8
+21:06:54 [v4][sorting-loop] TRACK red cube e_dist=0.1539 (thresh=0.005) still=0/4 move=2/8
+21:06:54 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=49.6 pub_fps=30.4 frames=7301 result_subs=1 roi=ok intrinsic=ok inference_age_ms=94 target=red cube transport=False sorting_thread=alive

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=JetArm Tweak Tool
+Comment=JetArm Correction Tool
+Encoding=UTF-8
+Exec=/home/ubuntu/factory_utils/calibration/tool.sh
+Terminal=false
+MultipleArgs=false
+Categories=Application;Development;
+StartupNotify=true
+Icon=/home/ubuntu/factory_utils/tweak_tool/icon.png
+Name[en_HK]=JetArm位置微调工具

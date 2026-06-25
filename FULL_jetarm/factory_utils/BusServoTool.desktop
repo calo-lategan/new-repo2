@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Bus Servo Tool
+Comment=Bus Servo Tool
+Encoding=UTF-8
+Exec= /home/ubuntu/factory_utils/Bus_Servo_Tool/main.py
+Terminal=false
+MultipleArgs=false
+Categories=Application;Development;
+StartupNotify=true
+Icon=/home/ubuntu/factory_utils/Bus_Servo_Tool/Bus_Servo.ico
+Name[en_HK]=Bus Servo Tool

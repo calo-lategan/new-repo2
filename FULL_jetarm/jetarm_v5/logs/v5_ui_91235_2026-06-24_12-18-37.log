@@ -1,0 +1,32 @@
+# v5 ui session 2026-06-24_12-18-37 pid=91235
+12:18:48 [ui][color] loaded red: min=[0, 140, 131] max=[55, 255, 255]
+12:19:20 [ui][color] enter OK (start)
+12:19:50 [ui][color] loaded green: min=[6, 99, 61] max=[76, 118, 170]
+12:19:58 [ui][color] loaded blue: min=[11, 115, 0] max=[90, 149, 113]
+12:20:06 [ui][color] loaded black: min=[0, 30, 92] max=[86, 187, 196]
+12:20:23 [ui][color] loaded white: min=[106, 100, 100] max=[255, 155, 155]
+12:20:31 [ui][color] loaded yellow: min=[0, 125, 169] max=[173, 159, 190]
+12:20:37 [ui][color] loaded tennis: min=[31, 66, 178] max=[210, 159, 255]
+12:20:47 [ui][calib_window] spawned gnome-terminal -> depth
+12:21:24 [ui][plane_refit] failed: no_depth_caminfo_yet
+12:22:23 [ui][calibrate] CALIBRATE button pressed
+12:22:26 [ui][calibrate] OK source=vendor
+12:22:33 [ui][calibrate] CALIBRATE button pressed
+12:22:35 [ui][calibrate] OK source=vendor
+12:26:06 [ui][calibrate] CALIBRATE button pressed
+12:26:11 [ui][calibrate] OK source=vendor
+12:27:05 [ui][push_logs] running /home/ubuntu/jetarm_v5_src/tools/push_logs.sh REPO=/home/ubuntu/jetarm_v5_src
+12:29:05 [ui][push_logs] crashed
+12:29:05 EXCEPTION: TimeoutExpired: Command '['bash', '/home/ubuntu/jetarm_v5_src/tools/push_logs.sh']' timed out after 120 seconds
+Traceback (most recent call last):
+  File "/home/ubuntu/ros2_ws/build/app/app/tune_uiv51.py", line 1688, in go
+    res = subprocess.run(['bash', script], env=env,
+  File "/usr/lib/python3.10/subprocess.py", line 505, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+  File "/usr/lib/python3.10/subprocess.py", line 1154, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+  File "/usr/lib/python3.10/subprocess.py", line 2022, in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+  File "/usr/lib/python3.10/subprocess.py", line 1198, in _check_timeout
+    raise TimeoutExpired(
+subprocess.TimeoutExpired: Command '['bash', '/home/ubuntu/jetarm_v5_src/tools/push_logs.sh']' timed out after 120 seconds

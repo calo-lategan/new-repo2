@@ -1,0 +1,10 @@
+# v5 ui session 2026-06-25_12-37-32 pid=118993
+12:37:42 [ui][color] loaded red: min=[0, 140, 131] max=[55, 255, 255]
+12:37:57 [ui][calibrate] CALIBRATE button pressed
+12:38:00 [ui][calibrate] OK source=vendor
+12:38:45 [ui][calibrate] CALIBRATE button pressed
+12:38:47 [ui][calibrate] OK source=vendor
+12:39:05 [ui][calibrate] CALIBRATE button pressed
+12:39:09 [ui][calibrate] OK source=vendor
+12:39:20 [ui][calibrate] CALIBRATE button pressed
+12:39:25 [ui][calibrate] FAILED source=? reason=no_vendor_node

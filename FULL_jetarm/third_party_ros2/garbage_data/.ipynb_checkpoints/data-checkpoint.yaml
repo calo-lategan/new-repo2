@@ -1,0 +1,19 @@
+path: /home/featurize/work/data
+train: /home/featurize/work/data/images/train
+val: /home/featurize/work/data/images/val
+
+nc: 12
+
+names:
+  0: BananaPeel
+  1: BrokenBones
+  2: CigaretteEnd
+  3: DisposableChopsticks
+  4: Ketchup
+  5: Marker
+  6: OralLiquidBottle
+  7: PlasticBottle
+  8: Plate
+  9: StorageBattery
+  10: Toothbrush
+  11: Umbrella

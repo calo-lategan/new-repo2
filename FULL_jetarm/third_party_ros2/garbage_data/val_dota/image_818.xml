@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_818</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_818.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>CigaretteEnd</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>283</x0><y0>113</y0><x1>370</x1><y1>204</y1><x2>311</x2><y2>261</y2><x3>224</x3><y3>169</y3></bndbox>
+  </object>
+</annotation>

@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/">
+    <file>resources/6dof_rgb.png</file>
+    <file>resources/index.png</file>
+  </qresource>
+</RCC>

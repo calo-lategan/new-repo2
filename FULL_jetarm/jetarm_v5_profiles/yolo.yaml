@@ -1,0 +1,18 @@
+# SAMPLE model-config file.
+#
+# The tuner UI's Model tab writes ~/jetarm_v5_profiles/yolo.yaml when you
+# press SAVE MODEL CONFIG, and the node auto-loads it on boot. This is just
+# a reference of the schema (the keys the ~/save_yolo_config service
+# persists) - your real file is written from the UI.
+#
+# Plain key/value (NOT the /**: ros__parameters wrapper) - it's a small
+# dedicated model config, kept separate from the full default.yaml profile
+# so you can tune the model without dragging motion/gripper params along.
+
+engine_path: /home/ubuntu/third_party_ros2/data/best_scaff2.engine
+yolo_conf_thresh: 0.25
+yolo_iou_thresh: 0.7
+yolo_max_det: 100
+inference_max_hz: 0.0
+# JSON string: class IDs to keep. '[]' = all classes the model exposes.
+yolo_enabled_classes: '[]'

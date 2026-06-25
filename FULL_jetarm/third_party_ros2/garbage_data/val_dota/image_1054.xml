@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_1054</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_1054.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>Plate</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>424</x0><y0>213</y0><x1>320</x1><y1>219</y1><x2>312</x2><y2>91</y2><x3>417</x3><y3>84</y3></bndbox>
+  </object>
+</annotation>

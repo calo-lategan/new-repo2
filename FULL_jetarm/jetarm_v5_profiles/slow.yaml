@@ -1,0 +1,19 @@
+# v5.1 SLOW speed preset (partial profile).
+# Loaded via the node's load_profile service from the "Slow" button. Gentle,
+# accurate, sequential motion for fragile picks or debugging. Speed-vs-accuracy
+# knobs only - engine, calibration, depth and place zones are untouched.
+/**:
+  ros__parameters:
+    motion_speed: 0.7
+    aggression: 0.7
+    hover_height: 0.09
+    approach_dwell: 0.4
+    gripper_close_duration: 0.6
+    gripper_settle: 0.9
+    grab_depth: 0.03
+    inference_max_hz: 8.0
+    count_still_threshold: 16
+    count_move_threshold: 16
+    lock_distance_thresh: 0.003
+    detection_avg_frames: 4
+    parallel_base_motion: false

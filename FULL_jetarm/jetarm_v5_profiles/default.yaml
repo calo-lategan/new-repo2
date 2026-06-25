@@ -1,0 +1,61 @@
+/**:
+  ros__parameters:
+    aggression: 0.7
+    approach_dwell: 0.4
+    calibrate_flash_secs: 6.0
+    calibrate_overlay_mode: 'off'
+    compliance_grasp_enabled: false
+    count_move_threshold: 13
+    count_still_threshold: 4
+    debug: false
+    depth_max_z_m: 0.05
+    depth_min_z_m: -0.1
+    depth_window_px: 1
+    detection_avg_frames: 8
+    detection_offset_x: 0
+    detection_offset_y: 0
+    enable_camera_sub: true
+    enable_inference: true
+    engine_path: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine
+    engine_task: obb
+    grab_depth: 0.03
+    grasp_max_temp: 65
+    grasp_prefer_short_axis: true
+    grasp_short_axis_min_ratio: 0.1
+    grasp_stall_pulse: 8
+    grasp_step_dwell: 0.1
+    grasp_step_pulse: 15
+    grasp_strength: '{}'
+    grasp_timeout: 2.0
+    grip_offset_x: -0.04957507082152973
+    grip_offset_y: 0.009915014164305958
+    grip_offset_z: -0.005
+    gripper_close_duration: 0.6
+    gripper_close_pulse: 540
+    gripper_open_pulse: 200
+    gripper_settle: 0.9
+    hot_log_inference_ms: false
+    hover_height: 0.09
+    inference_max_hz: 8.0
+    inference_warmup: true
+    lock_distance_thresh: 0.005072386058981233
+    motion_speed: 0.7
+    overlay_depth_view: false
+    parallel_base_motion: false
+    place_positions: '{"scaff": [0.1271, 0.0, 0.1821, "taught"], "dark blue cube":
+      [0.1271, 0.0, 0.1821, "taught"], "light blue cube": [0.1271, 0.0, 0.1821, "taught"],
+      "green cube": [0.1271, 0.0, 0.1821, "taught"]}'
+    publish_jpeg_quality: 80
+    publish_max_hz: 0.0
+    publish_scale: 1.0
+    startup_self_calibrate: true
+    target_overrides: '{}'
+    test_grip_dwell: 3.0
+    use_depth_for_z: false
+    workspace_scale: 1.0
+    workspace_size_x: 0.20070821529745042
+    workspace_size_y: 0.48059490084985834
+    yolo_conf_thresh: 0.4859773371104815
+    yolo_enabled_classes: '[]'
+    yolo_iou_thresh: 0.2971671388101983
+    yolo_max_det: 8

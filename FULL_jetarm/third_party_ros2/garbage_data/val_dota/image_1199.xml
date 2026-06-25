@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_1199</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_1199.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>PlasticBottle</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>364</x0><y0>98</y0><x1>461</x1><y1>150</y1><x2>402</x2><y2>261</y2><x3>305</x3><y3>209</y3></bndbox>
+  </object>
+</annotation>

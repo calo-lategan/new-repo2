@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_561</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_561.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>DisposableChopsticks</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>267</x0><y0>225</y0><x1>382</x1><y1>267</y1><x2>350</x2><y2>353</y2><x3>236</x3><y3>311</y3></bndbox>
+  </object>
+</annotation>

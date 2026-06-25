@@ -1,0 +1,1250 @@
+[02/27 22:21:41.444605][debug][32875][Context.cpp:30] Context creating, work_dir=/home/ubuntu/third_party_ros2/orbbec_ws
+[02/27 22:21:41.444772][debug][32875][Context.cpp:49] Config file version=1.1
+[02/27 22:21:41.445208][debug][32875][FrameBufferManager.cpp:23] Max global frame buffer size updated! size=2048.000MB
+[02/27 22:21:41.445251][info][32875][Context.cpp:68] Context created with config: /home/ubuntu/third_party_ros2/orbbec_ws/install/orbbec_camera/share/orbbec_camera/config/OrbbecSDKConfig_v1.0.xml
+[02/27 22:21:41.448352][info][32875][Context.cpp:73] Work directory=/home/ubuntu/third_party_ros2/orbbec_ws, SDK version=v1.10.15-20241012-bb4e350
+[02/27 22:21:41.451370][debug][32875][DeviceManager.cpp:30] DeviceManager init ...
+[02/27 22:21:41.451679][info][32875][LinuxPal.cpp:32] createObPal: create LinuxPal!
+[02/27 22:21:41.469436][debug][32875][DeviceManager.cpp:34] Enable USB Device Enumerator ...
+[02/27 22:21:41.578063][debug][32875][EnumeratorLibusb.cpp:324] queryDevicesInfo done!
+[02/27 22:21:41.578304][debug][32875][UsbDeviceEnumerator.cpp:163] Current usb device port list:
+[02/27 22:21:41.578333][debug][32875][UsbDeviceEnumerator.cpp:166]  - 1-2.2.1-83.0 | USB Camera
+[02/27 22:21:41.578340][debug][32875][UsbDeviceEnumerator.cpp:166]  - 1-2.2.2-84.0 | Orbbec(R) Astra(TM) 3D Camera(F) Depth
+[02/27 22:21:41.578443][warning][32875][OpenNIDeviceInfo.cpp:186] New openni device matched.
+[02/27 22:21:41.579198][info][32875][LinuxPal.cpp:166] Create PollingDeviceWatcher!
+[02/27 22:21:41.579310][debug][32875][UsbDeviceEnumerator.cpp:71] Found 1 device(s):
+[02/27 22:21:41.579337][debug][32875][UsbDeviceEnumerator.cpp:74]   - Name: SV1301S_U3, PID: 0x0614, SN/ID: , connection: USB2.0
+[02/27 22:21:41.579351][info][32875][DeviceManager.cpp:15] Current found device(s): (1)
+[02/27 22:21:41.579361][info][32875][DeviceManager.cpp:24] 	- Name: SV1301S_U3, PID: 0x0614, SN/ID: , Connection: USB2.0
+[02/27 22:21:41.579366][debug][32875][DeviceManager.cpp:52] DeviceManager construct done!
+[02/27 22:21:41.588526][info][32875][DeviceManager.cpp:304] Enable net device enumeration: false
+[02/27 22:21:41.689757][debug][32916][DeviceManager.cpp:109] DeviceManager  createDevice...
+[02/27 22:21:41.689836][debug][32916][UsbDeviceEnumerator.cpp:291] UsbDeviceEnumerator createDevice...
+[02/27 22:21:41.692599][info][32916][OpenNIHostProtocol.cpp:567] Hardware versions: FW=5.8.23 (14), HW=0, Chip=7, Sensor=0, SYS=12
+[02/27 22:21:41.694208][error][32916][OpenNIHostProtocol.cpp:584] Get usb core type failed!
+[02/27 22:21:41.694272][debug][32916][OpenNIHostProtocol.cpp:665] Requesting KeepAlive...
+[02/27 22:21:41.695704][debug][32916][OpenNIHostProtocol.cpp:672] Got KeepAlive Reply.
+[02/27 22:21:41.698339][debug][32916][OpenNIHostProtocol.cpp:665] Requesting KeepAlive...
+[02/27 22:21:41.700096][debug][32916][OpenNIHostProtocol.cpp:672] Got KeepAlive Reply.
+[02/27 22:21:41.700148][debug][32916][OpenNIHostProtocol.cpp:690] Getting the fixed params...
+[02/27 22:21:41.702974][debug][32916][OpenNIHostProtocol.cpp:730] Reading sensor serial number...
+[02/27 22:21:41.704953][info][32916][OpenNISensorFirmware.cpp:1190] Sensor serial number:AY2MC3101VT
+[02/27 22:21:41.706524][debug][32916][OpenNIHostProtocol.cpp:802] Reading sensor platform string...
+[02/27 22:21:41.709689][info][32916][OpenNISensorFirmware.cpp:1218] Firmware version RD3013
+[02/27 22:21:41.711284][info][32916][OpenNISensorFirmware.cpp:1224] Device frequency 50
+[02/27 22:21:41.711355][debug][32916][OpenNIHostProtocol.cpp:879] Update supported depth video modes from firmware
+[02/27 22:21:41.711385][debug][32916][OpenNIHostProtocol.cpp:915] Reading CMOS 1 supported presets...
+[02/27 22:21:41.713206][debug][32916][OpenNIHostProtocol.cpp:879] Update supported depth video modes from firmware
+[02/27 22:21:41.713267][debug][32916][OpenNIHostProtocol.cpp:915] Reading CMOS 2 supported presets...
+[02/27 22:21:41.773849][debug][32916][OpenNISensorParams.cpp:110] set property DepthMirror(0)
+[02/27 22:21:41.775352][debug][32916][OpenNISensorParams.cpp:121] DepthMirror(0)was successfully set.
+[02/27 22:21:41.775717][debug][32916][OpenNISensorFirmware.cpp:1236] OpenNI camera params read.
+[02/27 22:21:41.958772][debug][32916][OpenNISensorFirmware.cpp:2057] OpenNI camera params read end.
+[02/27 22:21:41.960468][error][32916][OpenNIHostProtocol.cpp:957] Host Protocol sub cmd not supported!
+[02/27 22:21:41.960537][warning][32916][OpenNISensorFirmware.cpp:153] OpenNI2 camera don't support Watchdog function!
+[02/27 22:21:41.960548][debug][32916][OpenNISensorIO.cpp:29] Opening endpoint 0x81 for depth...
+[02/27 22:21:41.960572][debug][32916][OpenNISensorIO.cpp:41] Depth endpoint(0x81) was successfully opened.
+[02/27 22:21:41.960581][debug][32916][OpenNISensorIO.cpp:48] Opening endpoint 0x82 for IR...
+[02/27 22:21:41.960586][debug][32916][OpenNISensorIO.cpp:54] IR endpoint(0x82) was successfully opened.
+[02/27 22:21:41.960589][debug][32916][OpenNISensorIO.cpp:60] Opening endpoint 0x84  for image...
+[02/27 22:21:41.960592][debug][32916][OpenNISensorIO.cpp:65] Image endpoint is not supported...
+[02/27 22:21:41.960595][debug][32916][OpenNISensorIO.cpp:75] Opening endpoint 0x83 for misc...
+[02/27 22:21:41.960598][debug][32916][OpenNISensorIO.cpp:80] Misc endpoint is not supported...
+[02/27 22:21:41.960601][debug][32916][OpenNISensorIO.cpp:87] Endpoints open end.
+[02/27 22:21:41.960734][debug][32916][VendorCommand.cpp:205] VendorCommand constructor ffff340037e0
+[02/27 22:21:41.960745][debug][32916][OpenNIDevice.cpp:193] init sensor map start!
+[02/27 22:21:41.960757][debug][32916][OpenNIDevice.cpp:207] init sensor map done!
+[02/27 22:21:41.960897][debug][32916][PropertyAccessor.cpp:50] get firmware data success! propertyId: 1000, dataLen: 164
+[02/27 22:21:41.960920][info][32916][AbstractDevice.cpp:125] 	- Firmware version: RD3013
+[02/27 22:21:41.961102][debug][32916][OpenNIDevice.cpp:247] Init depth process param start!
+[02/27 22:21:41.961132][debug][32916][OpenNIDevice.cpp:262] Device baseline: 39.93872, fx:950.5437622070312
+[02/27 22:21:41.961138][debug][32916][OpenNIDevice.cpp:293] Init depth process param done!
+[02/27 22:21:41.961876][info][32916][OpenNIDevice.cpp:812] Init depth filter params.
+[02/27 22:21:41.961911][info][32916][OpenNIDevice.cpp:40] OpenNI device created! PID: 0x0614, SN: AY2MC3101VT
+[02/27 22:21:41.961922][debug][32916][UsbDeviceEnumerator.cpp:359] Device created successfully! Name: SV1301S_U3, PID: 0x0614, SN/ID: 
+[02/27 22:21:41.961934][info][32916][DeviceManager.cpp:150] Device created successfully! Name: SV1301S_U3, PID: 0x0614, SN/ID: 
+[02/27 22:21:41.963071][debug][32916][FrameProcessingBlock.cpp:26] Block created with frame queue size: 10
+[02/27 22:21:41.963731][debug][32916][FrameProcessingBlock.cpp:26] Block created with frame queue size: 10
+[02/27 22:21:41.970166][debug][32916][FrameProcessor.cpp:90] FrameProcessor init with 2 blocks! @281471554209664
+[02/27 22:21:41.970299][debug][32916][FrameProcessingBlock.cpp:26] Block created with frame queue size: 10
+[02/27 22:21:41.970311][debug][32916][FrameProcessor.cpp:98]  - block: FrameUnpacker, status: enable
+[02/27 22:21:41.970349][debug][32916][FrameProcessingBlock.cpp:26] Block created with frame queue size: 10
+[02/27 22:21:41.970355][debug][32916][FrameProcessor.cpp:98]  - block: FrameMirror, status: disable
+[02/27 22:21:41.974079][info][32916][OpenNIDevice.cpp:680] IR sensor has been created!
+[02/27 22:21:41.974219][debug][32916][OpenNIVideoSensor.cpp:863] Query stream profile! size= 12, sensorType=OB_SENSOR_IR
+[02/27 22:21:41.974250][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 30}
+[02/27 22:21:41.974257][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 5}
+[02/27 22:21:41.974262][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 10}
+[02/27 22:21:41.974266][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 15}
+[02/27 22:21:41.974270][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 30}
+[02/27 22:21:41.974307][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 60}
+[02/27 22:21:41.974312][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 5}
+[02/27 22:21:41.974316][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 10}
+[02/27 22:21:41.974320][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 15}
+[02/27 22:21:41.974323][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 60}
+[02/27 22:21:41.974327][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 1280, height: 800, fps: 15}
+[02/27 22:21:41.974331][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 1280, height: 800, fps: 30}
+[02/27 22:21:41.974421][debug][32916][LinuxPal.cpp:292] Uvc backend have been set to LibUVC(1)
+[02/27 22:21:42.083780][debug][32916][ObLibuvcDevicePort.cpp:58] uvc_open success
+[02/27 22:21:42.083864][debug][32916][LinuxPal.cpp:127] UVC device have been create with LibUVC backend! dev: 1-2.2.1-83, inf: 1-2.2.1-83.0
+[02/27 22:21:42.083887][debug][32916][FrameProcessor.cpp:90] FrameProcessor init with 1 blocks! @281471554477632
+[02/27 22:21:42.088222][debug][32916][FrameProcessingBlock.cpp:26] Block created with frame queue size: 10
+[02/27 22:21:42.088287][debug][32916][FrameProcessor.cpp:98]  - block: FormatConverter, status: disable
+[02/27 22:21:42.088383][debug][32916][VideoSensor.cpp:252] VideoSensor construct!
+[02/27 22:21:42.088904][debug][32916][VideoSensor.cpp:263] stream profile size= 21, SensorType=OB_SENSOR_COLOR
+[02/27 22:21:42.088937][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_MJPG, width: 640, height: 480, fps: 30}
+[02/27 22:21:42.088949][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_MJPG, width: 1920, height: 1080, fps: 30}
+[02/27 22:21:42.088955][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_MJPG, width: 1280, height: 720, fps: 30}
+[02/27 22:21:42.088960][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_MJPG, width: 640, height: 480, fps: 60}
+[02/27 22:21:42.088964][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_MJPG, width: 640, height: 480, fps: 15}
+[02/27 22:21:42.088968][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_MJPG, width: 640, height: 480, fps: 10}
+[02/27 22:21:42.088972][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_MJPG, width: 640, height: 480, fps: 5}
+[02/27 22:21:42.088977][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_RGB888, width: 1920, height: 1080, fps: 30}
+[02/27 22:21:42.088982][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_RGB888, width: 1280, height: 720, fps: 30}
+[02/27 22:21:42.088986][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_RGB888, width: 640, height: 480, fps: 60}
+[02/27 22:21:42.088990][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_RGB888, width: 640, height: 480, fps: 30}
+[02/27 22:21:42.088994][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_RGB888, width: 640, height: 480, fps: 15}
+[02/27 22:21:42.088999][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_RGB888, width: 640, height: 480, fps: 10}
+[02/27 22:21:42.089003][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_RGB888, width: 640, height: 480, fps: 5}
+[02/27 22:21:42.089007][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_BGRA, width: 1920, height: 1080, fps: 30}
+[02/27 22:21:42.089041][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_BGRA, width: 1280, height: 720, fps: 30}
+[02/27 22:21:42.089046][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_BGRA, width: 640, height: 480, fps: 60}
+[02/27 22:21:42.089050][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_BGRA, width: 640, height: 480, fps: 30}
+[02/27 22:21:42.089054][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_BGRA, width: 640, height: 480, fps: 15}
+[02/27 22:21:42.089058][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_BGRA, width: 640, height: 480, fps: 10}
+[02/27 22:21:42.089062][debug][32916][VideoSensor.cpp:265]  - {type: OB_STREAM_COLOR, format: OB_FORMAT_BGRA, width: 640, height: 480, fps: 5}
+[02/27 22:21:42.089070][debug][32916][VideoSensor.cpp:278] VideoSensor created, @OB_SENSOR_COLOR
+[02/27 22:21:42.089074][info][32916][OpenNIDevice.cpp:631] Color sensor has been created!
+[02/27 22:21:42.089137][debug][32916][FrameProcessor.cpp:90] FrameProcessor init with 5 blocks! @281471554420112
+[02/27 22:21:42.089161][debug][32916][FrameProcessingBlock.cpp:26] Block created with frame queue size: 10
+[02/27 22:21:42.089169][debug][32916][FrameProcessor.cpp:98]  - block: FrameUnpacker, status: enable
+[02/27 22:21:42.089176][debug][32916][FrameProcessingBlock.cpp:26] Block created with frame queue size: 10
+[02/27 22:21:42.089181][debug][32916][FrameProcessor.cpp:98]  - block: FrameSoftFilter, status: enable
+[02/27 22:21:42.089187][debug][32916][FrameProcessingBlock.cpp:26] Block created with frame queue size: 10
+[02/27 22:21:42.089192][debug][32916][FrameProcessor.cpp:98]  - block: Disparity2DepthConverter, status: enable
+[02/27 22:21:42.089215][debug][32916][FrameProcessingBlock.cpp:26] Block created with frame queue size: 10
+[02/27 22:21:42.089220][debug][32916][FrameProcessor.cpp:98]  - block: D2CFilter, status: disable
+[02/27 22:21:42.089227][debug][32916][FrameProcessingBlock.cpp:26] Block created with frame queue size: 10
+[02/27 22:21:42.089231][debug][32916][FrameProcessor.cpp:98]  - block: PostProcessFilter, status: disable
+[02/27 22:21:42.089467][info][32916][OpenNIDevice.cpp:383] Depth sensor has been created!
+[02/27 22:21:42.089545][debug][32916][OpenNIVideoSensor.cpp:863] Query stream profile! size= 24, sensorType=OB_SENSOR_DEPTH
+[02/27 22:21:42.089555][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 30}
+[02/27 22:21:42.089560][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 5}
+[02/27 22:21:42.089564][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 5}
+[02/27 22:21:42.089569][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 10}
+[02/27 22:21:42.089572][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 10}
+[02/27 22:21:42.089576][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 15}
+[02/27 22:21:42.089580][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 15}
+[02/27 22:21:42.089584][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 30}
+[02/27 22:21:42.089588][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 30}
+[02/27 22:21:42.089592][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 60}
+[02/27 22:21:42.089596][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 60}
+[02/27 22:21:42.089600][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 5}
+[02/27 22:21:42.089620][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 5}
+[02/27 22:21:42.089625][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 10}
+[02/27 22:21:42.089629][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 10}
+[02/27 22:21:42.089633][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 15}
+[02/27 22:21:42.089636][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 15}
+[02/27 22:21:42.089640][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 30}
+[02/27 22:21:42.089644][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 60}
+[02/27 22:21:42.089648][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 60}
+[02/27 22:21:42.089651][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 1280, height: 800, fps: 15}
+[02/27 22:21:42.089655][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 1280, height: 800, fps: 15}
+[02/27 22:21:42.089659][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 1280, height: 800, fps: 30}
+[02/27 22:21:42.089663][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 1280, height: 800, fps: 30}
+[02/27 22:21:42.099557][debug][32916][PropertyAccessor.cpp:17] set property value success! propertyId: 2, value: {intValue: 0, floatValue: 0}
+[02/27 22:21:42.099785][debug][32916][OpenNISensorParams.cpp:110] set property DepthMirror(0)
+[02/27 22:21:42.102619][debug][32916][OpenNISensorParams.cpp:121] DepthMirror(0)was successfully set.
+[02/27 22:21:42.102709][debug][32916][PropertyAccessor.cpp:17] set property value success! propertyId: 14, value: {intValue: 0, floatValue: 0}
+[02/27 22:21:42.102855][debug][32916][FrameProcessor.cpp:210] setPropertyValue id=18, value={intValue: 0, floatValue: 0}
+[02/27 22:21:42.102878][debug][32916][PropertyAccessor.cpp:17] set property value success! propertyId: 18, value: {intValue: 0, floatValue: 0}
+[02/27 22:21:42.103019][debug][32916][PropertyAccessor.cpp:17] set property value success! propertyId: 24, value: {intValue: 1, floatValue: 0}
+[02/27 22:21:42.103106][debug][32916][ObLibuvcDevicePort.cpp:334] ObLibuvcDevicePort::uvcCtrlValueTranslate propertyId=1, action=2000, value=1
+[02/27 22:21:42.105187][debug][32916][ObLibuvcDevicePort.cpp:366] UVC_SET_CUR: getAERes:9.
+[02/27 22:21:42.105217][debug][32916][ObLibuvcDevicePort.cpp:370] UVC_AE_MODE_D0_MANUAL:translated_value:8,value:1.
+[02/27 22:21:42.106270][debug][32916][ObLibuvcDevicePort.cpp:207] ObLibuvcDevicePort::setPu() propertyId = 2000 value = 
+[02/27 22:21:42.106306][debug][32916][PropertyAccessor.cpp:17] set property value success! propertyId: 2000, value: {intValue: 1, floatValue: 0}
+[02/27 22:21:42.106425][debug][32916][ObLibuvcDevicePort.cpp:334] ObLibuvcDevicePort::uvcCtrlValueTranslate propertyId=1, action=2003, value=1
+[02/27 22:21:42.107533][debug][32916][ObLibuvcDevicePort.cpp:207] ObLibuvcDevicePort::setPu() propertyId = 2003 value = 
+[02/27 22:21:42.107594][debug][32916][PropertyAccessor.cpp:17] set property value success! propertyId: 2003, value: {intValue: 1, floatValue: 0}
+[02/27 22:21:42.107652][debug][32916][PropertyAccessor.cpp:28] get property value success! propertyId: 40, value: {intValue: 16, floatValue: 0}
+[02/27 22:21:42.107776][debug][32916][PropertyAccessor.cpp:17] set property value success! propertyId: 40, value: {intValue: 8, floatValue: 0}
+[02/27 22:21:42.107854][debug][32916][PropertyAccessor.cpp:28] get property value success! propertyId: 40, value: {intValue: 8, floatValue: 0}
+[02/27 22:21:42.107911][debug][32916][PropertyAccessor.cpp:28] get property value success! propertyId: 41, value: {intValue: 480, floatValue: 0}
+[02/27 22:21:42.107967][debug][32916][PropertyAccessor.cpp:17] set property value success! propertyId: 41, value: {intValue: 100, floatValue: 0}
+[02/27 22:21:42.107989][debug][32916][PropertyAccessor.cpp:28] get property value success! propertyId: 41, value: {intValue: 100, floatValue: 0}
+[02/27 22:21:42.109512][debug][32916][OpenNIVideoSensor.cpp:863] Query stream profile! size= 24, sensorType=OB_SENSOR_DEPTH
+[02/27 22:21:42.109557][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 30}
+[02/27 22:21:42.109566][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 5}
+[02/27 22:21:42.109571][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 5}
+[02/27 22:21:42.109575][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 10}
+[02/27 22:21:42.109580][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 10}
+[02/27 22:21:42.109584][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 15}
+[02/27 22:21:42.109588][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 15}
+[02/27 22:21:42.109592][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 30}
+[02/27 22:21:42.109595][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 30}
+[02/27 22:21:42.109599][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 60}
+[02/27 22:21:42.109603][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 60}
+[02/27 22:21:42.109607][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 5}
+[02/27 22:21:42.109611][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 5}
+[02/27 22:21:42.109615][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 10}
+[02/27 22:21:42.109619][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 10}
+[02/27 22:21:42.109622][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 15}
+[02/27 22:21:42.109626][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 15}
+[02/27 22:21:42.109630][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 30}
+[02/27 22:21:42.109634][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 60}
+[02/27 22:21:42.109638][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 60}
+[02/27 22:21:42.109641][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 1280, height: 800, fps: 15}
+[02/27 22:21:42.109645][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 1280, height: 800, fps: 15}
+[02/27 22:21:42.109649][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 1280, height: 800, fps: 30}
+[02/27 22:21:42.109673][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 1280, height: 800, fps: 30}
+[02/27 22:21:42.110271][debug][32916][OpenNIVideoSensor.cpp:863] Query stream profile! size= 12, sensorType=OB_SENSOR_IR
+[02/27 22:21:42.110301][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 30}
+[02/27 22:21:42.110356][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 5}
+[02/27 22:21:42.110363][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 10}
+[02/27 22:21:42.110368][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 15}
+[02/27 22:21:42.110372][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 30}
+[02/27 22:21:42.110377][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 60}
+[02/27 22:21:42.110381][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 5}
+[02/27 22:21:42.110384][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 10}
+[02/27 22:21:42.110388][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 15}
+[02/27 22:21:42.110392][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 60}
+[02/27 22:21:42.110396][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 1280, height: 800, fps: 15}
+[02/27 22:21:42.110400][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 1280, height: 800, fps: 30}
+[02/27 22:21:42.568513][debug][32916][Pipeline.cpp:29] Pipeline init ...
+[02/27 22:21:42.568624][debug][32916][Pipeline.cpp:168] loadFrameQueueSizeConfig() config queue size: 10
+[02/27 22:21:42.568648][warning][32916][ObException.cpp:5] Current device does not support frame sync!
+[02/27 22:21:42.569737][warning][32916][Pipeline.cpp:45] Execute failure! A libobsensor_exception has occurred!
+	 - where:45#Pipeline
+	 - msg:Current device does not support frame sync!
+	 - type:N11libobsensor31unsupported_operation_exceptionE
+[02/27 22:21:42.569776][info][32916][Pipeline.cpp:47] Pipeline created with device: {name: SV1301S_U3, sn: AY2MC3101VT}, @0xFFFF3430FDC0
+[02/27 22:21:42.570067][debug][32916][Pipeline.cpp:227] Pipeline start() start!
+[02/27 22:21:42.570086][info][32916][Pipeline.cpp:188] Check and set config start!
+[02/27 22:21:42.570120][debug][32916][OpenNIVideoSensor.cpp:863] Query stream profile! size= 24, sensorType=OB_SENSOR_DEPTH
+[02/27 22:21:42.570135][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 30}
+[02/27 22:21:42.570141][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 5}
+[02/27 22:21:42.570146][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 5}
+[02/27 22:21:42.570150][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 10}
+[02/27 22:21:42.570155][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 10}
+[02/27 22:21:42.570159][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 15}
+[02/27 22:21:42.570163][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 15}
+[02/27 22:21:42.570167][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 30}
+[02/27 22:21:42.570198][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 30}
+[02/27 22:21:42.570204][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 320, height: 200, fps: 60}
+[02/27 22:21:42.570208][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 320, height: 200, fps: 60}
+[02/27 22:21:42.570212][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 5}
+[02/27 22:21:42.570216][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 5}
+[02/27 22:21:42.570220][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 10}
+[02/27 22:21:42.570224][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 10}
+[02/27 22:21:42.570228][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 15}
+[02/27 22:21:42.570232][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 15}
+[02/27 22:21:42.570236][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 30}
+[02/27 22:21:42.570240][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 640, height: 400, fps: 60}
+[02/27 22:21:42.570244][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 640, height: 400, fps: 60}
+[02/27 22:21:42.570248][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 1280, height: 800, fps: 15}
+[02/27 22:21:42.570251][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 1280, height: 800, fps: 15}
+[02/27 22:21:42.570255][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y11, width: 1280, height: 800, fps: 30}
+[02/27 22:21:42.570259][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_DEPTH, format: OB_FORMAT_Y12, width: 1280, height: 800, fps: 30}
+[02/27 22:21:42.570268][debug][32916][OpenNIVideoSensor.cpp:863] Query stream profile! size= 12, sensorType=OB_SENSOR_IR
+[02/27 22:21:42.570273][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 30}
+[02/27 22:21:42.570277][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 5}
+[02/27 22:21:42.570281][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 10}
+[02/27 22:21:42.570285][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 15}
+[02/27 22:21:42.570289][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 30}
+[02/27 22:21:42.570293][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 320, height: 200, fps: 60}
+[02/27 22:21:42.570297][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 5}
+[02/27 22:21:42.570301][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 10}
+[02/27 22:21:42.570304][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 15}
+[02/27 22:21:42.570308][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 640, height: 400, fps: 60}
+[02/27 22:21:42.570319][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 1280, height: 800, fps: 15}
+[02/27 22:21:42.570324][debug][32916][OpenNIVideoSensor.cpp:865]  - {type: OB_STREAM_IR, format: OB_FORMAT_Y10, width: 1280, height: 800, fps: 30}
+[02/27 22:21:42.570329][info][32916][Pipeline.cpp:223] Check and set config done!
+[02/27 22:21:42.574518][debug][32916][PropertyAccessor.cpp:28] get property value success! propertyId: 14, value: {intValue: 0, floatValue: 0}
+[02/27 22:21:42.574563][debug][32916][PropertyAccessor.cpp:17] set property value success! propertyId: 63, value: {intValue: 0, floatValue: 0}
+[02/27 22:21:42.574593][debug][32916][FrameProcessingBlockManager.cpp:75]  FrameProcessingBlockManager started, 0 blocks contained!
+[02/27 22:21:42.574599][info][32916][Pipeline.cpp:288] Try to start streams!
+[02/27 22:21:42.574611][debug][32916][VideoSensor.cpp:566] VideoSensor::start, @OB_SENSOR_COLOR
+[02/27 22:21:42.574620][debug][32916][FrameMemoryPool.cpp:35] FrameMemoryPool created!
+[02/27 22:21:42.574637][debug][32916][FrameBufferManager.hpp:65] FrameBufferManager created! frame type:N11libobsensor10ColorFrameE, obj addr:0xffff34326680, frame obj total size:0.293MB
+[02/27 22:21:42.574641][debug][32916][FrameMemoryPool.cpp:76] ColorFrame bufferManager created!
+[02/27 22:21:42.574716][debug][32916][FrameProcessor.cpp:144] Frame processor active blocks chain update: input -> output
+[02/27 22:21:42.574725][debug][32916][FrameProcessor.cpp:155] FrameProcessor started, 1 blocks contained!
+[02/27 22:21:42.574737][info][32916][VideoSensor.cpp:646] start OB_SENSOR_COLOR stream with profile: {type: OB_STREAM_COLOR, format: OB_FORMAT_MJPG, width: 640, height: 480, fps: 60}, Backend Format: OB_FORMAT_MJPG
+[02/27 22:21:42.574741][debug][32916][ObLibuvcDevicePort.cpp:75] ObLibuvcDevicePort::startStream()...
+[02/27 22:21:42.574757][debug][32916][ObLibuvcDevicePort.cpp:90] playProfile: infIndex=0, selected_format.width=640, height=480, format=OB_FORMAT_MJPG
+[02/27 22:21:43.013473][debug][32916][ObLibuvcDevicePort.cpp:143] ObLibuvcDevicePort::startStream() done
+[02/27 22:21:43.013632][debug][32916][VideoSensor.cpp:672] Stream state changed to STREAM_STATE_STARTING. @OB_SENSOR_COLOR
+[02/27 22:21:43.013648][debug][32916][VideoSensor.cpp:674] Stream starting! @OB_SENSOR_COLOR
+[02/27 22:21:43.013659][debug][32916][Pipeline.cpp:299] Sensor stream started, sensorType=OB_SENSOR_COLOR
+[02/27 22:21:43.013700][debug][32916][FrameBufferManager.hpp:65] FrameBufferManager created! frame type:N11libobsensor10DepthFrameE, obj addr:0xffff34334610, frame obj total size:0.367MB
+[02/27 22:21:43.013710][debug][32916][FrameMemoryPool.cpp:60] DepthFrame bufferManager created!
+[02/27 22:21:43.013763][debug][32916][OpenNISensorStreams.cpp:79] Firmware stream Depth processor was replaced.
+[02/27 22:21:43.013795][debug][32916][FrameProcessor.cpp:144] Frame processor active blocks chain update: input ->FrameUnpacker -> FrameSoftFilter -> Disparity2DepthConverter -> output
+[02/27 22:21:43.013804][debug][32916][FrameProcessor.cpp:155] FrameProcessor started, 5 blocks contained!
+[02/27 22:21:43.015789][debug][32916][OpenNIVideoSensor.cpp:773] Creating USB Depth read thread... 
+[02/27 22:21:43.015820][debug][32916][OpenNIUSBLinux.cpp:112] Starting a USB read thread...
+[02/27 22:21:43.018276][debug][32916][OpenNISensorParams.cpp:110] set property DepthFormat(4)
+[02/27 22:21:43.019760][debug][32916][OpenNISensorParams.cpp:121] DepthFormat(4)was successfully set.
+[02/27 22:21:43.019805][debug][32916][OpenNISensorParams.cpp:110] set property DepthResolution(17)
+[02/27 22:21:43.021217][debug][32916][OpenNISensorParams.cpp:121] DepthResolution(17)was successfully set.
+[02/27 22:21:43.021250][debug][32916][OpenNISensorParams.cpp:110] set property DepthFPS(30)
+[02/27 22:21:43.023972][debug][32916][OpenNISensorParams.cpp:121] DepthFPS(30)was successfully set.
+[02/27 22:21:43.024010][debug][32916][OpenNISensorParams.cpp:110] set property DepthHoleFilter(1)
+[02/27 22:21:43.025523][debug][32916][OpenNISensorParams.cpp:121] DepthHoleFilter(1)was successfully set.
+[02/27 22:21:43.025592][debug][32916][OpenNISensorParams.cpp:110] set property Registration(0)
+[02/27 22:21:43.027298][debug][32916][OpenNISensorParams.cpp:121] Registration(0)was successfully set.
+[02/27 22:21:43.027333][debug][32916][OpenNISensorParams.cpp:110] set property DepthMirror(0)
+[02/27 22:21:43.028822][debug][32916][OpenNISensorParams.cpp:121] DepthMirror(0)was successfully set.
+[02/27 22:21:43.028843][debug][32916][OpenNISensorParams.cpp:110] set property Stream1Mode(2)
+[02/27 22:21:43.032338][debug][32916][OpenNISensorParams.cpp:121] Stream1Mode(2)was successfully set.
+[02/27 22:21:43.032392][debug][32916][OpenNISensorParams.cpp:110] set property DepthCropEnabled(0)
+[02/27 22:21:43.034142][debug][32916][OpenNISensorParams.cpp:121] DepthCropEnabled(0)was successfully set.
+[02/27 22:21:43.034174][debug][32916][OpenNISensorParams.cpp:110] set property FrameSync(0)
+[02/27 22:21:43.035911][debug][32916][OpenNISensorParams.cpp:121] FrameSync(0)was successfully set.
+[02/27 22:21:43.035981][debug][32916][OpenNIVideoSensor.cpp:546] Stream state changed to STREAM_STATE_STARTING. @OB_SENSOR_DEPTH
+[02/27 22:21:43.035998][debug][32916][Pipeline.cpp:299] Sensor stream started, sensorType=OB_SENSOR_DEPTH
+[02/27 22:21:43.036034][debug][32916][FrameBufferManager.hpp:65] FrameBufferManager created! frame type:N11libobsensor7IRFrameE, obj addr:0xffff3468ca90, frame obj total size:0.306MB
+[02/27 22:21:43.036044][debug][32916][FrameMemoryPool.cpp:72] IRFrame bufferManager created!
+[02/27 22:21:43.036131][debug][32916][OpenNISensorStreams.cpp:79] Firmware stream IR processor was replaced.
+[02/27 22:21:43.036157][debug][32916][FrameProcessor.cpp:144] Frame processor active blocks chain update: input ->FrameUnpacker -> output
+[02/27 22:21:43.036167][debug][32916][FrameProcessor.cpp:155] FrameProcessor started, 2 blocks contained!
+[02/27 22:21:43.036180][debug][32916][OpenNIVideoSensor.cpp:773] Creating USB IR read thread... 
+[02/27 22:21:43.036188][debug][32916][OpenNIUSBLinux.cpp:112] Starting a USB read thread...
+[02/27 22:21:43.046702][debug][32916][OpenNISensorParams.cpp:110] set property IRFormat(2)
+[02/27 22:21:43.049244][debug][32916][OpenNISensorParams.cpp:121] IRFormat(2)was successfully set.
+[02/27 22:21:43.049274][debug][32916][OpenNISensorParams.cpp:110] set property IRResolution(17)
+[02/27 22:21:43.051711][debug][32916][OpenNISensorParams.cpp:121] IRResolution(17)was successfully set.
+[02/27 22:21:43.051749][debug][32916][OpenNISensorParams.cpp:110] set property IRFPS(30)
+[02/27 22:21:43.054515][debug][32916][OpenNISensorParams.cpp:121] IRFPS(30)was successfully set.
+[02/27 22:21:43.054553][debug][32916][OpenNISensorParams.cpp:110] set property Stream0Mode(3)
+[02/27 22:21:43.057065][debug][32916][OpenNISensorParams.cpp:121] Stream0Mode(3)was successfully set.
+[02/27 22:21:43.057098][debug][32916][OpenNISensorParams.cpp:110] set property FrameSync(0)
+[02/27 22:21:43.063057][debug][32916][OpenNISensorParams.cpp:121] FrameSync(0)was successfully set.
+[02/27 22:21:43.063193][debug][32916][OpenNIVideoSensor.cpp:546] Stream state changed to STREAM_STATE_STARTING. @OB_SENSOR_IR
+[02/27 22:21:43.063216][debug][32916][Pipeline.cpp:299] Sensor stream started, sensorType=OB_SENSOR_IR
+[02/27 22:21:43.063230][info][32916][Pipeline.cpp:301] Start streams done!
+[02/27 22:21:43.063239][info][32916][Pipeline.cpp:277] Pipeline start done!
+[02/27 22:21:43.093832][debug][32964][FrameBufferManager.cpp:35] New frame buffer allocated=0.306MB, total usage: allocated=0.306MB, max limit=2048.000MB
+[02/27 22:21:43.094071][debug][32964][OpenNIVideoSensor.cpp:722] Stream state changed to STREAM_STATE_STREAMING. @OB_SENSOR_IR
+[02/27 22:21:43.094498][debug][32964][FrameProcessingBlock.cpp:59] FrameProcessingBlock@N11libobsensor13FrameUnpackerE process thread started!
+[02/27 22:21:43.094583][debug][32966][FrameBufferManager.hpp:65] FrameBufferManager created! frame type:N11libobsensor7IRFrameE, obj addr:0xffff345d2020, frame obj total size:0.489MB
+[02/27 22:21:43.094749][debug][32966][FrameMemoryPool.cpp:72] IRFrame bufferManager created!
+[02/27 22:21:43.094892][debug][32966][FrameBufferManager.cpp:35] New frame buffer allocated=0.489MB, total usage: allocated=0.794MB, max limit=2048.000MB
+[02/27 22:21:43.095551][debug][32966][FrameBufferManager.hpp:65] FrameBufferManager created! frame type:N11libobsensor8FrameSetE, obj addr:0xffff34334750, frame obj total size:0.000MB
+[02/27 22:21:43.095571][debug][32966][FrameMemoryPool.cpp:92] Frameset bufferManager created!
+[02/27 22:21:43.095614][debug][32966][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_IR
+[02/27 22:21:43.095964][debug][32963][FrameBufferManager.cpp:35] New frame buffer allocated=0.367MB, total usage: allocated=1.161MB, max limit=2048.000MB
+[02/27 22:21:43.096036][debug][32963][OpenNIVideoSensor.cpp:722] Stream state changed to STREAM_STATE_STREAMING. @OB_SENSOR_DEPTH
+[02/27 22:21:43.096770][debug][32963][FrameProcessingBlock.cpp:59] FrameProcessingBlock@N11libobsensor13FrameUnpackerE process thread started!
+[02/27 22:21:43.096890][debug][32967][FrameBufferManager.hpp:65] FrameBufferManager created! frame type:N11libobsensor10DepthFrameE, obj addr:0xffff24000b70, frame obj total size:0.489MB
+[02/27 22:21:43.096913][debug][32967][FrameMemoryPool.cpp:60] DepthFrame bufferManager created!
+[02/27 22:21:43.096938][debug][32967][FrameBufferManager.cpp:35] New frame buffer allocated=0.489MB, total usage: allocated=1.650MB, max limit=2048.000MB
+[02/27 22:21:43.097471][debug][32967][FrameProcessingBlock.cpp:59] FrameProcessingBlock@N11libobsensor15FrameSoftFilterE process thread started!
+[02/27 22:21:43.099338][debug][32968][FrameProcessingBlock.cpp:59] FrameProcessingBlock@N11libobsensor24Disparity2DepthConverterE process thread started!
+[02/27 22:21:43.100335][debug][32969][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_DEPTH
+[02/27 22:21:43.127896][debug][32966][FrameBufferManager.cpp:35] New frame buffer allocated=0.489MB, total usage: allocated=2.138MB, max limit=2048.000MB
+[02/27 22:21:43.134381][debug][32967][FrameBufferManager.cpp:35] New frame buffer allocated=0.489MB, total usage: allocated=2.627MB, max limit=2048.000MB
+[02/27 22:21:43.143786][debug][32962][FrameBufferManager.cpp:35] New frame buffer allocated=0.293MB, total usage: allocated=2.921MB, max limit=2048.000MB
+[02/27 22:21:43.143883][debug][32962][VideoSensor.cpp:460] Stream state changed to STREAM_STATE_STREAMING. @OB_SENSOR_COLOR
+[02/27 22:21:43.143913][debug][32962][FrameBufferManager.cpp:35] New frame buffer allocated=0.000MB, total usage: allocated=2.921MB, max limit=2048.000MB
+[02/27 22:21:43.163413][debug][32965][FrameBufferManager.hpp:65] FrameBufferManager created! frame type:N11libobsensor10ColorFrameE, obj addr:0xffff10000be0, frame obj total size:0.879MB
+[02/27 22:21:43.163535][debug][32965][FrameMemoryPool.cpp:76] ColorFrame bufferManager created!
+[02/27 22:21:43.163852][debug][32965][FrameBufferManager.cpp:35] New frame buffer allocated=0.879MB, total usage: allocated=3.800MB, max limit=2048.000MB
+[02/27 22:21:43.164300][debug][32962][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_COLOR
+[02/27 22:21:43.164378][debug][32962][FrameBufferManager.cpp:35] New frame buffer allocated=0.293MB, total usage: allocated=4.094MB, max limit=2048.000MB
+[02/27 22:21:43.164413][debug][32962][FrameBufferManager.cpp:35] New frame buffer allocated=0.000MB, total usage: allocated=4.094MB, max limit=2048.000MB
+[02/27 22:21:43.165574][debug][32967][FrameBufferManager.cpp:35] New frame buffer allocated=0.489MB, total usage: allocated=4.583MB, max limit=2048.000MB
+[02/27 22:21:43.166826][debug][32966][FrameBufferManager.cpp:35] New frame buffer allocated=0.489MB, total usage: allocated=5.072MB, max limit=2048.000MB
+[02/27 22:21:43.260080][debug][32962][FrameBufferManager.cpp:35] New frame buffer allocated=0.293MB, total usage: allocated=5.365MB, max limit=2048.000MB
+[02/27 22:21:43.567917][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:44.567971][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:45.383766][debug][32962][FrameBufferManager.cpp:35] New frame buffer allocated=0.293MB, total usage: allocated=5.659MB, max limit=2048.000MB
+[02/27 22:21:45.567904][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:46.119402][debug][32966][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_IR [**91 logs in 3023ms**]
+[02/27 22:21:46.127871][debug][32969][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_DEPTH [**90 logs in 3027ms**]
+[02/27 22:21:46.179768][debug][32962][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_COLOR [**183 logs in 3015ms**]
+[02/27 22:21:46.567892][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:47.567914][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:48.155756][debug][32962][VideoSensor.cpp:427] OB_SENSOR_COLOR Streaming... frameRate=60.454906fps
+[02/27 22:21:48.155906][debug][32962][Pipeline.cpp:323] Pipeline streaming... frameset output rate=60.055866fps
+[02/27 22:21:48.567914][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:49.567908][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:50.567861][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:51.567892][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:52.140560][debug][32966][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_IR [**181 logs in 6021ms**]
+[02/27 22:21:52.151667][debug][32969][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_DEPTH [**181 logs in 6023ms**]
+[02/27 22:21:52.191777][debug][32962][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_COLOR [**362 logs in 6012ms**]
+[02/27 22:21:52.567897][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:53.156881][debug][32969][Pipeline.cpp:323] Pipeline streaming... frameset output rate=60.387924fps
+[02/27 22:21:53.171770][debug][32962][VideoSensor.cpp:427] OB_SENSOR_COLOR Streaming... frameRate=60.207340fps
+[02/27 22:21:53.567911][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:54.567885][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:55.567957][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:56.567939][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:57.569414][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:58.166281][debug][32969][Pipeline.cpp:323] Pipeline streaming... frameset output rate=60.079838fps
+[02/27 22:21:58.172656][debug][32962][VideoSensor.cpp:427] OB_SENSOR_COLOR Streaming... frameRate=60.187962fps
+[02/27 22:21:58.567888][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:21:59.568688][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:00.567934][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:01.567894][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:02.567919][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:03.171892][debug][32962][Pipeline.cpp:323] Pipeline streaming... frameset output rate=60.139858fps
+[02/27 22:22:03.187866][debug][32962][VideoSensor.cpp:427] OB_SENSOR_COLOR Streaming... frameRate=60.219345fps
+[02/27 22:22:03.567929][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:04.150721][debug][32966][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_IR [**361 logs in 12010ms**]
+[02/27 22:22:04.158775][debug][32969][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_DEPTH [**361 logs in 12007ms**]
+[02/27 22:22:04.200186][debug][32962][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_COLOR [**723 logs in 12008ms**]
+[02/27 22:22:04.567942][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:05.567912][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:06.567922][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:07.567909][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:08.177158][debug][32969][Pipeline.cpp:323] Pipeline streaming... frameset output rate=60.327606fps
+[02/27 22:22:08.203843][debug][32962][VideoSensor.cpp:427] OB_SENSOR_COLOR Streaming... frameRate=60.207340fps
+[02/27 22:22:08.567907][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:09.567878][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:10.567879][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:11.567945][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:12.567903][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:13.183922][debug][32962][Pipeline.cpp:323] Pipeline streaming... frameset output rate=60.127846fps
+[02/27 22:22:13.219954][debug][32962][VideoSensor.cpp:427] OB_SENSOR_COLOR Streaming... frameRate=60.207340fps
+[02/27 22:22:13.567883][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:14.567899][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:15.567897][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:16.567926][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:17.567883][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:18.189256][debug][32969][Pipeline.cpp:323] Pipeline streaming... frameset output rate=60.327606fps
+[02/27 22:22:18.231916][debug][32962][VideoSensor.cpp:427] OB_SENSOR_COLOR Streaming... frameRate=60.255386fps
+[02/27 22:22:18.567906][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:19.567889][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:20.567919][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:21.567944][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:22.567926][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:23.199944][debug][32962][Pipeline.cpp:323] Pipeline streaming... frameset output rate=60.079838fps
+[02/27 22:22:23.248763][debug][32962][VideoSensor.cpp:427] OB_SENSOR_COLOR Streaming... frameRate=60.195332fps
+[02/27 22:22:23.567880][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:24.567875][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:25.567903][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:26.567866][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:27.567903][warning][32875][ObException.cpp:5] Property is not supported! propertyId: 1003
+[02/27 22:22:27.773458][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.773681][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.773817][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.773838][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.773847][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.773854][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.774114][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.774186][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.774318][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.774329][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.774600][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.774634][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.774831][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.774846][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.775317][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.775342][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.775358][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.775369][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.775553][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.775573][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.775921][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.775942][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.776056][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.776075][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.776294][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.776329][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.776638][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.776671][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.776952][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.776990][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.777109][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.777125][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.777351][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.777376][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.777602][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.777618][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.777857][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.777872][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.778117][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.778147][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.778338][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.778352][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.778579][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.778591][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.778809][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.778830][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.779049][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.779069][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.779388][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.779408][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.779617][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.779634][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.779931][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.779953][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.780197][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.780212][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.780440][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.780470][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.780575][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.780585][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.780838][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.780850][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.781058][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.781114][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.781454][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.781491][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.781702][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.781734][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.781930][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.781958][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.782209][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.782220][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.782424][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.782457][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.782715][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.782813][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.782951][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.782962][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.783218][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.783241][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.783466][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.783725][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.783759][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.783783][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.783999][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.784026][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.784235][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.784249][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.784453][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.784509][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.784708][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.784730][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.784956][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.784973][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.785260][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.785317][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.785465][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.785503][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.785729][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.785800][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.786265][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.786324][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.786551][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.786639][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.786732][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.786782][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.786973][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.787024][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.787261][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.787305][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788387][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788464][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788502][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788533][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788562][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788603][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788643][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788686][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788719][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788747][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788832][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788891][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788943][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.788977][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.789206][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.789256][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.789448][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.789490][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.789683][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.789895][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.789988][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.790034][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.790210][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.790246][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.790447][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.790498][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.790723][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.790788][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.790957][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.790984][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.791385][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.791452][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.792171][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.792266][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.792288][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.792312][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.792349][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.792380][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.792392][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.792400][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.792592][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.792629][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.792980][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.792995][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.793202][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.793233][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.793446][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.793458][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.793699][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.793711][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.793936][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.793958][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.794187][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.794216][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.794458][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.794477][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.794723][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.794741][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.795047][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.795059][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.795303][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.795342][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.795549][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.795560][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.795806][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.795829][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.796051][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.796071][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.796303][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.796320][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.796493][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.796522][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.796738][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.796759][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.796983][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.796998][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.797213][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.797225][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.797440][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.797536][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.797671][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.797715][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.797923][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.797950][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.798195][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.798456][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.798516][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.798535][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.798735][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.798749][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.798964][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.798991][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.799187][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.799205][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.799431][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.799445][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.799671][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.799709][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.800487][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.800572][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.800638][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.800671][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.800863][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.800939][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.800978][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.801010][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.801241][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.801255][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.801478][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.801492][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.801704][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.801772][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.801958][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.801973][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803778][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803812][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803828][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803837][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803846][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803855][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803893][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803906][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803939][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803950][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803963][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803973][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803980][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.803996][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.804009][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.804026][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.804177][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.804961][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.804983][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.804992][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.805002][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.805025][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.805089][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.805105][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.805503][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.805536][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.805642][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.805690][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.805862][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.805923][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.806131][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.806147][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.806366][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.806378][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.806598][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.806619][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.806825][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.806850][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.807081][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.807092][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.807294][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.807328][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.807541][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.807573][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.808164][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.808189][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.808202][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.808211][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.808400][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.808472][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.808772][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.808791][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.808815][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.808836][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.809006][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.809021][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.809300][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.809323][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.809548][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.809567][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.809746][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.809760][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.809977][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.809993][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.810222][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.810239][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.810467][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.810505][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.810713][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.810736][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.811144][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.811190][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.811203][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.811229][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.811453][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.811466][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.811702][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.811726][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.811953][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.811974][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.812225][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.812849][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.812877][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.812902][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.812915][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.812957][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.813099][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.813115][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.813333][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.813347][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.813573][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.813587][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.813833][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.813849][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.814105][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.814120][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.814333][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.814348][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.814592][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.814607][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.814832][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.814849][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.815081][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.815096][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.815328][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.815343][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.815571][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.815946][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.815985][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.816082][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.816103][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.816184][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.816322][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.816336][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.816645][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.816678][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.816840][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.816855][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.817090][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.817115][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.817318][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.817362][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.817594][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.817609][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.817925][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.817942][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.818182][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.818195][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.818431][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.818454][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.818688][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.818701][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.818918][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.818930][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.819164][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.819175][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.819417][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.819428][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.819684][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.819708][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.819875][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.819896][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.820129][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.820142][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.820410][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.820437][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.820592][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.820606][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.820827][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.820838][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.821061][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.821073][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.821327][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.821347][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.821574][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.821590][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.821856][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.821871][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.822001][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.822020][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.822259][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.822307][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.822467][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.822479][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.822712][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.822725][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.822970][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.822985][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.823323][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.823363][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.823439][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.823453][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.823706][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.823722][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.823951][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.823969][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.824245][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.824259][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.824467][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.824489][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.824720][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.824740][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.824953][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.824968][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.825300][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.825316][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.825485][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.825510][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.826003][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.826026][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.826045][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.826071][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.826239][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.826286][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.826511][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.826545][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.826714][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.826728][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.826988][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.827017][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.827254][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.827275][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.827459][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.827475][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.827723][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.827739][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.827952][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.827984][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.828191][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.828214][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.828453][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.828466][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.828669][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.828701][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.828920][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.828957][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.829169][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.829210][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.829508][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.829632][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.830051][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.830080][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.830092][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.830100][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.830292][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.830341][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.830470][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.830528][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.830735][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.830754][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.830974][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.830987][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.831208][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.831233][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.831492][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.831511][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.831716][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.831731][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.831932][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.831956][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.843069][warning][32964][MessengerLibusb.cpp:68] usb_request_queue returned error, endpoint:130, error:No such device, number:19 
+[02/27 22:22:27.843141][warning][32964][OpenNIUSBLinux.cpp:296] Unexpected device disconnect, aborting the read thread!
+[02/27 22:22:27.866405][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.866429][warning][32963][MessengerLibusb.cpp:68] usb_request_queue returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.866530][warning][32963][OpenNIUSBLinux.cpp:296] Unexpected device disconnect, aborting the read thread!
+[02/27 22:22:27.866487][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867544][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867561][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867572][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867581][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867592][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867602][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867610][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867620][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867629][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867637][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867646][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867655][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867665][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867671][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867678][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867687][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867695][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867704][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867712][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867718][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867727][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867734][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867741][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867748][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.867984][debug][32914][LinuxPal.cpp:266] Device removed event occurred
+[02/27 22:22:27.868049][debug][32914][UsbDeviceEnumerator.cpp:137] usb device removed: 1-2.2.1-83
+[02/27 22:22:27.868058][debug][32914][UsbDeviceEnumerator.cpp:142] Current usb device port list:
+[02/27 22:22:27.868064][debug][32914][UsbDeviceEnumerator.cpp:145]  - 1-2.2.2-84.0 | Orbbec(R) Astra(TM) 3D Camera(F) Depth
+[02/27 22:22:27.868164][debug][32914][UsbDeviceEnumerator.cpp:105] device list changed: removed=1, current=0
+[02/27 22:22:27.868173][debug][32914][UsbDeviceEnumerator.cpp:107] Removed device list:
+[02/27 22:22:27.868181][debug][32914][UsbDeviceEnumerator.cpp:109]   - Name: SV1301S_U3, PID: 0x0614, SN/ID: 
+[02/27 22:22:27.868369][debug][32914][LinuxPal.cpp:266] Device removed event occurred
+[02/27 22:22:27.868403][debug][32914][UsbDeviceEnumerator.cpp:137] usb device removed: 1-2.2.2-84
+[02/27 22:22:27.868402][info][33047][DeviceManager.cpp:181] Device changed! removed: 1, added: 0
+[02/27 22:22:27.868458][debug][33047][VendorCommand.cpp:381] handleDeviceDetached
+[02/27 22:22:27.868500][debug][33047][VideoSensor.cpp:678] VideoSensor::stop, @OB_SENSOR_COLOR
+[02/27 22:22:27.868515][debug][33047][VideoSensor.cpp:701] Stream state changed to STREAM_STATE_STOPPING. @OB_SENSOR_COLOR
+[02/27 22:22:27.868525][debug][33047][ObLibuvcDevicePort.cpp:148] ObLibuvcDevicePort::stopStream()...
+[02/27 22:22:27.872424][debug][32914][UsbDeviceEnumerator.cpp:142] Current usb device port list:
+[02/27 22:22:27.872539][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872557][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872568][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872579][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872589][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872597][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872607][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872618][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872626][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872633][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872641][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872650][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872658][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872664][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872672][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872680][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872689][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872695][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872702][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872711][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872717][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872725][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872734][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872742][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872748][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872754][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872761][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872769][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872775][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872782][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872821][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872829][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872835][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872879][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872888][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872896][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872903][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872915][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872924][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872930][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872936][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872944][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872952][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872958][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872966][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872975][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872982][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872990][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.872998][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873006][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873012][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873020][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873027][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873033][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873042][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873050][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873057][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873064][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873070][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873076][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873082][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873089][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873097][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873103][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873109][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873115][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873123][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873131][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873140][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873147][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873155][warning][32914][RequestLibusb.cpp:27] Request callback with error: No Device!
+[02/27 22:22:27.873173][warning][32914][RequestLibusb.cpp:27] Request callback with error: No Device!
+[02/27 22:22:27.873182][warning][32914][RequestLibusb.cpp:27] Request callback with error: No Device!
+[02/27 22:22:27.873189][warning][32914][RequestLibusb.cpp:27] Request callback with error: No Device!
+[02/27 22:22:27.873197][warning][32914][RequestLibusb.cpp:27] Request callback with error: No Device!
+[02/27 22:22:27.873204][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873210][warning][32914][RequestLibusb.cpp:24] Request callback with transfer error!
+[02/27 22:22:27.873218][warning][32914][RequestLibusb.cpp:27] Request callback with error: No Device!
+[02/27 22:22:27.873226][warning][32914][RequestLibusb.cpp:27] Request callback with error: No Device!
+[02/27 22:22:27.873234][warning][32914][RequestLibusb.cpp:27] Request callback with error: No Device!
+[02/27 22:22:27.873243][warning][32914][RequestLibusb.cpp:27] Request callback with error: No Device!
+[02/27 22:22:27.873249][warning][32914][RequestLibusb.cpp:27] Request callback with error: No Device!
+[02/27 22:22:27.873880][debug][33047][ObLibuvcDevicePort.cpp:172] ObLibuvcDevicePort::stopStream() done
+[02/27 22:22:27.873934][debug][33047][VideoSensor.cpp:727] stream stoped! @OB_SENSOR_COLOR
+[02/27 22:22:27.873945][debug][33047][FrameProcessor.cpp:165] FrameProcessor stoped!
+[02/27 22:22:27.873975][debug][33047][VideoSensor.cpp:716] Stream state changed to STREAM_STATE_STOPED. @OB_SENSOR_COLOR
+[02/27 22:22:27.873981][info][33047][VideoSensor.cpp:734] Video sensor stopped, @OB_SENSOR_COLOR
+[02/27 22:22:27.874002][info][33047][DeviceManager.cpp:15] Removed device(s) list: (1)
+[02/27 22:22:27.874013][info][33047][DeviceManager.cpp:24] 	- Name: SV1301S_U3, PID: 0x0614, SN/ID: , Connection: USB2.0
+[02/27 22:22:27.874020][info][33047][DeviceManager.cpp:15] Current device(s) list: (0)
+[02/27 22:22:27.885427][info][32917][Pipeline.cpp:411] Try to stop pipeline!
+[02/27 22:22:27.885488][info][32917][Pipeline.cpp:383] Try to stop streams!
+[02/27 22:22:27.885510][debug][32917][OpenNIVideoSensor.cpp:783] Shutting down USB IR read thread...
+[02/27 22:22:27.885516][debug][32917][OpenNIUSBLinux.cpp:344] Shutdown read thread...
+[02/27 22:22:27.885543][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885558][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885573][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885582][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885592][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885598][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885604][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885609][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885615][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885621][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885626][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885631][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885637][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885671][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885678][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885683][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885689][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885694][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885699][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885704][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885710][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885715][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885722][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885726][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885732][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885738][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885743][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885748][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885753][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885758][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885764][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885769][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885774][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885779][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885784][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885790][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885795][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885800][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885806][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885811][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885816][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885822][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885827][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885839][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885845][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885851][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885856][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885861][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885867][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885873][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885878][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885884][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885889][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885895][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885900][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885905][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885911][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885916][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885922][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885927][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885932][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885938][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885944][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885949][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:130, error:Success, number:0 
+[02/27 22:22:27.885955][debug][32917][OpenNIUSBLinux.cpp:379] Shutdown read thread end...
+[02/27 22:22:27.885960][debug][32917][OpenNISensorParams.cpp:110] set property Stream0Mode(0)
+[02/27 22:22:27.886006][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.886016][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.886026][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.886030][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.886037][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.886041][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.886047][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.886051][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.886066][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.886071][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.886075][error][32917][OpenNIHostProtocol.cpp:872] Failed setting 5 value 0
+[02/27 22:22:27.886079][error][32917][OpenNISensorParams.cpp:116] Failed to set Stream0Mode property.
+[02/27 22:22:27.886083][error][32917][OpenNIVideoSensor.cpp:692] OpenNI IR  stream stop failed!
+[02/27 22:22:27.890816][debug][32917][FrameProcessingBlock.cpp:74] Process thread stoped! N11libobsensor13FrameUnpackerE@0xffff34041880 
+[02/27 22:22:27.890884][debug][32917][FrameProcessor.cpp:165] FrameProcessor stoped!
+[02/27 22:22:27.890950][debug][32917][OpenNISensorStreams.cpp:114] Erase FW Stream IR
+[02/27 22:22:27.890960][debug][32917][OpenNISensorStreams.cpp:124] released FW Stream strType
+[02/27 22:22:27.890970][error][32917][OpenNIVideoSensor.cpp:708] OpenNI IR stream stop completed.
+[02/27 22:22:27.890993][info][32917][Pipeline.cpp:396] Sensor stream stopped, sensorType=OB_SENSOR_IR
+[02/27 22:22:27.891008][debug][32917][OpenNIVideoSensor.cpp:783] Shutting down USB Depth read thread...
+[02/27 22:22:27.891012][debug][32917][OpenNIUSBLinux.cpp:344] Shutdown read thread...
+[02/27 22:22:27.891069][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891094][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891103][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891109][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891121][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891127][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891133][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891137][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891143][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891152][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891158][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891163][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891169][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891175][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891180][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891185][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891191][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891197][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891202][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891239][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891246][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891251][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891257][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891262][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891267][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891273][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891278][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891284][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891289][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891294][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891300][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891305][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891310][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891315][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891321][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891327][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891332][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891337][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891342][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891347][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891352][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891356][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891361][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891366][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891371][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891376][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891381][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891385][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891399][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891404][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891409][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891415][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891420][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891425][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891429][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891434][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891439][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891444][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891449][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891453][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891458][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891463][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891468][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891474][warning][32917][MessengerLibusb.cpp:82] usb_request_cancel returned error, endpoint:129, error:No such device, number:19 
+[02/27 22:22:27.891480][debug][32917][OpenNIUSBLinux.cpp:379] Shutdown read thread end...
+[02/27 22:22:27.891485][debug][32917][OpenNISensorParams.cpp:110] set property Stream1Mode(0)
+[02/27 22:22:27.891516][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.891523][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.891532][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.891536][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.891543][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.891546][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.891554][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.891557][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.891564][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.891568][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.891572][error][32917][OpenNIHostProtocol.cpp:872] Failed setting 6 value 0
+[02/27 22:22:27.891575][error][32917][OpenNISensorParams.cpp:116] Failed to set Stream1Mode property.
+[02/27 22:22:27.891579][error][32917][OpenNIVideoSensor.cpp:692] OpenNI Depth  stream stop failed!
+[02/27 22:22:27.894943][debug][32917][FrameProcessingBlock.cpp:74] Process thread stoped! N11libobsensor13FrameUnpackerE@0xffff3404df20 
+[02/27 22:22:27.896137][debug][32917][FrameProcessingBlock.cpp:74] Process thread stoped! N11libobsensor15FrameSoftFilterE@0xffff3404e020 
+[02/27 22:22:27.896543][debug][32917][FrameProcessingBlock.cpp:74] Process thread stoped! N11libobsensor24Disparity2DepthConverterE@0xffff34040400 
+[02/27 22:22:27.896590][debug][32917][FrameProcessor.cpp:165] FrameProcessor stoped!
+[02/27 22:22:27.896663][debug][32917][OpenNISensorStreams.cpp:114] Erase FW Stream Depth
+[02/27 22:22:27.896673][debug][32917][OpenNISensorStreams.cpp:124] released FW Stream strType
+[02/27 22:22:27.896683][error][32917][OpenNIVideoSensor.cpp:708] OpenNI Depth stream stop completed.
+[02/27 22:22:27.896703][info][32917][Pipeline.cpp:396] Sensor stream stopped, sensorType=OB_SENSOR_DEPTH
+[02/27 22:22:27.896716][debug][32917][VideoSensor.cpp:678] VideoSensor::stop, @OB_SENSOR_COLOR
+[02/27 22:22:27.896721][warning][32917][VideoSensor.cpp:680] Sensor(OB_SENSOR_COLOR) already stop.
+[02/27 22:22:27.896725][info][32917][Pipeline.cpp:396] Sensor stream stopped, sensorType=OB_SENSOR_COLOR
+[02/27 22:22:27.896729][info][32917][Pipeline.cpp:402] Stop streams done!
+[02/27 22:22:27.896753][debug][32917][OpenNISensorParams.cpp:110] set property Registration(0)
+[02/27 22:22:27.896795][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.896804][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.896814][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.896820][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.896827][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.896831][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.896838][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.896842][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.896850][warning][32917][MessengerLibusb.cpp:31] control_transfer returned error, index:0, error:No such device, number:19
+[02/27 22:22:27.896854][error][32917][OpenNIHostProtocol.cpp:868] Retrying to set the param...
+[02/27 22:22:27.896858][error][32917][OpenNIHostProtocol.cpp:872] Failed setting 2 value 0
+[02/27 22:22:27.896862][error][32917][OpenNISensorParams.cpp:116] Failed to set Registration property.
+[02/27 22:22:27.896894][debug][32917][PropertyAccessor.cpp:17] set property value success! propertyId: 42, value: {intValue: 0, floatValue: 0}
+[02/27 22:22:27.896919][debug][32917][FrameProcessingBlockManager.cpp:84] FrameProcessingBlockManager stoped!
+[02/27 22:22:27.896924][debug][32917][FrameProcessingBlockManager.cpp:20] Processing block list cleared!
+[02/27 22:22:27.896930][info][32917][Pipeline.cpp:443] Stop pipeline done!
+[02/27 22:22:27.898136][debug][32917][Pipeline.cpp:68] Pipeline deInit start!
+[02/27 22:22:27.898163][info][32917][Pipeline.cpp:75] Pipeline destroyed! @0xFFFF3430FDC0
+[02/27 22:22:27.898200][info][32917][OpenNIDevice.cpp:44] OpenNI device destroyed! PID: 0x0614, SN: AY2MC3101VT
+[02/27 22:22:27.898217][info][32917][OpenNIVideoSensor.cpp:1020] OpenNIVideoSensor destroyed! sensorType=OB_SENSOR_IR
+[02/27 22:22:27.898232][debug][32917][VideoSensor.cpp:282] VideoSensor::~VideoSensor(), @OB_SENSOR_COLOR
+[02/27 22:22:27.898237][info][32917][VideoSensor.cpp:303] VideoSensor destroyed, @OB_SENSOR_COLOR
+[02/27 22:22:27.898248][info][32917][OpenNIVideoSensor.cpp:1020] OpenNIVideoSensor destroyed! sensorType=OB_SENSOR_DEPTH
+[02/27 22:22:27.898273][debug][32917][FrameProcessor.cpp:807] try remove eventId: PropertyValueUpdate
+[02/27 22:22:27.898283][debug][32917][FrameProcessor.cpp:807] try remove eventId: DepthStreamProfileChanged
+[02/27 22:22:27.898321][debug][32917][FrameProcessor.cpp:111] FrameProcessor destroyed! @281471554420112
+[02/27 22:22:27.898525][debug][32917][FrameProcessor.cpp:111] FrameProcessor destroyed! @281471554477632
+[02/27 22:22:27.898535][debug][32917][ObLibuvcDevicePort.cpp:63] ~ObLibuvcDevicePort
+[02/27 22:22:27.901363][info][32917][ObLibuvcDevicePort.cpp:70] uvc_close done.
+[02/27 22:22:27.901391][info][32917][ObLibuvcDevicePort.cpp:71] ~ObLibuvcDevicePort done
+[02/27 22:22:27.902136][debug][32917][FrameProcessor.cpp:111] FrameProcessor destroyed! @281471554209664
+[02/27 22:22:27.902179][debug][32917][VendorCommand.cpp:213] destructor ffff340037e0
+[02/27 22:22:27.902199][debug][32917][VendorCommand.cpp:467] disableHeartBeat heartBeatHelper_: 0
+[02/27 22:22:27.902206][debug][32917][HostProtocol.cpp:139] ~HostProtocol()
+[02/27 22:22:27.902237][debug][32918][HostProtocol.cpp:167] emitTranDataFutureSignalThread_ finish
+[02/27 22:22:28.181459][debug][33006][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_IR [**710 logs in 24030ms, last: 22:22:27.758504**]
+[02/27 22:22:28.188768][debug][33007][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_DEPTH [**710 logs in 24029ms, last: 22:22:27.765287**]
+[02/27 22:22:28.216232][debug][33008][Pipeline.cpp:319] Frame received on pipeline! type=OB_FRAME_COLOR [**1419 logs in 24015ms, last: 22:22:27.768121**]

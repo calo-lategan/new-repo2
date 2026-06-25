@@ -1,0 +1,31 @@
+# Top-level home folders + sizes
+
+13G	/home/ubuntu/third_party_ros2
+628M	/home/ubuntu/ros2_ws
+249M	/home/ubuntu/jetarm_v5_src
+245M	/home/ubuntu/jetarm_v4_1_src
+244M	/home/ubuntu/new-repo2
+243M	/home/ubuntu/jetarm_v4_src
+148M	/home/ubuntu/large_models
+137M	/home/ubuntu/snap
+23M	/home/ubuntu/factory_utils
+23M	/home/ubuntu/Desktop
+3.7M	/home/ubuntu/jetarm_v5
+3.4M	/home/ubuntu/Log
+1.9M	/home/ubuntu/wifi_manager
+1.3M	/home/ubuntu/Pictures
+172K	/home/ubuntu/Documents
+28K	/home/ubuntu/jetarm_v5_profiles
+28K	/home/ubuntu/docker
+28K	/home/ubuntu/custom_sorting.py.bak
+24K	/home/ubuntu/jetarm_v4
+20K	/home/ubuntu/jetarm_v4_1
+16K	/home/ubuntu/msc
+16K	/home/ubuntu/jetarm_v5_1
+16K	/home/ubuntu/jetarm_v4_profiles
+8.0K	/home/ubuntu/Videos
+4.0K	/home/ubuntu/Templates
+4.0K	/home/ubuntu/Public
+4.0K	/home/ubuntu/Music
+4.0K	/home/ubuntu/Downloads
+4.0K	/home/ubuntu/DONT TURN OFF THE ROBOT

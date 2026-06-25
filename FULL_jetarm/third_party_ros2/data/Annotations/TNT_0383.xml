@@ -1,0 +1,34 @@
+<?xml version="1.0" ?>
+<annotation>
+    <folder>JPEGImages</folder>
+    <filename>TNT_0383.jpg</filename>
+    <size>
+        <width>4096</width>
+        <height>2730</height>
+        <depth>3</depth>
+    </size>
+    <object>
+        <name>0</name>
+        <pose>Unspecified</pose>
+        <truncated>0</truncated>
+        <difficult>0</difficult>
+        <bndbox>
+            <xmin>1918</xmin>
+            <ymin>963</ymin>
+            <xmax>2655</xmax>
+            <ymax>1708</ymax>
+        </bndbox>
+    </object>
+    <object>
+        <name>0</name>
+        <pose>Unspecified</pose>
+        <truncated>0</truncated>
+        <difficult>0</difficult>
+        <bndbox>
+            <xmin>1099</xmin>
+            <ymin>1270</ymin>
+            <xmax>1929</xmax>
+            <ymax>2089</ymax>
+        </bndbox>
+    </object>
+</annotation>

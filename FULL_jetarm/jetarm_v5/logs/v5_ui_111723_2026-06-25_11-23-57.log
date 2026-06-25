@@ -1,0 +1,39 @@
+# v5 ui session 2026-06-25_11-23-57 pid=111723
+11:24:05 [ui][color] loaded red: min=[0, 140, 131] max=[55, 255, 255]
+11:25:54 [ui][calibrate] CALIBRATE button pressed
+11:25:59 [ui][calibrate] OK source=vendor
+11:27:40 [ui][calibrate] CALIBRATE button pressed
+11:27:42 [ui][calibrate] OK source=vendor
+11:27:53 [ui][color] enter OK (start)
+11:27:59 [ui][color] stash red: ok=True
+11:28:07 [ui][color] loaded green: min=[6, 99, 61] max=[76, 118, 170]
+11:28:22 [ui][color] stash green: ok=True
+11:28:31 [ui][color] loaded blue: min=[11, 115, 0] max=[90, 149, 113]
+11:28:41 [ui][color] loaded black: min=[0, 30, 92] max=[86, 187, 196]
+11:28:53 [ui][color] loaded blue: min=[11, 115, 0] max=[90, 149, 113]
+11:28:57 [ui][color] loaded black: min=[0, 30, 92] max=[86, 187, 196]
+11:28:59 [ui][color] loaded white: min=[106, 100, 100] max=[255, 155, 155]
+11:29:21 [ui][plane_refit] OK
+11:30:03 [ui][calibrate] CALIBRATE button pressed
+11:30:15 [ui][calibrate] timed out waiting for heartbeat
+11:36:57 [ui][calibrate] CALIBRATE button pressed
+11:37:10 [ui][calibrate] timed out waiting for heartbeat
+11:37:11 [ui][calibrate] CALIBRATE button pressed
+11:37:24 [ui][calibrate] timed out waiting for heartbeat
+11:37:34 [ui][calibrate] CALIBRATE button pressed
+11:37:36 [ui][calibrate] FAILED source=vendor reason=finish_timeout
+11:37:53 [ui][push_logs] running /home/ubuntu/jetarm_v5_src/tools/push_logs.sh REPO=/home/ubuntu/jetarm_v5_src
+11:39:53 [ui][push_logs] crashed
+11:39:53 EXCEPTION: TimeoutExpired: Command '['bash', '/home/ubuntu/jetarm_v5_src/tools/push_logs.sh']' timed out after 120 seconds
+Traceback (most recent call last):
+  File "/home/ubuntu/ros2_ws/build/app/app/tune_uiv51.py", line 1812, in go
+    res = subprocess.run(['bash', script], env=env,
+  File "/usr/lib/python3.10/subprocess.py", line 505, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+  File "/usr/lib/python3.10/subprocess.py", line 1154, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+  File "/usr/lib/python3.10/subprocess.py", line 2022, in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+  File "/usr/lib/python3.10/subprocess.py", line 1198, in _check_timeout
+    raise TimeoutExpired(
+subprocess.TimeoutExpired: Command '['bash', '/home/ubuntu/jetarm_v5_src/tools/push_logs.sh']' timed out after 120 seconds

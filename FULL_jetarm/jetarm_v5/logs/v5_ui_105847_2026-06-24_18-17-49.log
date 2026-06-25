@@ -1,0 +1,16 @@
+# v5 ui session 2026-06-24_18-17-49 pid=105847
+18:17:59 [ui][color] loaded red: min=[0, 140, 131] max=[55, 255, 255]
+18:19:52 [ui][calibrate] CALIBRATE button pressed
+18:19:57 [ui][calibrate] OK source=vendor
+18:25:35 [ui][calibrate] CALIBRATE button pressed
+18:25:37 [ui][calibrate] OK source=vendor
+18:29:18 [ui][calibrate] CALIBRATE button pressed
+18:29:20 [ui][calibrate] OK source=vendor
+18:40:15 [ui][calibrate] CALIBRATE button pressed
+18:40:17 [ui][calibrate] FAILED source=vendor reason=finish_timeout
+18:40:54 [ui][calibrate] CALIBRATE button pressed
+18:40:56 [ui][calibrate] FAILED source=vendor reason=finish_timeout
+18:44:37 [ui][calibrate] CALIBRATE button pressed
+18:44:40 [ui][calibrate] FAILED source=vendor reason=finish_timeout
+18:52:45 [ui][calibrate] CALIBRATE button pressed
+18:52:47 [ui][calibrate] FAILED source=vendor reason=finish_timeout

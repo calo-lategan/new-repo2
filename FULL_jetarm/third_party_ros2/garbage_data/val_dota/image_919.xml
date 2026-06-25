@@ -1,0 +1,23 @@
+<annotation verified="no">
+  <folder>JPEGImages</folder>
+  <filename>image_919</filename>
+  <path>/home/ubuntu/third_party_ros2/data/JPEGImages/image_919.jpg</path>
+  <source>
+    <database>Unknown</database>
+  </source>
+  <size>
+    <width>640</width>
+    <height>480</height>
+    <depth>3</depth>
+  </size>
+  <segmented>0</segmented>
+  <object>
+    <type>robndbox</type>
+    <name>BrokenBones</name>
+    <pose>Unspecified</pose>
+    <truncated>0</truncated>
+    <difficult>0</difficult>
+    <bndbox>
+      <x0>276</x0><y0>215</y0><x1>194</x1><y1>258</y1><x2>137</x2><y2>147</y2><x3>218</x3><y3>105</y3></bndbox>
+  </object>
+</annotation>

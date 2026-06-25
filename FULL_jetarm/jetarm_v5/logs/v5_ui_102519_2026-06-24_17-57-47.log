@@ -1,0 +1,4 @@
+# v5 ui session 2026-06-24_17-57-47 pid=102519
+17:57:59 [ui][color] loaded red: min=[0, 140, 131] max=[55, 255, 255]
+18:06:44 [ui][calibrate] CALIBRATE button pressed
+18:06:51 [ui][calibrate] OK source=vendor
