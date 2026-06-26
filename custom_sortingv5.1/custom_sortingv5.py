@@ -3359,6 +3359,12 @@ class ObjectSortingNodeV5(Node):
 
         if self.motion.aborted:
             return False
+        # v5.1 controller-alive guard (defense-in-depth): never start arm motion
+        # into a dead controller and report success. Returning False routes
+        # through the transport FAIL path (open gripper + go_home).
+        if not self._controller_alive():
+            _stage('pick', 'CONTROLLER DOWN - aborting pick (no servo controller)')
+            return False
         _dbg('pick', f'pick {label} compliance={use_compliance} '
                      f'close={close_pulse} max_strength={max_strength} '
                      f'grab_depth={grab_depth:.3f} settle={settle:.2f}')
@@ -3585,6 +3591,26 @@ class ObjectSortingNodeV5(Node):
         except Exception as e:
             _stage('transport', 'CRASHED - thread exiting', exc=e)
 
+    def _controller_alive(self):
+        """True if ros_robot_controller is present in the ROS graph.
+
+        This arm is OPEN-LOOP - joint targets go out on the 'servo_controller'
+        topic with no ack - so a dead controller (USB drop / OSError Errno 5)
+        otherwise lets the pick path log a fake 'pick OK' while nothing moves.
+        Cheap (one graph query per pick). Fails OPEN on error so a transient
+        query hiccup never blocks sorting.
+        """
+        try:
+            if 'ros_robot_controller' in self.get_node_names():
+                return True
+        except Exception:
+            return True
+        cli = getattr(self, 'bus_servo_state_client', None)
+        try:
+            return bool(cli is not None and cli.service_is_ready())
+        except Exception:
+            return True
+
     def transport_thread(self):
         while self.running:
             if not self.start_transport:
@@ -3617,6 +3643,23 @@ class ObjectSortingNodeV5(Node):
                                     f'({position[0]:.3f},{position[1]:.3f},{position[2]:.3f}) '
                                     f'yaw_pulse={yaw}')
                 t0 = time.time()
+                # v5.1 controller-alive guard: the arm is OPEN-LOOP (joint
+                # targets are published to a topic with no ack), so if
+                # ros_robot_controller has died on a USB drop the publishes still
+                # "succeed" and we'd log a fake 'pick OK' while nothing moves.
+                # Refuse the pick loudly instead of faking success.
+                if not self._controller_alive():
+                    _stage('transport', 'CONTROLLER DOWN - refusing pick '
+                                        '(ros_robot_controller not in ROS graph; '
+                                        'arm not moving)')
+                    self.get_logger().error(
+                        'CONTROLLER DOWN - servo controller absent; aborting pick. '
+                        'Check the USB link / power (dmesg: ch341 disconnect / '
+                        'err -71).')
+                    with self._transport_lock:
+                        self.target = None
+                        self.start_transport = False
+                    continue
                 picked = self._do_pick(position, 80, yaw, label)
                 _stage('transport',
                        f'pick {"OK" if picked else "FAIL"} in {time.time()-t0:.2f}s')

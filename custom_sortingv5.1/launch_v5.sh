@@ -577,18 +577,39 @@ if [ "${JETARM_V5_DEBUG:-0}" = "1" ]; then
     export JETARM_V5_DEBUG=1
 fi
 
-# Pin Jetson to max clocks for deterministic throughput.
-# Without jetson_clocks, CPU stays at 729MHz and GPU at 305MHz until the
-# governor boosts them - causing 2-3x inference jitter (27ms vs 61ms).
-# Sudoers tip: <user> ALL=(ALL) NOPASSWD: /usr/sbin/nvpmodel, /usr/bin/jetson_clocks
-stage perf "pinning Jetson to MAXN + max clocks..."
-sudo -n nvpmodel -m 0 2>/dev/null \
-    || sudo nvpmodel -m 0 2>/dev/null \
-    || err perf "nvpmodel -m 0 failed (add sudoers rule or run manually)"
-sudo -n jetson_clocks 2>/dev/null \
-    || sudo jetson_clocks 2>/dev/null \
-    || err perf "jetson_clocks failed (add sudoers rule or run manually)"
-ok perf "clocks pinned (or skipped if sudoers not set - add rule to avoid prompt)"
+# Jetson power / clocks policy.
+# DEFAULT = power-friendly: do NOT force MAXN and do NOT pin clocks, so the
+# Jetson honours its persisted nvpmodel mode and uses dynamic clock scaling
+# (DVFS) - far lower idle power + heat. On this rig the SoC shares its supply
+# with the arm + USB hub; forcing MAXN (`nvpmodel -m 0`) + `jetson_clocks`
+# raised draw enough to help brown out the servo controller's USB link (the
+# `-71` "cable is bad" drops). Sorting only needs ~2-3 Hz of locks, so the
+# small inference-jitter cost of DVFS is an easy trade.
+#
+# We deliberately do NOT run `nvpmodel -m <n>` here: switching power MODE can
+# prompt for a reboot (core-count change) and hang a headless launch. To cap
+# the mode, set it ONCE yourself and reboot when convenient:
+#     sudo nvpmodel -m 1     # 7W, persists across boots
+#
+# Opt back into max performance (pins clocks) with:
+#     JETSON_MAX_PERF=1 ~/jetarm_v5_1/launch_v5.sh
+# Only do that if the arm has its OWN dedicated power supply.
+# Sudoers tip: <user> ALL=(ALL) NOPASSWD: /usr/bin/jetson_clocks
+JETSON_MAX_PERF="${JETSON_MAX_PERF:-0}"
+if [ "$JETSON_MAX_PERF" = "1" ]; then
+    stage perf "JETSON_MAX_PERF=1 - pinning max clocks (HIGHER power draw)..."
+    sudo -n jetson_clocks 2>/dev/null \
+        || sudo jetson_clocks 2>/dev/null \
+        || err perf "jetson_clocks failed (add sudoers rule or run manually)"
+    ok perf "max clocks pinned"
+else
+    stage perf "power-friendly: DVFS on, MAXN not forced (JETSON_MAX_PERF=1 to pin max clocks)"
+    # Un-pin clocks live in case a prior run/boot left them maxed - no reboot.
+    sudo -n jetson_clocks --restore 2>/dev/null \
+        || sudo jetson_clocks --restore 2>/dev/null \
+        || true
+    ok perf "clocks left to dynamic scaling"
+fi
 
 stage launcher "ros2 launch app custom_sorting_nodev51.launch.py ${LAUNCH_ARGS[*]}"
 ros2 launch app custom_sorting_nodev51.launch.py "${LAUNCH_ARGS[@]}"

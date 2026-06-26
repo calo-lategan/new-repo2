@@ -76,7 +76,12 @@
     # Use measured per-object depth as the projection height so the arm
     # descends to the actual top of each object. Falls back to the table
     # plane (0.03 m) when depth is unavailable.
-    use_depth_for_z: true
+    # v5.1 power/USB: FALSE on this rig. This Orbbec only publishes RAW depth on
+    # a different FOV than the RGB, so depth is never colour-aligned and the pick
+    # ALWAYS falls back to the AprilTag/table worldpos anyway (logs:
+    # 'worldpos=legacy/table'). Keeping it false avoids waiting on depth-Z and
+    # pairs with the color-only camera bringup (camera_color_only:=true).
+    use_depth_for_z: false
     depth_window_px: 5
     # Sanity gate: drop detections whose median depth is outside [min, max]
     # (filters hands above and reflections below the workspace plane).

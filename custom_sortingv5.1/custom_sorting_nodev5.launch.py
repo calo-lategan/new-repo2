@@ -118,11 +118,51 @@ def launch_setup(context):
         description='Bring up the Orbbec depth_camera from this launch (true). '
                     'Set false when the factory service already owns the '
                     'camera, to avoid a double-open that steals the device.')
-    depth_camera_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(peripherals_package_path, 'launch/depth_camera.launch.py')),
-        condition=IfCondition(bringup_depth_camera),
-    )
+    # v5.1 power/USB reduction. The Orbbec was streaming color + depth + IR +
+    # point cloud, but sorting only consumes color (it always falls back to the
+    # AprilTag/table worldpos - this Orbbec's raw depth is a different FOV than
+    # RGB so it never aligns), and NOTHING subscribes to the IR image or the
+    # point cloud. Those two are pure USB-2.0 bandwidth + CPU for nothing, so we
+    # turn them OFF by default. DEPTH stays ON because the depth->color TF and
+    # the in-app AprilTag calibration's ground-plane fit need it.
+    #   camera_color_only:=true -> also drop depth + de-energise the IR laser
+    #   (max USB/power saving; disables depth-based plane refit so calibrate
+    #   first). depth_camera.launch.py forwards only camera_name to gemini, so
+    #   for GEMINI we include gemini.launch.py directly to set the stream flags.
+    camera_color_only = LaunchConfiguration('camera_color_only', default='false')
+    camera_color_only_arg = DeclareLaunchArgument(
+        'camera_color_only', default_value='false',
+        description='true = stream COLOR only (depth+IR+point-cloud off, IR laser '
+                    'off) for the lowest USB/power; disables depth-based plane '
+                    'refit so calibrate before using it. Default false keeps depth '
+                    'for the TF + calibration, with IR + point cloud already off.')
+    _cam_type = os.environ.get('CAMERA_TYPE', 'GEMINI')
+    _color_only = camera_color_only.perform(context).strip().lower() in (
+        'true', '1', 'yes', 'on')
+    _depth_on = 'false' if _color_only else 'true'
+    if _cam_type == 'GEMINI':
+        depth_camera_launch = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(peripherals_package_path,
+                             'launch/include/gemini.launch.py')),
+            launch_arguments={
+                'camera_name': 'depth_cam',
+                'enable_color': 'true',
+                'enable_depth': _depth_on,
+                'enable_ir': 'false',
+                'enable_point_cloud': 'false',
+                'enable_colored_point_cloud': 'false',
+            }.items(),
+            condition=IfCondition(bringup_depth_camera),
+        )
+    else:
+        # Non-GEMINI (USB cam etc): keep the vendor depth_camera bringup as-is.
+        depth_camera_launch = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(peripherals_package_path,
+                             'launch/depth_camera.launch.py')),
+            condition=IfCondition(bringup_depth_camera),
+        )
     sdk_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(sdk_package_path, 'launch/jetarm_sdk.launch.py')),
@@ -279,6 +319,7 @@ def launch_setup(context):
         open_image_view_arg,
         image_view_topic_arg,
         bringup_depth_camera_arg,
+        camera_color_only_arg,
         sdk_launch,
         depth_camera_launch,
         calibration_launch,
