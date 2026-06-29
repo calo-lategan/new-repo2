@@ -73,38 +73,44 @@ for i in range(5):
         hits += 1
 print("  -> reads answered %d/5" % hits)
 
-orig, _ = read_offset_retry(SH)
-print("\n==== write-readback (with retry) ====")
-print("  original offset = %s" % orig)
-if orig is None:
-    sys.exit("  cannot read offset at all - reads are failing; check the setup/power.")
-test = 7 if orig != 7 else -7
-board.bus_servo_set_offset(SH, test)
+# NOTE: offset is a BAD write-proof on this firmware - set_offset (0x20) writes a
+# *temporary* deviation while read_offset (0x22) returns the *saved* value, so the
+# readback never reflects the write. Use ANGLE LIMIT instead: set (0x30) and read
+# (0x32) share one register, so the readback faithfully reflects the write.
+def read_ang_retry(sid, tries=8):
+    for i in range(tries):
+        v = g(board.bus_servo_read_angle_limit, sid)
+        if isinstance(v, (list, tuple)) and len(v) >= 2:
+            return [v[0], v[1]], i + 1
+        time.sleep(0.15)
+    return None, tries
+
+
+orig_ang, _ = read_ang_retry(SH)
+print("\n==== write-readback via ANGLE LIMIT (set/read share one register) ====")
+print("  original angle_limit = %s" % orig_ang)
+if orig_ang is None:
+    sys.exit("  cannot read angle_limit - reads failing; check setup/power.")
+test_lim = [10, 990] if orig_ang != [10, 990] else [20, 980]
+board.bus_servo_set_angle_limit(SH, test_lim)
 time.sleep(0.3)
-rb, used = read_offset_retry(SH, tries=8)
-print("  wrote offset=%d -> read back=%s (after %d attempt(s))" % (test, rb, used))
-# second confirmation with a different value
-test2 = 15 if test != 15 else -15
-board.bus_servo_set_offset(SH, test2)
+rb, used = read_ang_retry(SH, tries=8)
+print("  wrote angle_limit=%s -> read back=%s (after %d attempt(s))" % (test_lim, rb, used))
+board.bus_servo_set_angle_limit(SH, orig_ang)
 time.sleep(0.3)
-rb2, used2 = read_offset_retry(SH, tries=8)
-print("  wrote offset=%d -> read back=%s (after %d attempt(s))" % (test2, rb2, used2))
-board.bus_servo_set_offset(SH, orig)
-time.sleep(0.2)
-print("  restored offset -> %s" % (read_offset_retry(SH)[0]))
+print("  restored angle_limit -> %s" % (read_ang_retry(SH)[0]))
 
 print("\n==== VERDICT ====")
-if rb == test and rb2 == test2:
-    print("  WRITES REACH SERVO 2 = TRUE (two distinct offset writes both stuck).")
-    print("  Servo 2 receives AND acts on write commands. Yet it ignores position")
-    print("  commands and never moves, while the base obeys the identical path, and")
-    print("  every addressable lock is already bypassed. => CONCLUSIVE MECHANICAL")
-    print("  FAILURE: the servo's controller is alive, the motor/gearbox is not.")
-    print("  Replace servo 2.")
-elif rb is None and rb2 is None:
-    print("  offset readback still timing out after many retries -> the bus is flaky")
-    print("  for servo 2 right now. Power-cycle the arm and re-run.")
+if rb == test_lim:
+    print("  WRITES REACH SERVO 2 = TRUE (angle_limit write stuck + read back).")
+    print("  Servo 2 receives AND applies write commands, yet ignores position")
+    print("  commands and never moves while the base does, with no voltage sag")
+    print("  under load. => its controller is alive but the motor/gearbox is dead.")
+    print("  Replace servo 2 (cable already ruled out by the load test).")
+elif rb is None:
+    print("  angle_limit readback kept timing out -> bus flaky for servo 2 now;")
+    print("  power-cycle the arm and re-run.")
 else:
-    print("  writes did NOT consistently take (got %s / %s). Possible write-path")
-    print("  issue - paste this output." % (rb, rb2))
+    print("  write did not take: read back " + str(rb) + " != " + str(test_lim) + ".")
+    print("  Genuine write-path anomaly - paste this output.")
 print("\ndone.")

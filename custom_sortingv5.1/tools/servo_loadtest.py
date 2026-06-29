@@ -72,6 +72,8 @@ def load_test(sid, home):
     time.sleep(0.2)
     board.bus_servo_set_position(0.6, [[sid, home]])
     time.sleep(1.0)
+    start = pos(sid)
+    print("  start pos: %s (home target was %s)" % (start, home))
     idle = [v for v in (vin(sid), vin(sid), vin(sid)) if isinstance(v, int)]
     idle_v = sum(idle) // len(idle) if idle else None
     print("  idle vin: %s mV (avg %s)" % (idle, idle_v))
@@ -87,12 +89,18 @@ def load_test(sid, home):
         time.sleep(0.08)
     p_after = pos(sid)
     lo = min(samples) if samples else None
+    # moved = position changed from where it ACTUALLY started (not from the home
+    # target - the frozen servo never reaches home, so comparing to home gives a
+    # false 'moved').
+    moved = (isinstance(p_after, int) and isinstance(start, int)
+             and abs(p_after - start) > 15)
     print("  vin under load: %s" % samples)
-    print("  -> min vin=%s mV   pos_after=%s   (moved=%s)"
-          % (lo, p_after, isinstance(p_after, int) and abs(p_after - home) > 15))
+    print("  -> min vin=%s mV   start=%s -> pos_after=%s   moved=%s"
+          % (lo, start, p_after, moved))
     board.bus_servo_set_position(0.8, [[sid, home]])
     time.sleep(1.0)
-    return {"idle": idle_v, "lo": lo, "pos_after": p_after, "home": home}
+    return {"idle": idle_v, "lo": lo, "pos_after": p_after, "start": start,
+            "home": home, "moved": moved}
 
 
 r1 = load_test(1, 500)
@@ -110,7 +118,7 @@ def sag(r):
 s1, s2 = sag(r1), sag(r2)
 print("  servo 1 (base)     idle=%s lo=%s sag=%s mV" % (r1["idle"], r1["lo"], s1))
 print("  servo 2 (shoulder) idle=%s lo=%s sag=%s mV" % (r2["idle"], r2["lo"], s2))
-moved2 = isinstance(r2["pos_after"], int) and abs(r2["pos_after"] - r2["home"]) > 15
+moved2 = bool(r2.get("moved"))
 print("")
 if moved2:
     print("  -> servo 2 actually MOVED under load - it's working right now.")
