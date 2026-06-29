@@ -3661,6 +3661,16 @@ class ObjectSortingNodeV5(Node):
                         self.start_transport = False
                     continue
                 picked = self._do_pick(position, 80, yaw, label)
+                # If the controller died DURING the pick (the serial recv thread
+                # dies a beat before the process exits, so it was still in the
+                # graph at the guard check above), _do_pick can still return True
+                # on this open-loop arm. Re-check liveness now and demote that
+                # "success" so a pick on a now-dead controller is never logged OK.
+                if picked and not self._controller_alive():
+                    _stage('transport', 'CONTROLLER DOWN mid-pick - pick did NOT happen')
+                    self.get_logger().error(
+                        'CONTROLLER DOWN during pick; treating as FAILED (USB drop)')
+                    picked = False
                 _stage('transport',
                        f'pick {"OK" if picked else "FAIL"} in {time.time()-t0:.2f}s')
                 if picked:
