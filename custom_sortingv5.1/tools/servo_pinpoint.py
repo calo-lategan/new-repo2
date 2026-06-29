@@ -104,17 +104,24 @@ time.sleep(0.5)
 print("\n==== VERDICT ====")
 down_lo = [mins[d] for d in DOWNSTREAM if isinstance(mins[d], int)]
 down_collapsed = any(v < COLLAPSE_MV for v in down_lo)
+up_collapsed = isinstance(mins[UPSTREAM], int) and mins[UPSTREAM] < COLLAPSE_MV
 sh_collapsed = isinstance(mins[SH], int) and mins[SH] < COLLAPSE_MV
 if not sh_collapsed:
     print("  shoulder did NOT collapse this run - re-run (the fault is intermittent).")
+elif up_collapsed:
+    print("  Even the UPSTREAM base servo collapsed while only the shoulder pulled")
+    print("  current => the bad joint is upstream of ALL servos: the MAIN servo-power")
+    print("  feed - the controller's power input, the lead from the battery/PSU to the")
+    print("  controller, or the supply itself (under-rated / failing / loose connector).")
+    print("  This is NOT a per-servo daisy-chain cable and NOT the servo. Reseat the MAIN")
+    print("  power connector into the controller + verify the supply can deliver the")
+    print("  shoulder's peak current (charged pack / adequately-rated adapter).")
 elif down_collapsed:
-    print("  Downstream joints' voltage ALSO collapsed while only the shoulder pulled")
-    print("  current => the bad joint is in the SHARED path: the lead feeding the")
-    print("  shoulder (base->shoulder) or the shoulder's INPUT connector.")
-    print("  => Replace/reseat THAT lead. (The elbow/wrist would brown out under load too.)")
+    print("  Downstream joints collapsed but the upstream base HELD => the bad joint is")
+    print("  between the base and the shoulder: the shoulder's feed lead / input")
+    print("  connector. Replace/reseat THAT lead.")
 else:
-    print("  Downstream joints HELD voltage (only the shoulder collapsed) => the fault is")
-    print("  ISOLATED to the shoulder: its own lead, its input connector, or its internal")
-    print("  tap. Swap the shoulder's lead with a known-good one: collapse clears => it's")
-    print("  the lead (replace it); collapse stays => it's inside the servo (replace servo).")
+    print("  Only the shoulder collapsed (others held) => fault ISOLATED to the shoulder:")
+    print("  its own lead or internal tap. Swap the shoulder's lead - clears => lead,")
+    print("  stays => internal => replace servo.")
 print("\ndone.")
