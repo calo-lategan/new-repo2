@@ -128,7 +128,7 @@ if [ "${SKIP_MODAL:-0}" != "1" ] && [ $# -eq 0 ]; then
             --column="Pick" --column="Profile" --column="What it does" \
             FALSE "default"     "Standard: sorting node + tuner UI + rqt auto-popup" \
             TRUE  "debug"       "Default + verbose ROS log + extra stage prints" \
-            FALSE "headless"    "No rqt auto-popup. Buttons in tuner UI still work." \
+            FALSE "headless"    "Power-saving: sorting + camera view, NO tuner UI, auto-starts" \
             FALSE "camera-off"  "Boot with camera subscription paused (debug pub path)" \
             FALSE "ai-off"      "Boot with inference paused (raw camera view only)" \
             FALSE "no-ui"       "Skip the Tkinter tuner UI (background only)" \
@@ -151,7 +151,7 @@ if [ "${SKIP_MODAL:-0}" != "1" ] && [ $# -eq 0 ]; then
             --default-item "debug" \
             "default"    "Standard: sorting + tuner UI + rqt auto-popup" \
             "debug"      "Default + verbose ROS log + extra stage prints" \
-            "headless"   "No rqt auto-popup (tuner UI buttons still work)" \
+            "headless"   "Power-saving: sort + camera view, NO tuner UI, auto-start" \
             "camera-off" "Boot with camera subscription paused" \
             "ai-off"     "Boot with inference paused (raw camera view only)" \
             "no-ui"      "Skip the Tkinter tuner UI (background only)" \
@@ -166,7 +166,7 @@ if [ "${SKIP_MODAL:-0}" != "1" ] && [ $# -eq 0 ]; then
             printf '\n\033[1;36m========== JetArm Sort v5 - pick a profile ==========\033[0m\n'
             printf '  1) default     Standard: sorting node + tuner UI + rqt auto-popup\n'
             printf '  2) debug       Default + verbose ROS log + extra stage prints  \033[1m[DEFAULT]\033[0m\n'
-            printf '  3) headless    No rqt auto-popup (tuner UI buttons still work)\n'
+            printf '  3) headless    Power-saving: sort + camera view, NO tuner UI, auto-start\n'
             printf '  4) camera-off  Boot with camera subscription paused\n'
             printf '  5) ai-off      Boot with inference paused (raw camera only)\n'
             printf '  6) no-ui       Skip the Tkinter tuner UI (background only)\n'
@@ -200,7 +200,13 @@ if [ "${SKIP_MODAL:-0}" != "1" ] && [ $# -eq 0 ]; then
             export JETARM_V5_DEBUG=1
             MODAL_ARGS+=("debug:=true") ;;
         headless)
-            MODAL_ARGS+=("image_view:=false") ;;
+            # Power-saving headless: NO Tkinter tuner UI (frees CPU/RAM/GPU =
+            # headroom for the OBB model), but KEEP the camera view, run the
+            # vision model on its saved default.yaml settings, and AUTO-START
+            # sorting (there's no UI to press START). Stop/start it from a shell:
+            #   ros2 service call /custom_sortingv5/enable_sorting std_srvs/srv/SetBool "{data: false}"
+            #   ros2 service call /custom_sortingv5/enable_sorting std_srvs/srv/SetBool "{data: true}"
+            MODAL_ARGS+=("tune_ui:=false" "image_view:=true" "start:=true") ;;
         camera-off)
             MODAL_ARGS+=("enable_camera_sub:=false") ;;
         ai-off)
