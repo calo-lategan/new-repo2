@@ -3872,6 +3872,10 @@ class ObjectSortingNodeV5(Node):
                                         f'(target={joints} actual={pulses} '
                                         f'errs={errs}) - NOT releasing')
                         return False
+        # Round 20g: pulses can be None here (retry read failed after a
+        # first read that was off) - int(None[0]) would raise, and the
+        # exception path opens the gripper at home. Guard it.
+        if pulses is not None:
             self.motion._last_base_pulse = int(pulses[0])
         # -- 4) RELEASE at the taught point.
         _stage('place', f'{label!r}: at taught posture - releasing')
