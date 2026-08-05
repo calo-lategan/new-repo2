@@ -720,6 +720,11 @@ class TunerUI:
                 self.teach_class_combo['values'] = names
                 if not self.teach_class_var.get():
                     self.teach_class_var.set(names[0])
+                # Round 20 T3c: once the model's real class names are known,
+                # lock the combo to them - free-typed names ('red' vs the
+                # model's 'red cube') could never match at place time. The
+                # node refuses them too; this stops the typo at the source.
+                self.teach_class_combo.configure(state='readonly')
         except Exception:
             pass
         tt = self.client.latest_teach
@@ -1459,7 +1464,17 @@ class TunerUI:
                 except Exception:
                     pass
             elif k == 'place_positions':
-                vals[k] = json.dumps(getattr(self, '_places', {}) or {})
+                # Round 20 T3a: the tab-level save used to push the UI's
+                # startup snapshot wholesale (persist=True), permanently
+                # clobbering any bin taught after the UI launched. Base on
+                # the node's LIVE dict; UI rows only fill classes the live
+                # dict doesn't know yet.
+                merged = self._live_places()
+                for nm, v in (getattr(self, '_places', {}) or {}).items():
+                    if nm not in merged:
+                        merged[nm] = v
+                self._places = merged
+                vals[k] = json.dumps(merged)
             elif k == 'grasp_strength':
                 vals[k] = json.dumps(getattr(self, '_grasp_strength', {}) or {})
         if get_extra is not None:
@@ -2465,6 +2480,26 @@ class TunerUI:
         ttk.Checkbutton(sf, text='persist to default.yaml (survives relaunch)',
                         variable=self.teach_persist_var).pack(anchor='w', padx=8, pady=(0, 6))
 
+        # ---- hand-teach (experimental): torque off, move by hand, read ----
+        # Round 20 T4. Whether the servos answer position reads after a
+        # torque-off is hardware-dependent on this arm - the teach status
+        # line reports plainly whether the hand-read worked.
+        hf = ttk.LabelFrame(parent, text='Hand-teach (experimental)')
+        hf.pack(fill='x', padx=8, pady=4)
+        hr = ttk.Frame(hf); hr.pack(fill='x', padx=8, pady=6)
+        ttk.Button(hr, text='Torque OFF (move by hand)',
+                   command=self._on_teach_torque_off).pack(side='left', padx=4)
+        ttk.Button(hr, text='Torque ON & Read',
+                   command=self._on_teach_torque_on).pack(side='left', padx=4)
+        ttk.Label(hf, foreground='#666', wraplength=700, justify='left',
+                  text='OFF makes the arm LIMP - hold it before confirming. '
+                       'Move it to the bin by hand, then Torque ON & Read: if '
+                       'the live read works the readout updates and Save '
+                       'stores the hand pose; if this arm does not answer '
+                       'reads after torque-off, the status says so - use the '
+                       'jog buttons instead.'
+                  ).pack(anchor='w', padx=8, pady=(0, 6))
+
         # ---- saved bins: jump to an existing bin to fine-tune ------------
         bf = ttk.LabelFrame(parent, text='Saved bins — Go, then fine-tune & re-save')
         bf.pack(fill='x', padx=8, pady=4)
@@ -2624,13 +2659,41 @@ class TunerUI:
         if not cls:
             messagebox.showinfo('Pick a class', 'Choose (or type) the class to save.')
             return
+        # Round 20 T3c: warn when no teach readout has arrived yet. The node
+        # now LIVE-reads the servos + re-runs FK on save (so this is only a
+        # heads-up, not a hard block).
+        tt = self.client.latest_teach or {}
+        if not tt.get('teach_pose') and not tt.get('teach_joints'):
+            if not messagebox.askyesno(
+                    'No readout yet',
+                    'No teach readout has been received yet.\n\n'
+                    'The node will live-read the servo positions when saving, '
+                    'but if you have not jogged or pressed Read, make sure the '
+                    'arm is physically AT the bin right now.\n\nContinue?'):
+                return
         if not messagebox.askyesno(
                 'Save bin',
                 f'Save the current arm coordinate as the "{cls}" bin?\n\n'
-                f'Every "{cls}" detection will then be dropped here.'):
+                f'The node refreshes the live servo positions + world pose '
+                f'first, then saves. Every "{cls}" detection will then be '
+                f'dropped here.'):
             return
         self._teach_send({'action': 'save', 'class': cls},
                          persist=bool(self.teach_persist_var.get()))
+
+    def _on_teach_torque_off(self):
+        # Round 20 T4: the arm goes LIMP the moment torque drops - make the
+        # operator acknowledge they're holding it before we send the command.
+        if not messagebox.askyesno(
+                'Torque OFF',
+                'The arm will go LIMP immediately and can fall.\n\n'
+                'HOLD THE ARM before confirming. Then move it to the bin by '
+                'hand and press "Torque ON & Read".\n\nTurn torque off now?'):
+            return
+        self._teach_send({'action': 'torque_off'})
+
+    def _on_teach_torque_on(self):
+        self._teach_send({'action': 'torque_on'})
 
     def _on_teach_save_workspace(self):
         if not messagebox.askyesno(
@@ -2687,6 +2750,12 @@ class TunerUI:
         names = sorted(class_names.values())
         if list(self._places_rows.keys()) == names:
             return
+        # Round 20 T3b: rebuild the rows from the node's LIVE dict, not the
+        # startup snapshot - if the startup get_values timed out (2 s), the
+        # snapshot is {} and the rows would populate with the hardcoded
+        # [0.0, 0.2, 0.015] defaults; saving those over real bins was the
+        # nastiest variant of the clobber.
+        self._places = self._live_places()
         for w in self._places_inner.winfo_children():
             w.destroy()
         self._places_rows = {}
@@ -2720,6 +2789,21 @@ class TunerUI:
         x = float(entries['x'].get()); y = float(entries['y'].get())
         z = float(entries['z'].get()); s = int(float(entries['strength'].get()))
         return [x, y, z], s
+
+    def _live_places(self):
+        """Round 20 T3a: the node's CURRENT place_positions dict - never the
+        startup snapshot. Every save merges into THIS, so runtime-taught bins
+        (4/5-element ['taught'] entries saved after the UI launched) survive a
+        Places-tab save instead of being clobbered by stale data. Falls back
+        to the local cache only if the service times out."""
+        try:
+            raw = self.client.get_values(['place_positions']).get('place_positions')
+            d = json.loads(raw or '{}')
+            if isinstance(d, dict):
+                return d
+        except Exception:
+            pass
+        return dict(getattr(self, '_places', {}) or {})
 
     def _on_test_grip(self, name, entries):
         # Save this row's strength FIRST so the test uses the latest value
@@ -2756,30 +2840,56 @@ class TunerUI:
         except ValueError:
             messagebox.showerror('Bad value', f'{name}: x/y/z and grip must be numbers.')
             return
-        self._places[name] = pos
         self._grasp_strength[name] = strength
         def go():
-            self.client.set_value('place_positions', json.dumps(self._places))
+            # Round 20 T3a: merge THIS row into the node's live dict so a
+            # save never clobbers taught bins made after the UI launched.
+            merged = self._live_places()
+            old = merged.get(name)
+            was_taught = (isinstance(old, (list, tuple)) and len(old) >= 4)
+            merged[name] = pos  # explicit row edit -> manual 3-element entry
+            self._places = merged
+            self.client.set_value('place_positions', json.dumps(merged))
             self.client.set_value('grasp_strength', json.dumps(self._grasp_strength))
-            self._set_status(f'TARGET {name} SAVED', '#3366aa')
+            self._set_status(
+                f'TARGET {name} SAVED'
+                + (' (taught bin replaced by manual coords)' if was_taught else ''),
+                '#3366aa')
         threading.Thread(target=go, daemon=True).start()
 
     def _on_save_all_places(self):
         bad = []
+        parsed = {}
         for name, entries in self._places_rows.items():
             try:
-                pos, strength = self._parse_place_row(name, entries)
-                self._places[name] = pos
-                self._grasp_strength[name] = strength
+                parsed[name] = self._parse_place_row(name, entries)
             except ValueError:
                 bad.append(name)
         if bad:
             messagebox.showerror('Bad value',
                                  f'Skipped (non-numeric): {", ".join(bad)}')
         def go():
-            self.client.set_value('place_positions', json.dumps(self._places))
+            # Round 20 T3a: base = the node's LIVE dict. A row only overwrites
+            # its class when its coords actually differ from the live entry -
+            # untouched rows keep the live entry intact (incl. the 'taught'
+            # tag + saved joints), so Save-all can't silently downgrade bins.
+            merged = self._live_places()
+            for name, (pos, strength) in parsed.items():
+                self._grasp_strength[name] = strength
+                cur = merged.get(name)
+                cur_xyz = None
+                if isinstance(cur, (list, tuple)) and len(cur) >= 3:
+                    try:
+                        cur_xyz = [round(float(cur[i]), 3) for i in range(3)]
+                    except Exception:
+                        cur_xyz = None
+                if cur_xyz is not None and [round(v, 3) for v in pos] == cur_xyz:
+                    continue  # row unchanged - keep the live entry as-is
+                merged[name] = pos
+            self._places = merged
+            self.client.set_value('place_positions', json.dumps(merged))
             self.client.set_value('grasp_strength', json.dumps(self._grasp_strength))
-            self._set_status('ALL TARGETS SAVED', '#3366aa')
+            self._set_status('ALL TARGETS SAVED (taught bins preserved)', '#3366aa')
         threading.Thread(target=go, daemon=True).start()
 
     # ---- Profiles tab ----

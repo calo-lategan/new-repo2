@@ -205,6 +205,9 @@ except Exception as _e:
 
 from ros_robot_controller_msgs.srv import GetBusServoState
 from ros_robot_controller_msgs.msg import GetBusServoCmd
+# Round 20 T4 (hand-teach): torque off/on is a bus_servo/set_state PUBLISH
+# (the controller node subscribes; flag-array [do_flag, value] semantics).
+from ros_robot_controller_msgs.msg import SetBusServoState, BusServoState
 
 from ultralytics import YOLO
 
@@ -1206,6 +1209,11 @@ class ObjectSortingNodeV5(Node):
             self.bus_servo_state_client = None
         else:
             _stage('init', 'bus_servo/get_state ready (full feedback enabled)')
+        # Round 20 T4: torque off/on for hand-teach goes out on the
+        # controller's set_state TOPIC (it is a subscription on the vendor
+        # node, not a service).
+        self.bus_servo_set_state_pub = self.create_publisher(
+            SetBusServoState, 'ros_robot_controller/bus_servo/set_state', 1)
 
         self.motion = MotionController(self, self.joints_pub,
                                        self.kinematics_client,
@@ -1832,6 +1840,13 @@ class ObjectSortingNodeV5(Node):
                        'calibrated path (still functional, less depth-accurate)')
 
     def go_home(self, interrupt=True):
+        # Round 20 T1e: the arm is about to move OUTSIDE the teach tracker's
+        # knowledge (sorting cycle / test-grip / recovery). Invalidate the
+        # tracked teach state so a later jog/save can't operate on stale
+        # joints. The teach 'home' action re-syncs immediately after calling
+        # this, so the teach flow is unaffected.
+        self._teach_joints = None
+        self._teach_pose = None
         speed = max(0.1, 1.0 / float(self.p('motion_speed')))
         if interrupt:
             self.motion.set_gripper(self.p('gripper_open_pulse'), 0.3 * speed)
@@ -2466,37 +2481,34 @@ class ObjectSortingNodeV5(Node):
         if getattr(self, '_calibrating', False) or self.start_transport:
             self._teach_log('refused - calibration/transport in progress')
             response.success = False; return response
+        # Round 20 T1a: teach only runs while sorting is STOPPED - but STOP /
+        # exit / calibrate set motion._abort=True and only START clears it, so
+        # every FK await and goto_pose silently refused and _teach_pose froze
+        # (this is why saved bins all captured the home coordinate). The guards
+        # above have just proven nothing is moving, so the stale abort is safe
+        # to clear here.
+        self.motion.abort(False)
         if action == 'save':
+            # Round 20 T1b/T1g: validation happens here; the actual save runs
+            # on the worker thread (below) so it can LIVE-READ the servos and
+            # re-run FK before persisting - never a stale cached pose.
             if getattr(self, '_teach_running', False):
                 self._teach_log('save refused - a jog is still moving; wait')
                 response.success = False; return response
             cls = str(cmd.get('class', '')).strip()
-            tp = getattr(self, '_teach_pose', None)
-            if not cls or tp is None:
-                self._teach_log(f'save refused - need a class and a readout '
-                                f'(class={cls!r}, pose={tp})')
+            if not cls:
+                self._teach_log('save refused - need a class name')
                 response.success = False; return response
-            try:
-                pp = json.loads(self.p('place_positions') or '{}')
-                if not isinstance(pp, dict):
-                    pp = {}
-                # 4th element 'taught' marks this as a hand-set coordinate so
-                # _do_place drives straight to it (skips the vision-reach affine).
-                pp[cls] = [round(float(tp[0]), 4), round(float(tp[1]), 4),
-                           round(float(tp[2]), 4), 'taught']
-                self.set_parameters([rclpy.parameter.Parameter(
-                    'place_positions', value=json.dumps(pp))])
-                self.place_position[cls] = [float(tp[0]), float(tp[1]),
-                                            float(tp[2])]  # keep fallback in sync
-                if request.data_bool:
-                    self._merge_into_default(['place_positions'])
-                self._teach_log(f'SAVE {cls} = {pp[cls]} (persist={request.data_bool})')
-                response.success = True
-            except Exception as e:
-                self._teach_log(f'save failed: {type(e).__name__}')
-                _stage('teach', 'save failed', exc=e)
-                response.success = False
-            return response
+            names = set(getattr(self, 'target_labels', {}) or {})
+            if names and cls not in names:
+                # 'red' vs 'red cube': a taught key that isn't a model class
+                # can never match at place time - refuse it loudly instead of
+                # silently saving a dead entry.
+                self._teach_log(f'save refused - {cls!r} is not a model class; '
+                                f'classes: {sorted(names)}')
+                response.success = False; return response
+            cmd['_persist'] = bool(request.data_bool)
+            # falls through to the worker dispatch below
         # workspace teach (centre/edges) -> synchronous (uses the current
         # readout + a transform.yaml write; no arm motion of its own).
         if action in ('set_center', 'add_edge', 'clear_workspace', 'save_workspace'):
@@ -2512,9 +2524,12 @@ class ObjectSortingNodeV5(Node):
                 _stage('teach', 'workspace teach crashed', exc=e)
                 response.success = False
             return response
-        # jog / joint_jog / read / goto / home -> move (or read) on a worker
-        # thread; the service calls + goto_pose must run OFF the executor.
-        if action not in ('jog', 'joint_jog', 'read', 'goto', 'home'):
+        # jog / joint_jog / read / save / goto / home / torque -> run on a
+        # worker thread; the service calls + goto_pose must run OFF the
+        # executor. ('save' moved here in Round 20 T1b: it live-reads the
+        # servos + re-runs FK, both blocking awaits.)
+        if action not in ('jog', 'joint_jog', 'read', 'save', 'goto', 'home',
+                          'torque_off', 'torque_on'):
             self._teach_log(f'unknown teach action {action!r}')
             response.success = False; return response
         if action in ('jog', 'goto', 'home') and self.kinematics_client is None:
@@ -2548,10 +2563,15 @@ class ObjectSortingNodeV5(Node):
             # the init endpoint pose is captured).
             if action == 'joint_jog':
                 if self._teach_joints is None:
-                    self._teach_log('joint_jog: joints not synced yet - press '
-                                    'Home first (this arm can\'t report servo '
-                                    'positions, so jogs are tracked from Home)')
-                    return
+                    # Round 20: try a LIVE servo read before refusing - the
+                    # per-servo get_state path is proven on this driver.
+                    pulses = self.motion.get_arm_servo_positions()
+                    if pulses is not None:
+                        self._teach_joints = pulses
+                    else:
+                        self._teach_log('joint_jog: joints not synced and live '
+                                        'read failed - press Home first')
+                        return
                 try:
                     jid = int(cmd.get('joint', 0))
                     delta = int(round(float(cmd.get('delta', 0))))
@@ -2576,17 +2596,106 @@ class ObjectSortingNodeV5(Node):
                     f'world={[round(v, 3) for v in (self._teach_pose or [])]}')
                 return
 
-            # ---- read-back: refresh the world readout from tracked joints ----
-            if action == 'read':
+            # ---- read/save: LIVE-refresh servos + FK, then (save) persist ----
+            # Round 20 T1b/T1c: both actions first try to read the REAL servo
+            # pulses (per-servo get_state - the proven path), resync the
+            # tracker to reality, recompute the world pose via FK, and only
+            # then report/persist. A save can never capture a stale cache
+            # again; the fallback to tracked joints keeps working when the
+            # driver won't answer reads.
+            if action in ('read', 'save'):
+                pulses = self.motion.get_arm_servo_positions()
+                if pulses is not None:
+                    self._teach_joints = pulses
+                    src = 'live'
+                else:
+                    src = 'tracked'
                 if self._teach_joints is None:
-                    self._teach_log('read: joints not synced - press Home first')
+                    self._teach_log(f'{action}: no joint state - live read '
+                                    'failed and nothing tracked; press Home '
+                                    '(or jog) first')
                     return
                 wp = self._fk_world_pose(self._teach_joints)
                 if wp is not None:
                     self._teach_pose = wp
-                self._teach_log(
-                    f'read joints={self._teach_joints}; '
-                    f'world={[round(v, 3) for v in (self._teach_pose or [])]}')
+                if action == 'read':
+                    self._teach_log(
+                        f'read[{src}] joints={self._teach_joints}; '
+                        f'world={[round(v, 3) for v in (self._teach_pose or [])]}')
+                    return
+                # -- save --
+                if self._teach_pose is None:
+                    self._teach_log('save refused - no world pose (FK failed); '
+                                    'jog or press Read first')
+                    return
+                if wp is None:
+                    self._teach_log('save: FK failed on refresh - saving the '
+                                    'last good readout instead')
+                tp = self._teach_pose
+                cls = str(cmd.get('class', '')).strip()
+                persist = bool(cmd.get('_persist', False))
+                try:
+                    pp = json.loads(self.p('place_positions') or '{}')
+                    if not isinstance(pp, dict):
+                        pp = {}
+                    # Round 20 T1f: 5-field taught entry - world XYZ + tag +
+                    # the five servo pulses that REACHED it. The joints let
+                    # _do_place fall back to driving them directly when the
+                    # IK approach refuses (side bins at the workspace edge).
+                    entry = [round(float(tp[0]), 4), round(float(tp[1]), 4),
+                             round(float(tp[2]), 4), 'taught']
+                    if self._teach_joints is not None:
+                        entry.append([int(j) for j in self._teach_joints])
+                    pp[cls] = entry
+                    self.set_parameters([rclpy.parameter.Parameter(
+                        'place_positions', value=json.dumps(pp))])
+                    self.place_position[cls] = [float(tp[0]), float(tp[1]),
+                                                float(tp[2])]  # fallback sync
+                    if persist:
+                        self._merge_into_default(['place_positions'])
+                    self._teach_log(f'SAVE {cls} = {entry} '
+                                    f'(src={src}, persist={persist})')
+                except Exception as e:
+                    self._teach_log(f'save failed: {type(e).__name__}')
+                    _stage('teach', 'save failed', exc=e)
+                return
+
+            # ---- hand-teach: torque off (move by hand) / torque on + read ----
+            # Round 20 T4 (experimental). Torque-disable is a set_state
+            # publish (flag-array [do_flag, value]); after re-enabling we
+            # attempt a live read - if this driver answers, hand-teach works;
+            # if not, we say so explicitly instead of failing silently.
+            if action in ('torque_off', 'torque_on'):
+                en = 1 if action == 'torque_on' else 0
+                msg = SetBusServoState()
+                for sid in (1, 2, 3, 4, 5):
+                    st = BusServoState()
+                    st.present_id = [1, sid]
+                    st.enable_torque = [1, en]
+                    msg.state.append(st)
+                self.bus_servo_set_state_pub.publish(msg)
+                if en == 0:
+                    self._teach_joints = None  # tracked pulses now meaningless
+                    self._teach_log('torque OFF (servos 1-5) - the arm is '
+                                    'LIMP: hold it! Move it by hand, then '
+                                    'press "Torque ON & Read"')
+                    return
+                time.sleep(0.4)
+                pulses = self.motion.get_arm_servo_positions()
+                if pulses is not None:
+                    self._teach_joints = pulses
+                    wp = self._fk_world_pose(pulses)
+                    if wp is not None:
+                        self._teach_pose = wp
+                    self._teach_log(
+                        f'torque ON - live read OK joints={pulses} world='
+                        f'{[round(v, 3) for v in (self._teach_pose or [])]} '
+                        f'- hand-teach WORKS on this arm; Save to keep it')
+                else:
+                    self._teach_log('torque ON - live read FAILED (this arm '
+                                    'does not answer position reads after '
+                                    'torque-off); hand-teach unavailable - '
+                                    'use the jog buttons + Home instead')
                 return
 
             # ---- home: command the physical home servo config DIRECTLY -----
@@ -3535,6 +3644,43 @@ class ObjectSortingNodeV5(Node):
         except Exception:
             return False
 
+    def _taught_joints(self, label):
+        """Round 20 T2a: the five servo pulses saved with a taught bin
+        (5th element of a [x, y, z, 'taught', [p1..p5]] entry), else None.
+        These are the pulses that PHYSICALLY reached the bin during teach,
+        so they are reachable by construction - the escape hatch when the
+        IK approach refuses a side bin."""
+        try:
+            user = json.loads(self.p('place_positions') or '{}')
+            pos = user.get(label) if isinstance(user, dict) else None
+            if (isinstance(pos, (list, tuple)) and len(pos) >= 5
+                    and isinstance(pos[4], (list, tuple)) and len(pos[4]) == 5):
+                return [int(v) for v in pos[4]]
+        except Exception:
+            pass
+        return None
+
+    def _place_by_joints(self, label):
+        """Taught-bin fallback: drive the SAVED joint pulses directly (open
+        loop - exactly how teach reached them) when the IK approach refuses,
+        then release. Arm joints first, base last, mirroring go_home's
+        ordering. Returns True if the drop happened."""
+        joints = self._taught_joints(label)
+        if joints is None:
+            return False
+        speed = max(0.1, 1.0 / float(self.p('motion_speed')))
+        _stage('place', f'IK refused - driving taught joints {joints} for '
+                        f'{label!r} (open-loop fallback)')
+        set_servo_position(self.joints_pub, 0.8 * speed,
+                           ((2, joints[1]), (3, joints[2]), (4, joints[3]),
+                            (5, joints[4])))
+        self.motion._sleep(0.8 * speed)
+        set_servo_position(self.joints_pub, 0.6 * speed, ((1, joints[0]),))
+        self.motion._sleep(0.6 * speed)
+        self.motion.set_gripper(int(self.p('gripper_open_pulse')), 0.25 * speed)
+        self.motion._sleep(float(self.p('gripper_settle')))
+        return True
+
     def _do_place(self, label):
         speed = max(0.1, 1.0 / float(self.p('motion_speed')))
         aggression = float(self.p('aggression'))
@@ -3568,12 +3714,23 @@ class ObjectSortingNodeV5(Node):
         if self.motion.goto_pose(hover, 80,
                                  duration=max(0.5, 0.9 * speed / aggression),
                                  parallel_base=True) is None:
-            return False
+            # Round 20 T2c: place IK failures were completely silent (unlike
+            # _do_pick), so a refused bin looked like a mystery drop-at-home.
+            _stage('place', f'hover IK failed for {label!r} at '
+                            f'({hover[0]:.3f},{hover[1]:.3f},{hover[2]:.3f}) '
+                            f'taught={self._is_taught_place(label)}')
+            # Round 20 T2a: a taught bin carries the joints that reached it -
+            # drive them directly instead of giving up.
+            return self._place_by_joints(label)
         self.motion.set_wrist(yaw, 0.25 * speed)
         if self.motion.goto_pose(position, 80,
                                  duration=max(0.35, 0.6 * speed / aggression),
                                  parallel_base=False) is None:
-            return False
+            _stage('place', f'descend IK failed for {label!r} at '
+                            f'({position[0]:.3f},{position[1]:.3f},'
+                            f'{position[2]:.3f}) '
+                            f'taught={self._is_taught_place(label)}')
+            return self._place_by_joints(label)
         self.motion.set_gripper(int(self.p('gripper_open_pulse')), 0.25 * speed)
         # Let the jaws fully open before retreating so the object isn't
         # dragged (reference sleeps 0.5s after release).
@@ -3581,7 +3738,11 @@ class ObjectSortingNodeV5(Node):
         if self.motion.goto_pose(hover, 80,
                                  duration=max(0.35, 0.6 * speed / aggression),
                                  parallel_base=False) is None:
-            return False
+            # Round 20: the cube is ALREADY delivered at this point - a failed
+            # hover retreat must not report 'place FAIL' (that used to trigger
+            # the failure path after a successful drop). go_home recovers.
+            _stage('place', f'retreat IK failed for {label!r} AFTER release - '
+                            f'drop succeeded; homing recovers')
         return True
 
     def _sorting_loop_wrapped(self):
@@ -3685,7 +3846,21 @@ class ObjectSortingNodeV5(Node):
                            f'place {"OK" if placed else "FAIL"} in {time.time()-tp:.2f}s')
                     self.go_home(False)
                     if not placed:
-                        self.get_logger().warn(f'place failed for {label}')
+                        # Round 20 T2b: NEVER leave a failed place carried home
+                        # with the jaws still clamped - it gets silently
+                        # released whenever the gripper next opens, which reads
+                        # as "the arm drops it at the home position". Release
+                        # it deliberately, loudly, at home instead.
+                        _stage('transport',
+                               f'place FAILED for {label} - releasing object '
+                               f'AT HOME (see [place] log above for the '
+                               f'refused coordinate)')
+                        self.get_logger().error(
+                            f'place FAILED for {label} - releasing at home; '
+                            f'check the [place] log for the refused coordinate')
+                        self.motion.set_gripper(
+                            int(self.p('gripper_open_pulse')), 0.3)
+                        self.motion._sleep(float(self.p('gripper_settle')))
                 else:
                     self.motion.set_gripper(int(self.p('gripper_open_pulse')), 0.3)
                     self.go_home(True)
