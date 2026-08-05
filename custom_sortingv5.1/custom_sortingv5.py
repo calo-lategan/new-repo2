@@ -3720,7 +3720,7 @@ class ObjectSortingNodeV5(Node):
         # this, pressing STOP mid-place made goto_pose return None ("IK
         # failed") -> this fallback ran -> _sleep() returns instantly while
         # aborted -> the arm swept to the bin and opened the jaws mid-flight.
-        if self.motion.aborted():
+        if self.motion.aborted:
             _stage('place', f'taught-joint fallback aborted for {label!r} (STOP)')
             return False
         # The arm is open-loop: if the controller is gone these publishes are
@@ -3747,7 +3747,7 @@ class ObjectSortingNodeV5(Node):
         # the arm in its (higher) carry shape during the slew.
         set_servo_position(self.joints_pub, 0.6 * speed, ((1, joints[0]),))
         self.motion._sleep(0.6 * speed)
-        if self.motion.aborted():
+        if self.motion.aborted:
             _stage('place', f'taught-joint fallback aborted mid-move for {label!r}')
             return False
         set_servo_position(self.joints_pub, 0.8 * speed,
@@ -3755,7 +3755,7 @@ class ObjectSortingNodeV5(Node):
                             (5, joints[4])))
         self.motion._sleep(0.8 * speed)
         # Final gate: never open the jaws if a STOP landed during the descent.
-        if self.motion.aborted():
+        if self.motion.aborted:
             _stage('place', f'taught-joint fallback aborted before release '
                             f'for {label!r} - object retained')
             return False
@@ -3911,6 +3911,12 @@ class ObjectSortingNodeV5(Node):
                     with self._transport_lock:
                         self.target = None
                         self.start_transport = False
+                    # Round 20c: this branch used to `continue` straight past
+                    # the `_transport_busy = False` at the bottom of the loop,
+                    # leaving the flag stuck True - after which teach refused
+                    # every command ("cycle is still unwinding") until the node
+                    # was restarted. Clear it before bailing out.
+                    self._transport_busy = False
                     continue
                 picked = self._do_pick(position, 80, yaw, label)
                 # If the controller died DURING the pick (the serial recv thread
