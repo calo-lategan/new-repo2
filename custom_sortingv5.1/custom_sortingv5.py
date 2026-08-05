@@ -499,6 +499,10 @@ class MotionController:
         self.kinematics_client = kinematics_client
         self.bus_servo_state_client = bus_servo_state_client
         self._abort = False
+        # Round 20d: last pulse commanded to the BASE servo (id 1). Used to
+        # size the base move's duration so a large swing is actually given
+        # time to arrive. None = unknown -> assume worst case.
+        self._last_base_pulse = None
 
     def abort(self, value=True):
         self._abort = value
@@ -578,6 +582,8 @@ class MotionController:
         p = max(0, min(1000, int(pulse)))
         set_servo_position(self.joints_pub, float(duration),
                            ((int(servo_id), p),))
+        if int(servo_id) == 1:
+            self._last_base_pulse = p  # keep the base tracker honest (R20d)
         self._sleep(duration)
         return p
 
@@ -602,8 +608,34 @@ class MotionController:
             return None
         last = servo_data[-1]
         if parallel_base:
-            set_servo_position(self.joints_pub, max(duration * 0.6, 0.2),
-                               ((1, last[0]),))
+            # Round 20d: the base must actually ARRIVE before servos 2-4 are
+            # driven. The vendor (utils/pick_and_place.py) commands servo 1
+            # with duration 1.0 and then sleeps a FULL SECOND before touching
+            # the arm joints. We were giving the base max(duration*0.6, 0.2)
+            # (~0.25 s) and starting the arm interpolation immediately, with
+            # nothing ever re-commanding it.
+            #
+            # Small base moves still completed in time, which is why picking
+            # worked (detected cubes sit within ~30 deg of centre). A large
+            # swing did not: a taught side bin at 75.6 deg (315 pulses) never
+            # finished, so the arm executed the correct reach and height at
+            # the WRONG base angle - landing in front of the arm instead of
+            # in the bin.
+            #
+            # Scale the base move by how far it actually has to travel
+            # (~450 pulses/s is comfortable for the loaded base servo) and
+            # wait for it before shaping the arm.
+            base_target = int(last[0])
+            base_from = self._last_base_pulse
+            # Unknown start -> assume a worst-case swing so we never
+            # under-run the move (matches the vendor's flat 1.0 s).
+            delta = 500 if base_from is None else abs(base_target - int(base_from))
+            base_dur = max(duration * 0.6, 0.2, delta / 450.0)
+            set_servo_position(self.joints_pub, base_dur, ((1, base_target),))
+            self._last_base_pulse = base_target
+            if self._abort:
+                return None
+            self._sleep(base_dur * 0.9)
         steps = max(1, len(servo_data))
         step_dt = max(0.02, duration / steps)
         for i in servo_data:
@@ -1855,6 +1887,7 @@ class ObjectSortingNodeV5(Node):
                            ((2, ja[1]), (3, ja[2]), (4, ja[3]), (5, 500)))
         self.motion._sleep(0.6 * speed)
         set_servo_position(self.joints_pub, 0.5 * speed, ((1, ja[0]),))
+        self.motion._last_base_pulse = ja[0]  # R20d base tracker
         self.motion._sleep(0.5 * speed)
 
     # ------------------------------------------------------------------ ROI
@@ -1972,6 +2005,7 @@ class ObjectSortingNodeV5(Node):
         set_servo_position(self.joints_pub, 1, ((1, 500), (2, joint_angle[1]),
                                                 (3, joint_angle[2]), (4, joint_angle[3]),
                                                 (5, 500), (10, self.p('gripper_open_pulse'))))
+        self.motion._last_base_pulse = 500  # R20d base tracker
         self.enter = True
         response.success = True
         return response
