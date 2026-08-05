@@ -1963,6 +1963,12 @@ class ObjectSortingNodeV5(Node):
             self.heart = None
         self.start_get_roi = True
         joint_angle = [500, 520, 210, 50, 500]
+        # Round 20b: START moves the arm to the home config directly (not via
+        # go_home), so the teach tracker must be invalidated here too -
+        # otherwise jog-to-bin -> START -> STOP -> Save would save the stale
+        # pre-START joints while the arm physically sits at home.
+        self._teach_joints = None
+        self._teach_pose = None
         set_servo_position(self.joints_pub, 1, ((1, 500), (2, joint_angle[1]),
                                                 (3, joint_angle[2]), (4, joint_angle[3]),
                                                 (5, 500), (10, self.p('gripper_open_pulse'))))
@@ -2164,6 +2170,10 @@ class ObjectSortingNodeV5(Node):
                                     'error': f'exception:{type(e).__name__}'}
         finally:
             self._calibrating = False
+            # Round 20b: the vendor calibration node moves the arm to its own
+            # poses, so anything the teach tracker held is now stale.
+            self._teach_joints = None
+            self._teach_pose = None
 
     def _flash_overlay(self):
         """Flash the calibration overlay for `calibrate_flash_secs` then
@@ -2237,6 +2247,9 @@ class ObjectSortingNodeV5(Node):
                 # present in the new model; default new classes to enabled.
                 old = dict(self.target_labels)
                 self.target_labels = {n: old.get(n, True) for n in names.values()}
+                # Round 20b: from here on target_labels reflects the REAL model
+                # classes, so teach-save class validation may be enforced.
+                self._class_names_from_model = True
                 _stage('engine-load', f'class names from model.names: '
                                       f'{list(names.values())}')
                 # Validate place coverage: a detected class with no place
@@ -2487,6 +2500,14 @@ class ObjectSortingNodeV5(Node):
         # (this is why saved bins all captured the home coordinate). The guards
         # above have just proven nothing is moving, so the stale abort is safe
         # to clear here.
+        # Round 20b: ...unless a transport cycle is still unwinding. exit/STOP
+        # clears start_transport IMMEDIATELY while the thread is still inside
+        # the pick/place body, so the guards above can all pass while motion
+        # is frozen mid-cycle - clearing the abort then would let it resume.
+        if getattr(self, '_transport_busy', False):
+            self._teach_log('refused - a pick/place cycle is still unwinding; '
+                            'wait a moment and retry')
+            response.success = False; return response
         self.motion.abort(False)
         if action == 'save':
             # Round 20 T1b/T1g: validation happens here; the actual save runs
@@ -2499,7 +2520,12 @@ class ObjectSortingNodeV5(Node):
             if not cls:
                 self._teach_log('save refused - need a class name')
                 response.success = False; return response
-            names = set(getattr(self, 'target_labels', {}) or {})
+            # Round 20b: target_labels is PRE-SEEDED from DEFAULT_PLACE_POSITIONS
+            # at init, so it is never empty - gating on truthiness alone would
+            # refuse a perfectly valid model class before the engine has
+            # loaded. Only enforce once the names actually came from model.names.
+            names = (set(getattr(self, 'target_labels', {}) or {})
+                     if getattr(self, '_class_names_from_model', False) else set())
             if names and cls not in names:
                 # 'red' vs 'red cube': a taught key that isn't a model class
                 # can never match at place time - refuse it loudly instead of
@@ -2629,8 +2655,15 @@ class ObjectSortingNodeV5(Node):
                                     'jog or press Read first')
                     return
                 if wp is None:
-                    self._teach_log('save: FK failed on refresh - saving the '
-                                    'last good readout instead')
+                    # Round 20b: REFUSE rather than persist a mismatched pair.
+                    # The live read may have just resynced _teach_joints to the
+                    # real bin while _teach_pose still holds the PREVIOUS
+                    # location - saving both would send the cube to the old bin
+                    # (XYZ wins at place time) with no way to notice.
+                    self._teach_log('save refused - FK failed on refresh, so '
+                                    'the world pose and the servo pulses would '
+                                    'disagree. Press Read, then Save.')
+                    return
                 tp = self._teach_pose
                 cls = str(cmd.get('class', '')).strip()
                 persist = bool(cmd.get('_persist', False))
@@ -2675,7 +2708,12 @@ class ObjectSortingNodeV5(Node):
                     msg.state.append(st)
                 self.bus_servo_set_state_pub.publish(msg)
                 if en == 0:
+                    # Round 20b: clear the world pose too. Leaving it set meant
+                    # the next world X/Y/Z jog IK-drove the arm from wherever
+                    # the operator had hand-placed it straight back to the
+                    # pre-torque-off pose in one fast move.
                     self._teach_joints = None  # tracked pulses now meaningless
+                    self._teach_pose = None
                     self._teach_log('torque OFF (servos 1-5) - the arm is '
                                     'LIMP: hold it! Move it by hand, then '
                                     'press "Torque ON & Read"')
@@ -2728,8 +2766,9 @@ class ObjectSortingNodeV5(Node):
                     return
                 target = [float(p[0]), float(p[1]), float(p[2])]
                 hover = [target[0], target[1], target[2] + 0.05]
-                if self.motion.goto_pose(hover, 80, duration=dur,
-                                         parallel_base=True) is None:
+                rh = self.motion.goto_pose(hover, 80, duration=dur,
+                                           parallel_base=True)
+                if rh is None:
                     self._teach_log(f'goto {[round(v, 3) for v in target]} '
                                     f'hover UNREACHABLE (IK) - not moved')
                     return
@@ -2738,6 +2777,17 @@ class ObjectSortingNodeV5(Node):
                     parallel_base=False)
                 if res is None:
                     self._teach_pose = hover
+                    # Round 20b: the arm is now AT the hover pose, so the
+                    # tracked joints must follow it. Leaving the previous
+                    # (usually HOME) pulses here meant a following Save
+                    # re-ran FK on home joints and overwrote the correct
+                    # hover pose - re-introducing the "everything saved at
+                    # home" bug through the UI's own advertised
+                    # "Go, then fine-tune & re-save" workflow.
+                    try:
+                        self._teach_joints = [int(round(v)) for v in rh]
+                    except Exception:
+                        self._teach_joints = None
                     self._teach_log(f'goto {[round(v, 3) for v in target]} '
                                     f'descend UNREACHABLE (IK) - left at hover')
                     return
@@ -3665,18 +3715,50 @@ class ObjectSortingNodeV5(Node):
         loop - exactly how teach reached them) when the IK approach refuses,
         then release. Arm joints first, base last, mirroring go_home's
         ordering. Returns True if the drop happened."""
+        # Round 20b safety: this path publishes raw servo commands and bypasses
+        # goto_pose's own abort check, so it MUST honour a STOP itself. Without
+        # this, pressing STOP mid-place made goto_pose return None ("IK
+        # failed") -> this fallback ran -> _sleep() returns instantly while
+        # aborted -> the arm swept to the bin and opened the jaws mid-flight.
+        if self.motion.aborted():
+            _stage('place', f'taught-joint fallback aborted for {label!r} (STOP)')
+            return False
+        # The arm is open-loop: if the controller is gone these publishes are
+        # silently discarded and we would report a drop that never happened.
+        if not self._controller_alive():
+            _stage('place', f'taught-joint fallback refused for {label!r} - '
+                            f'controller is DOWN (nothing would move)')
+            return False
         joints = self._taught_joints(label)
         if joints is None:
+            _stage('place', f'{label!r}: taught entry has NO saved joints '
+                            f'(saved before the 5-field format) - re-teach '
+                            f'this bin from the Bin Teach tab to enable the '
+                            f'joint fallback')
             return False
         speed = max(0.1, 1.0 / float(self.p('motion_speed')))
         _stage('place', f'IK refused - driving taught joints {joints} for '
                         f'{label!r} (open-loop fallback)')
+        # Round 20b: BASE FIRST. go_home can move the arm shape first because
+        # its target is a folded pose; a bin pose is the opposite - setting
+        # servos 2-5 first drops the loaded gripper to bin height while still
+        # pointing at the pick table, then slews the base across it, plowing
+        # the held cube through the workspace. Rotating the base first keeps
+        # the arm in its (higher) carry shape during the slew.
+        set_servo_position(self.joints_pub, 0.6 * speed, ((1, joints[0]),))
+        self.motion._sleep(0.6 * speed)
+        if self.motion.aborted():
+            _stage('place', f'taught-joint fallback aborted mid-move for {label!r}')
+            return False
         set_servo_position(self.joints_pub, 0.8 * speed,
                            ((2, joints[1]), (3, joints[2]), (4, joints[3]),
                             (5, joints[4])))
         self.motion._sleep(0.8 * speed)
-        set_servo_position(self.joints_pub, 0.6 * speed, ((1, joints[0]),))
-        self.motion._sleep(0.6 * speed)
+        # Final gate: never open the jaws if a STOP landed during the descent.
+        if self.motion.aborted():
+            _stage('place', f'taught-joint fallback aborted before release '
+                            f'for {label!r} - object retained')
+            return False
         self.motion.set_gripper(int(self.p('gripper_open_pulse')), 0.25 * speed)
         self.motion._sleep(float(self.p('gripper_settle')))
         return True
@@ -3796,6 +3878,10 @@ class ObjectSortingNodeV5(Node):
                         self.target = None
                 if _info is None:
                     continue
+                # Round 20b: marks the pick/place body as in-flight so the
+                # teach service can't clear the abort flag out from under a
+                # cycle that a STOP/exit just froze mid-motion.
+                self._transport_busy = True
                 position, yaw, target = list(_info[0]), _info[1], _info[2]
                 if position[0] > 0.22:
                     position[2] += 0.01
@@ -3870,6 +3956,7 @@ class ObjectSortingNodeV5(Node):
                     self.go_home(True)
                 except Exception:
                     pass
+            self._transport_busy = False
             with self._transport_lock:
                 self.target = None
                 self.start_transport = False

@@ -2774,6 +2774,14 @@ class TunerUI:
                 e = ttk.Entry(row, width=9, justify='right')
                 e.insert(0, f'{float(existing[i]):.3f}')
                 e.pack(side='left', padx=2); entries[col] = e
+            # Round 20b: remember EXACTLY what this row was populated with.
+            # _refresh_places early-returns whenever the class list is
+            # unchanged, so rows are never rebuilt after startup - a bin
+            # taught later leaves the row showing stale numbers that would
+            # otherwise look like an operator edit and overwrite the taught
+            # entry on Save-all. Comparing against this seed tells a real
+            # edit from a stale row.
+            entries['_seed'] = tuple(f'{float(existing[i]):.3f}' for i in range(3))
             se = ttk.Entry(row, width=9, justify='right')
             se.insert(0, str(int(self._grasp_strength.get(name, 540))))
             se.pack(side='left', padx=2); entries['strength'] = se
@@ -2798,8 +2806,17 @@ class TunerUI:
         to the local cache only if the service times out."""
         try:
             raw = self.client.get_values(['place_positions']).get('place_positions')
+            # Round 20b: get_values returns {} on its 2 s TIMEOUT without
+            # raising, so raw is None and json.loads(None or '{}') -> {}.
+            # Returning that empty dict re-armed the exact clobber this
+            # helper exists to prevent (every save would wipe the other
+            # bins). An empty live dict is never a legitimate state - the
+            # shipped default.yaml always has >= 5 entries - so treat
+            # None/empty as FAILURE and fall back to the cache.
+            if raw is None:
+                return dict(getattr(self, '_places', {}) or {})
             d = json.loads(raw or '{}')
-            if isinstance(d, dict):
+            if isinstance(d, dict) and d:
                 return d
         except Exception:
             pass
@@ -2860,36 +2877,42 @@ class TunerUI:
     def _on_save_all_places(self):
         bad = []
         parsed = {}
+        untouched = set()
         for name, entries in self._places_rows.items():
             try:
                 parsed[name] = self._parse_place_row(name, entries)
             except ValueError:
                 bad.append(name)
+                continue
+            # Round 20b: a row the operator did NOT edit still holds whatever
+            # it was populated with at startup. Since rows are never rebuilt,
+            # that value can be stale (a bin taught afterwards). Only rows
+            # whose text actually CHANGED from their seed are real edits.
+            seed = entries.get('_seed')
+            if seed is not None:
+                now = tuple(entries[c].get().strip() for c in ('x', 'y', 'z'))
+                if now == tuple(seed):
+                    untouched.add(name)
         if bad:
             messagebox.showerror('Bad value',
                                  f'Skipped (non-numeric): {", ".join(bad)}')
         def go():
-            # Round 20 T3a: base = the node's LIVE dict. A row only overwrites
-            # its class when its coords actually differ from the live entry -
-            # untouched rows keep the live entry intact (incl. the 'taught'
-            # tag + saved joints), so Save-all can't silently downgrade bins.
+            # Round 20 T3a: base = the node's LIVE dict, so anything taught
+            # after the UI launched is preserved verbatim (tag + joints).
             merged = self._live_places()
+            kept = 0
             for name, (pos, strength) in parsed.items():
                 self._grasp_strength[name] = strength
-                cur = merged.get(name)
-                cur_xyz = None
-                if isinstance(cur, (list, tuple)) and len(cur) >= 3:
-                    try:
-                        cur_xyz = [round(float(cur[i]), 3) for i in range(3)]
-                    except Exception:
-                        cur_xyz = None
-                if cur_xyz is not None and [round(v, 3) for v in pos] == cur_xyz:
-                    continue  # row unchanged - keep the live entry as-is
+                if name in untouched and isinstance(merged.get(name), (list, tuple)):
+                    kept += 1
+                    continue  # unedited row - never overwrite the live entry
                 merged[name] = pos
             self._places = merged
             self.client.set_value('place_positions', json.dumps(merged))
             self.client.set_value('grasp_strength', json.dumps(self._grasp_strength))
-            self._set_status('ALL TARGETS SAVED (taught bins preserved)', '#3366aa')
+            self._set_status(
+                f'ALL TARGETS SAVED ({kept} unedited row(s) left untouched)',
+                '#3366aa')
         threading.Thread(target=go, daemon=True).start()
 
     # ---- Profiles tab ----
