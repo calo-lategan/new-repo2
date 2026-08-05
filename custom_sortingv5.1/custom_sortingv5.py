@@ -2405,7 +2405,12 @@ class ObjectSortingNodeV5(Node):
         try:
             msg = set_joint_value_target([int(p) for p in pulses])
             res = self.motion._await_future(client.call_async(msg), timeout=3.0)
-            if res is not None and getattr(res, 'pose', None) is not None:
+            # Round 20 T1d: the vendor FK service ALWAYS returns a Pose
+            # (zeroed when no solution) and sets response.solution to say
+            # whether it's real. Trusting the pose alone turned FK failures
+            # into a silent [0,0,0] readout - which save then persisted.
+            if (res is not None and getattr(res, 'solution', False)
+                    and getattr(res, 'pose', None) is not None):
                 p = res.pose.position
                 return [float(p.x), float(p.y), float(p.z)]
         except Exception as e:
