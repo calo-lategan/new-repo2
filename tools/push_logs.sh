@@ -103,11 +103,35 @@ git commit -m "logs: session $ts ($copied file(s))" \
 # the local checkout's branch (main) is irrelevant and never conflicts.
 # Round 16 MM.2: capture stderr and echo the last line so the UI can show
 # WHY a push failed (auth vs rejected vs network).
+#
+# AUTH (Round 20h): the device has NO stored git credentials - proven by
+# origin/jetarm-logs never existing while origin/device-context does
+# (push_context.sh works only because a PAT is embedded in REPO_URL at
+# invocation). Plain `git push origin` therefore always failed here. If a
+# token file exists, push to an authenticated URL instead - the same
+# mechanism push_context.sh uses, made persistent and button-friendly:
+#   echo 'github_pat_XXXX' > ~/.jetarm_v5.pat && chmod 600 ~/.jetarm_v5.pat
+PAT_FILE="${PAT_FILE:-$HOME/.jetarm_v5.pat}"
+PUSH_TARGET="origin"
+tok=""
+if [ -f "$PAT_FILE" ]; then
+  tok="$(head -1 "$PAT_FILE" | tr -d '[:space:]')"
+  if [ -n "$tok" ]; then
+    PUSH_TARGET="https://calo-lategan:${tok}@github.com/calo-lategan/new-repo2.git"
+    echo "[push_logs] using token from $PAT_FILE"
+  fi
+fi
 push_ok=0
 push_err=""
 for attempt in 1 2 3 4 5; do
-  push_err="$(git push origin "HEAD:$BRANCH" 2>&1)"
-  if [ $? -eq 0 ]; then
+  push_err="$(git push "$PUSH_TARGET" "HEAD:$BRANCH" 2>&1)"
+  rc=$?
+  # Never let the token leak into logs/UI via git's error text (it echoes
+  # the remote URL on failure).
+  if [ -n "$tok" ]; then
+    push_err="${push_err//$tok/***}"
+  fi
+  if [ $rc -eq 0 ]; then
     push_ok=1
     break
   fi
@@ -121,7 +145,7 @@ done
 if [ "$push_ok" -ne 1 ]; then
   echo "[push_logs] git push failed after retries. Last error:" >&2
   echo "$push_err" | tail -n 1 >&2
-  echo "[push_logs] (likely the device has no push credentials - see UPDATE_JETARM.md)" >&2
+  echo "[push_logs] (no credentials: echo your PAT into ~/.jetarm_v5.pat (chmod 600) and retry - see UPDATE_JETARM.md)" >&2
   exit 4
 fi
 
