@@ -587,6 +587,55 @@ class MotionController:
         self._sleep(duration)
         return p
 
+    def _verify_base_arrived(self, target, started_at=None,
+                             tol=12, extra_waits=3):
+        """Round 20e: confirm servo 1 actually REACHED `target`, extending the
+        wait if it hasn't.
+
+        The open-loop duration is only an estimate of the base servo's loaded
+        slew rate. If that estimate is optimistic the arm silently ends up at
+        the wrong base angle while servos 2-4 execute the correct reach and
+        height - which is exactly how taught side bins were being missed
+        (object delivered in front of the arm instead of into the bin).
+
+        Reads are ~16 ms on this arm, so verifying costs almost nothing. If
+        the base still hasn't arrived after the extra waits we log loudly with
+        the numbers needed to tell 'too slow' from 'never commanded'.
+        Returns the last read pulse, or None when no feedback is available."""
+        if self.bus_servo_state_client is None:
+            return None  # no feedback path - stays open-loop as before
+        pos = None
+        for attempt in range(extra_waits + 1):
+            if self._abort:
+                return None
+            st = self.get_servo_state(1, fields=('position',), timeout=1.0)
+            pos = st.get('position') if isinstance(st, dict) else None
+            if pos is None:
+                return None  # read failed - fall back to open-loop behaviour
+            if abs(int(pos) - int(target)) <= tol:
+                if attempt:
+                    _stage('motion', f'base reached {target} after {attempt} '
+                                     f'extra wait(s)')
+                self._last_base_pulse = int(pos)
+                return int(pos)
+            if attempt < extra_waits:
+                self._sleep(0.25)
+        short_by = int(target) - int(pos)
+        if started_at is not None and int(pos) == int(started_at):
+            # Did not move AT ALL -> the command isn't reaching the servo;
+            # that is a wiring/controller problem, not a speed problem.
+            _stage('motion', f'BASE DID NOT MOVE: target={target} still at '
+                             f'{pos} (start={started_at}). The command is not '
+                             f'reaching servo 1 - this is NOT a slew-rate '
+                             f'issue; check the controller/servo 1 link.')
+        else:
+            _stage('motion', f'BASE FELL SHORT: target={target} actual={pos} '
+                             f'(short by {short_by} pulses, start={started_at}). '
+                             f'Slew-rate estimate is too optimistic - lower it. '
+                             f'The arm is now at the WRONG base angle.')
+        self._last_base_pulse = int(pos)  # keep the tracker honest
+        return int(pos)
+
     def goto_pose(self, position, pitch, duration, parallel_base=True,
                   pitch_range=(-180.0, 180.0)):
         # pitch_range: reference pick_and_place.py constrains approach/grab
@@ -636,6 +685,11 @@ class MotionController:
             if self._abort:
                 return None
             self._sleep(base_dur * 0.9)
+            # Round 20e: do not TRUST the slew-rate estimate - verify. A
+            # single-servo read costs ~16 ms on this arm, so confirming the
+            # base actually arrived (and waiting longer if not) is nearly
+            # free and removes the guesswork entirely.
+            self._verify_base_arrived(base_target, base_from)
         steps = max(1, len(servo_data))
         step_dt = max(0.02, duration / steps)
         for i in servo_data:
