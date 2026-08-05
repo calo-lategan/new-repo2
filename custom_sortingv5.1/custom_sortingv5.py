@@ -3798,57 +3798,91 @@ class ObjectSortingNodeV5(Node):
             pass
         return None
 
-    def _place_by_joints(self, label):
-        """Taught-bin fallback: drive the SAVED joint pulses directly (open
-        loop - exactly how teach reached them) when the IK approach refuses,
-        then release. Arm joints first, base last, mirroring go_home's
-        ordering. Returns True if the drop happened."""
-        # Round 20b safety: this path publishes raw servo commands and bypasses
-        # goto_pose's own abort check, so it MUST honour a STOP itself. Without
-        # this, pressing STOP mid-place made goto_pose return None ("IK
-        # failed") -> this fallback ran -> _sleep() returns instantly while
-        # aborted -> the arm swept to the bin and opened the jaws mid-flight.
+    def _place_at_taught_joints(self, label, joints):
+        """Round 20f: the PRIMARY place path for taught bins.
+
+        Replays the EXACT posture the operator taught - base angle, elbow
+        shape AND wrist pitch. The kinematic analysis (validated against the
+        arm's own FK to 0.1 mm) showed the taught posture for the operator's
+        bin implies pitch 94.3 deg while the IK path hardcodes pitch 80: same
+        XYZ, different wrist attitude and arm shape. The operator teaches
+        with their own wrist pitch and verified the jaws over the bin BY EYE
+        in that attitude - so replaying the pulses one-for-one is the only
+        way to honour it. IK remains the path for legacy 3/4-element entries.
+
+        Sequencing lessons baked in (all evidenced in the on-arm logs):
+        - BASE FIRST, alone, and WAIT: a follow-up ServosPosition message
+          cancels an in-flight interpolation, so commanding servos 2-5
+          immediately after the base froze servo 1 at its start pulse
+          (log: base read exactly 506 after a goto to 815).
+        - Distance-scaled base duration + arrival verification (Round 20d/e).
+        - Release is GATED on the posture actually being reached; a shortfall
+          retains the object (transport then releases it at home, loudly)."""
         if self.motion.aborted:
-            _stage('place', f'taught-joint fallback aborted for {label!r} (STOP)')
+            _stage('place', f'taught place aborted for {label!r} (STOP)')
             return False
-        # The arm is open-loop: if the controller is gone these publishes are
-        # silently discarded and we would report a drop that never happened.
         if not self._controller_alive():
-            _stage('place', f'taught-joint fallback refused for {label!r} - '
+            _stage('place', f'taught place refused for {label!r} - '
                             f'controller is DOWN (nothing would move)')
             return False
-        joints = self._taught_joints(label)
-        if joints is None:
-            _stage('place', f'{label!r}: taught entry has NO saved joints '
-                            f'(saved before the 5-field format) - re-teach '
-                            f'this bin from the Bin Teach tab to enable the '
-                            f'joint fallback')
-            return False
         speed = max(0.1, 1.0 / float(self.p('motion_speed')))
-        _stage('place', f'IK refused - driving taught joints {joints} for '
-                        f'{label!r} (open-loop fallback)')
-        # Round 20b: BASE FIRST. go_home can move the arm shape first because
-        # its target is a folded pose; a bin pose is the opposite - setting
-        # servos 2-5 first drops the loaded gripper to bin height while still
-        # pointing at the pick table, then slews the base across it, plowing
-        # the held cube through the workspace. Rotating the base first keeps
-        # the arm in its (higher) carry shape during the slew.
-        set_servo_position(self.joints_pub, 0.6 * speed, ((1, joints[0]),))
-        self.motion._sleep(0.6 * speed)
-        if self.motion.aborted:
-            _stage('place', f'taught-joint fallback aborted mid-move for {label!r}')
+        _stage('place', f'{label!r}: replaying taught posture {joints} '
+                        f'(base first, verified)')
+        # -- 1) BASE alone, while the arm is still in the safe carry shape.
+        base_target = int(joints[0])
+        base_from = self.motion._last_base_pulse
+        delta = 500 if base_from is None else abs(base_target - int(base_from))
+        base_dur = max(0.4, delta / 450.0)
+        set_servo_position(self.joints_pub, base_dur, ((1, base_target),))
+        self.motion._last_base_pulse = base_target
+        self.motion._sleep(base_dur * 0.9)
+        arrived = self.motion._verify_base_arrived(base_target, base_from)
+        if arrived is not None and abs(int(arrived) - base_target) > 15:
+            _stage('place', f'{label!r}: base did NOT reach the taught angle '
+                            f'(target={base_target} actual={arrived}) - '
+                            f'NOT releasing; object retained')
             return False
-        set_servo_position(self.joints_pub, 0.8 * speed,
+        if self.motion.aborted:
+            _stage('place', f'taught place aborted after base for {label!r}')
+            return False
+        # -- 2) ARM to the exact taught shape (servo 5 = the taught wrist,
+        #       i.e. the operator's pitch - deliberately NOT recomputed).
+        arm_dur = max(0.8, 1.0 * speed)
+        set_servo_position(self.joints_pub, arm_dur,
                            ((2, joints[1]), (3, joints[2]), (4, joints[3]),
                             (5, joints[4])))
-        self.motion._sleep(0.8 * speed)
-        # Final gate: never open the jaws if a STOP landed during the descent.
+        self.motion._sleep(arm_dur)
         if self.motion.aborted:
-            _stage('place', f'taught-joint fallback aborted before release '
-                            f'for {label!r} - object retained')
+            _stage('place', f'taught place aborted before release for '
+                            f'{label!r} - object retained')
             return False
+        # -- 3) VERIFY the posture before opening (5 reads ~= 80 ms; the
+        #       whole point of teaching is exactness, so never release on
+        #       hope). One extra settle-and-retry absorbs a slow joint.
+        pulses = self.motion.get_arm_servo_positions()
+        if pulses is not None:
+            errs = [abs(int(a) - int(b)) for a, b in zip(pulses, joints)]
+            if max(errs) > 25:
+                self.motion._sleep(0.4)
+                pulses = self.motion.get_arm_servo_positions()
+                if pulses is not None:
+                    errs = [abs(int(a) - int(b)) for a, b in zip(pulses, joints)]
+                    if max(errs) > 25:
+                        _stage('place', f'{label!r}: posture NOT reached '
+                                        f'(target={joints} actual={pulses} '
+                                        f'errs={errs}) - NOT releasing')
+                        return False
+            self.motion._last_base_pulse = int(pulses[0])
+        # -- 4) RELEASE at the taught point.
+        _stage('place', f'{label!r}: at taught posture - releasing')
         self.motion.set_gripper(int(self.p('gripper_open_pulse')), 0.25 * speed)
         self.motion._sleep(float(self.p('gripper_settle')))
+        # -- 5) RETREAT: fold the arm back toward the carry shape BEFORE the
+        #       base swings home, so the jaws lift clear of the bin instead
+        #       of being dragged sideways through it.
+        set_servo_position(self.joints_pub, max(0.5, 0.6 * speed),
+                           ((2, 520), (3, 210), (4, 50)))
+        self.motion._sleep(max(0.5, 0.6 * speed))
         return True
 
     def _do_place(self, label):
@@ -3859,6 +3893,14 @@ class ObjectSortingNodeV5(Node):
             _stage('place', f'no place position configured for {label!r} '
                             f'- set one in the tuner UI Places tab')
             return False
+        # Round 20f: a taught bin with saved pulses is placed by REPLAYING
+        # the exact taught posture (base angle, elbow shape, wrist pitch) -
+        # not by re-solving IK at a hardcoded pitch the operator never
+        # taught. This is the primary path; the IK approach below serves
+        # legacy 3/4-element entries only.
+        taught_joints = self._taught_joints(label)
+        if taught_joints is not None:
+            return self._place_at_taught_joints(label, taught_joints)
         yaw = self.calculate_place_grasp_yaw(position, 0)
         # v5.1 bin-teach: a hand-taught bin is already a physically-reached
         # arm-base coordinate, so drive straight to it. The kinematics
@@ -3886,21 +3928,27 @@ class ObjectSortingNodeV5(Node):
                                  parallel_base=True) is None:
             # Round 20 T2c: place IK failures were completely silent (unlike
             # _do_pick), so a refused bin looked like a mystery drop-at-home.
+            # (Round 20f: taught bins with joints never reach this branch -
+            # they return via _place_at_taught_joints above.)
             _stage('place', f'hover IK failed for {label!r} at '
                             f'({hover[0]:.3f},{hover[1]:.3f},{hover[2]:.3f}) '
-                            f'taught={self._is_taught_place(label)}')
-            # Round 20 T2a: a taught bin carries the joints that reached it -
-            # drive them directly instead of giving up.
-            return self._place_by_joints(label)
+                            f'- legacy entry has no saved joints to fall '
+                            f'back on; re-teach this bin to enable them')
+            return False
         self.motion.set_wrist(yaw, 0.25 * speed)
+        # Round 20f: descend re-commands the base too (parallel_base=True).
+        # It used to run with parallel_base=False, DISCARDING its own base
+        # solution - so a hover whose base fell short executed the correct
+        # arm shape at the wrong angle with no chance of correction. With
+        # the base verified on both legs, a shortfall is caught, and
+        # re-commanding an already-arrived base is a no-op.
         if self.motion.goto_pose(position, 80,
                                  duration=max(0.35, 0.6 * speed / aggression),
-                                 parallel_base=False) is None:
+                                 parallel_base=True) is None:
             _stage('place', f'descend IK failed for {label!r} at '
                             f'({position[0]:.3f},{position[1]:.3f},'
-                            f'{position[2]:.3f}) '
-                            f'taught={self._is_taught_place(label)}')
-            return self._place_by_joints(label)
+                            f'{position[2]:.3f}) - object retained')
+            return False
         self.motion.set_gripper(int(self.p('gripper_open_pulse')), 0.25 * speed)
         # Let the jaws fully open before retreating so the object isn't
         # dragged (reference sleeps 0.5s after release).
