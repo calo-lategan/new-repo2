@@ -621,6 +621,41 @@ stage launcher "ros2 launch app custom_sorting_nodev51.launch.py ${LAUNCH_ARGS[*
 ros2 launch app custom_sorting_nodev51.launch.py "${LAUNCH_ARGS[@]}"
 RC=$?
 
+# -----------------------------------------------------------------------------
+# Round 20i: auto-publish the session logs AFTER the app exits, so every
+# shutdown ends with the full, uncut logs on the jetarm-logs branch without
+# pressing PUSH LOGS. Runs on crash exits too (those logs matter most).
+# Needs ~/.jetarm_v5.pat to exist (see tools/push_logs.sh) - without it the
+# push fails fast and loudly instead of hanging. AUTO_PUSH_LOGS=0 disables.
+# Limits: this fires when the app QUITS (window closed / Ctrl-C / crash).
+# A hard power cut or closing the whole terminal kills the shell before it
+# can run - quit the app first, then power down.
+AUTO_PUSH_LOGS="${AUTO_PUSH_LOGS:-1}"
+if [ "$AUTO_PUSH_LOGS" = "1" ]; then
+    # This script is symlinked into ~/jetarm_v5_1 by install.sh; readlink -f
+    # resolves back to the real checkout, whose parent is the repo root.
+    SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+    REPO_DIR="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)"
+    PUSH_SCRIPT="$REPO_DIR/tools/push_logs.sh"
+    if [ -f "$PUSH_SCRIPT" ]; then
+        stage logs "app exited (rc=$RC) - auto-publishing session logs..."
+        if timeout 90 bash "$PUSH_SCRIPT"; then
+            ok logs "session logs pushed to the jetarm-logs branch"
+        else
+            plrc=$?
+            # rc=2 no logs yet / rc=3 nothing new are benign; 4 = push failed.
+            if [ "$plrc" = "2" ] || [ "$plrc" = "3" ]; then
+                stage logs "nothing new to push (rc=$plrc)"
+            else
+                err logs "auto log push failed (rc=$plrc) - if it's auth, run:"
+                err logs "  echo 'github_pat_XXXX' > ~/.jetarm_v5.pat && chmod 600 ~/.jetarm_v5.pat"
+            fi
+        fi
+    else
+        stage logs "tools/push_logs.sh not found at $PUSH_SCRIPT - skipping auto push"
+    fi
+fi
+
 if [ $RC -ne 0 ]; then
     err launcher "launch exited with code $RC"
     err launcher "see [v4][stage] lines above for the failing step"
