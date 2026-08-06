@@ -141,7 +141,9 @@ PARAM_LABELS = {
     'detection_offset_y': ('Overlay offset Y', 'px - nudge boxes +down/-up onto objects'),
     'grip_offset_x':     ('Offset X', 'm - shift the arm landing left/right'),
     'grip_offset_y':     ('Offset Y', 'm - shift the arm landing forward/back'),
-    'workspace_scale':   ('Workspace scale (Z)', 'how big/small the world map is (1.0 = no change)'),
+    'workspace_scale':   ('Workspace scale (OLD - no effect)', 'disconnected placebo - use Map expand X/Y below'),
+    'workspace_expand_x': ('Map expand X', 'stretch the map forward/back about the mat centre; >1 pushes grabs outward (1.0 = off)'),
+    'workspace_expand_y': ('Map expand Y', 'stretch the map left/right about the mat centre; >1 pushes grabs outward (1.0 = off)'),
     'workspace_size_x':  ('Workspace size X', 'm - width of your physical mat'),
     'workspace_size_y':  ('Workspace size Y', 'm - depth of your physical mat'),
     'grasp_short_axis_min_ratio': ('Short-axis gate', '|w-h|/max(w,h) above which short-axis preference applies (cubes: stay vendor)'),
@@ -188,6 +190,10 @@ CALIB_FLOAT_PARAMS = [
     ('grip_offset_x',        -0.50, 0.50, 0.005),
     ('grip_offset_y',        -0.50, 0.50, 0.005),
     ('workspace_scale',       0.50, 1.50, 0.01),
+    # Round 20j: the WORKING map stretch, about the mat centre (the old
+    # workspace_scale above is a disconnected placebo, kept for yaml compat).
+    ('workspace_expand_x',    0.70, 1.40, 0.005),
+    ('workspace_expand_y',    0.70, 1.40, 0.005),
     ('workspace_size_x',      0.05, 1.00, 0.005),
     ('workspace_size_y',      0.05, 1.00, 0.005),
 ]

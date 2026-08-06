@@ -901,11 +901,19 @@ class ObjectSortingNodeV5(Node):
         # otherwise a fixed table-plane constant; this lifts the grasp off the
         # table without depth. Applies to PICKS only (place uses its own z).
         ('grip_offset_z', 0.0, (-0.1, 0.1)),
-        # Workspace XY scale (the user's "Z" - how big the world-map appears).
-        # Multiplies the projected world XY around (0,0) AFTER grip_offset,
-        # so 1.05 stretches the workspace 5% outward from centre. 1.0 = no
-        # change.
+        # DEPRECATED placebo: workspace_scale multiplied world XY about the
+        # ARM ORIGIN, which corrected near objects while throwing far ones
+        # off, so it was disconnected from picks (see _apply_world_offsets).
+        # Declared only so existing default.yaml files keep loading.
         ('workspace_scale', 1.0, (0.5, 1.5)),
+        # Round 20j: the WORKING map stretch. Scales detection world XY about
+        # the MAT CENTRE (white_area_pose_world), which is the correct pivot
+        # for the observed "everything grabs toward the middle of the map"
+        # compression: error is zero at the centre and grows outward. 1.0 =
+        # off. X = forward/back (away from the arm), Y = left/right. Applied
+        # to DETECTIONS only - taught bins replay joints and are untouched.
+        ('workspace_expand_x', 1.0, (0.5, 1.5)),
+        ('workspace_expand_y', 1.0, (0.5, 1.5)),
         # Physical workspace dimensions (m). The yellow overlay rectangle is
         # drawn at this world size around the AprilTag centre, so the user
         # can size it to match their physical mat and confirm the centre is
@@ -3380,6 +3388,26 @@ class ObjectSortingNodeV5(Node):
         # is applied AFTER the kinematics affine in transport_thread (true metres,
         # not scaled). workspace_scale stays a declared param but no longer
         # affects picks.
+        # Round 20j: workspace expand - scale world XY about the MAT CENTRE
+        # (the taught/AprilTag origin), NOT the arm origin the old
+        # workspace_scale used. A uniformly compressed map ("cubes off-centre
+        # grab toward the middle") has zero error at the centre and a
+        # radially growing error outward; scaling about the centre corrects
+        # exactly that. Runs before grip_offset so the offsets stay a pure
+        # final nudge. Overlay shares this method, so the drawn grab points
+        # move with the sliders and can be dialled in visually.
+        try:
+            sx = float(self.p('workspace_expand_x'))
+            sy = float(self.p('workspace_expand_y'))
+        except Exception:
+            sx = sy = 1.0
+        if sx != 1.0 or sy != 1.0:
+            wac = getattr(self, 'white_area_center', None)
+            if wac is not None:
+                cx = float(wac[0][3])
+                cy = float(wac[1][3])
+                position[0] = cx + (position[0] - cx) * sx
+                position[1] = cy + (position[1] - cy) * sy
         position[0] += float(self.p('grip_offset_x'))
         position[1] += float(self.p('grip_offset_y'))
         return position
