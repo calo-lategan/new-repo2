@@ -1,0 +1,3 @@
+# v5 ui session 2026-08-06_19-30-33 pid=15144
+19:30:44 [ui][color] loaded red: min=[0, 140, 131] max=[55, 255, 255]
+19:31:10 [ui][plane_refit] failed: service call timeout
