@@ -1,0 +1,191 @@
+# v5 session 2026-08-14_18-45-58 pid=9800
+18:46:03 [v4][main] starting custom_sortingv5
+18:46:03 [v4][init] constructing node 'custom_sortingv5'
+18:46:03 [v4][init] config_path=/home/ubuntu/ros2_ws/src/stepper/config/ (CHASSIS_TYPE='Slide_Rails')
+18:46:03 [v4][init] waiting for kinematics/set_pose_target service...
+18:46:05 [v4][init] kinematics/set_pose_target ready
+18:46:05 [v4][init] bus_servo/get_state ready (full feedback enabled)
+18:46:05 [v4][inference] worker thread starting
+18:46:05 [v4][init] inference worker started (engine=/home/ubuntu/third_party_ros2/data/scaff_cube_best.engine)
+18:46:05 [v4][engine-load] starting load: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine
+18:46:05 [v4][init] camera subscriptions created (always-on) - topic /depth_cam/rgb/image_raw + camera_info
+18:46:05 [v4][init] depth subscribed (candidate): /depth_cam/depth_to_color
+18:46:05 [v4][init] depth subscribed (candidate): /depth_cam/depth/image_raw
+18:46:05 [v4][main] spinning executor (4 threads)
+18:46:05 [v4][startup] spawning sorting + transport threads
+18:46:05 [v4][camera] first camera_info received: fx=453.0 fy=453.0 cx=328.3 cy=243.4
+18:46:05 [v4][sorting-loop] thread started, waiting for enter+frames
+18:46:05 [v4][camera] FIRST FRAME received: (480, 640, 3) enc=rgb8
+18:46:05 [v4][svc] set_target red=True
+18:46:05 [v4][camera] depth source = /depth_cam/depth/image_raw (colour-aligned=False)
+18:46:05 [v4][svc] set_target green=True
+18:46:05 [v4][camera] FIRST DEPTH FRAME on /depth_cam/depth/image_raw: shape=(400, 640) dtype=uint16
+18:46:05 [v4][svc] set_target blue=True
+18:46:05 [v4][svc] set_target scaff=True
+18:46:05 [v4][startup] v4 init finish
+18:46:05 [v4][init] captured endpoint pose t=[0.1271, 0.0000, 0.1821]
+18:46:05 [v4][engine-load] YOLO() constructed in 0.10s task=obb (raw='obb', override='obb')
+18:46:06 [v4][init] depth->color TF resolved + composed into hand2cam
+18:46:07 [v4][svc] enable_sorting -> False
+18:46:07 [v4][publish] first frame published: shape=(480, 640, 3) step=1920 contig=True qos=reliable/depth10 topic=/custom_sortingv5/image_result
+18:46:09 [v4][engine-load] warmup pass done in 3.11s
+18:46:09 [v4][engine-load] engine active: /home/ubuntu/third_party_ros2/data/scaff_cube_best.engine (total load 3.21s, swap #1)
+18:46:09 [v4][engine-load] class names from model.names: ['scaff', 'light blue cube', 'dark blue cube', 'red cube', 'green cube']
+18:46:09 [v4][inference] first inference complete (84 ms)
+18:46:09 [v4][sorting-loop] first inference result reached the loop
+18:46:09 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/stepper/config/transform.yaml
+18:46:09 [v4][roi]   loaded plane: [-0.0034594295448868296, -0.08463774716902761, -0.9964057828522352, 0.21475674481696266]
+18:46:09 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+18:46:09 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+18:46:09 [v4][roi]   extrinsic plane shift done
+18:46:09 [v4][roi]   projected 4 corners to image pixels
+18:46:09 [v4][roi]   computed roi (y=79..403 x=164..572) on intrinsic shape=(3, 3)
+18:46:09 [v4][sorting-loop] ROI built - detection branch is now live
+18:46:10 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=34.3 pub_fps=21.6 frames=172 result_subs=1 roi=ok intrinsic=ok inference_age_ms=84 target=none transport=False sorting_thread=alive
+18:46:15 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=47.6 pub_fps=30.2 frames=410 result_subs=1 roi=ok intrinsic=ok inference_age_ms=34 target=none transport=False sorting_thread=alive
+18:46:20 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=43.6 pub_fps=30.4 frames=628 result_subs=1 roi=ok intrinsic=ok inference_age_ms=111 target=none transport=False sorting_thread=alive
+18:46:25 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=47.2 pub_fps=30.2 frames=864 result_subs=1 roi=ok intrinsic=ok inference_age_ms=42 target=none transport=False sorting_thread=alive
+18:46:30 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=43.0 pub_fps=30.4 frames=1079 result_subs=1 roi=ok intrinsic=ok inference_age_ms=107 target=none transport=False sorting_thread=alive
+18:46:35 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=43.6 pub_fps=30.4 frames=1297 result_subs=1 roi=ok intrinsic=ok inference_age_ms=113 target=none transport=False sorting_thread=alive
+18:46:40 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=42.4 pub_fps=30.2 frames=1509 result_subs=1 roi=ok intrinsic=ok inference_age_ms=110 target=none transport=False sorting_thread=alive
+18:46:45 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=43.2 pub_fps=30.1 frames=1727 result_subs=1 roi=ok intrinsic=ok inference_age_ms=106 target=none transport=False sorting_thread=alive
+18:46:50 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=39.6 pub_fps=30.3 frames=1923 result_subs=1 roi=ok intrinsic=ok inference_age_ms=67 target=none transport=False sorting_thread=alive
+18:46:55 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=47.0 pub_fps=30.4 frames=2158 result_subs=1 roi=ok intrinsic=ok inference_age_ms=64 target=none transport=False sorting_thread=alive
+18:47:00 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=43.4 pub_fps=30.2 frames=2375 result_subs=1 roi=ok intrinsic=ok inference_age_ms=101 target=none transport=False sorting_thread=alive
+18:47:05 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=43.8 pub_fps=30.4 frames=2594 result_subs=1 roi=ok intrinsic=ok inference_age_ms=67 target=none transport=False sorting_thread=alive
+18:47:10 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=38.6 pub_fps=30.2 frames=2787 result_subs=1 roi=ok intrinsic=ok inference_age_ms=84 target=none transport=False sorting_thread=alive
+18:47:15 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=46.2 pub_fps=30.4 frames=3018 result_subs=1 roi=ok intrinsic=ok inference_age_ms=74 target=none transport=False sorting_thread=alive
+18:47:20 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=39.7 pub_fps=30.1 frames=3217 result_subs=1 roi=ok intrinsic=ok inference_age_ms=96 target=none transport=False sorting_thread=alive
+18:47:25 [v4][heartbeat] enter=False sorting=False cam=LIVE ai=LIVE cam_fps=46.2 pub_fps=30.5 frames=3447 result_subs=1 roi=ok intrinsic=ok inference_age_ms=81 target=none transport=False sorting_thread=alive
+18:47:28 [v4][enter] enter requested (camera subs were already alive)
+18:47:28 [v4][roi] reading transform.yaml from /home/ubuntu/ros2_ws/src/stepper/config/transform.yaml
+18:47:28 [v4][svc] enable_sorting -> True
+18:47:28 [v4][roi]   loaded plane: [-0.0034594295448868296, -0.08463774716902761, -0.9964057828522352, 0.21475674481696266]
+18:47:28 [v4][roi]   yaml loaded: extristric.shape=(4, 3) corners.shape=(5, 3) white_area_center.shape=(4, 4)
+18:47:28 [v4][roi]   intrinsic ready after 0.00s (shape=(3, 3)) distortion.shape=(8,)
+18:47:28 [v4][roi]   extrinsic plane shift done
+18:47:28 [v4][roi]   projected 4 corners to image pixels
+18:47:28 [v4][roi]   computed roi (y=79..403 x=164..572) on intrinsic shape=(3, 3)
+18:47:28 [v4][sorting-loop] ROI built - detection branch is now live
+18:47:28 [v4][sorting-loop] LOCKED on scaff pixel=(439, 231) world=(0.196,-0.042,0.025)
+18:47:29 [v4][sorting-loop] TRACK scaff e_dist=0.0004 (thresh=0.005) still=6/10 move=0/10
+18:47:29 [v4][sorting-loop] FIRING TRANSPORT label=scaff pos=(0.197,-0.041,0.025) yaw=517
+18:47:29 [v4][transport] BEGIN pick scaff at (0.197,-0.044,0.080) yaw_pulse=517
+18:47:30 [v4][motion] base reached 447 after 1 extra wait(s)
+18:47:30 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=42.5 pub_fps=29.6 frames=3660 result_subs=1 roi=ok intrinsic=ok inference_age_ms=114 target=scaff transport=True sorting_thread=alive
+18:47:31 [v4][pick] descend obj_top_z=0.080 grab_depth=0.020 -> z=0.060 (worldpos=legacy/table)
+18:47:33 [v4][motion] base reached 500 after 1 extra wait(s)
+18:47:33 [v4][pick] pick scaff complete (standard)
+18:47:33 [v4][transport] pick OK in 4.18s
+18:47:35 [v4][motion] base reached 987 after 1 extra wait(s)
+18:47:35 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=42.8 pub_fps=30.4 frames=3874 result_subs=1 roi=ok intrinsic=ok inference_age_ms=97 target=scaff transport=True sorting_thread=alive
+18:47:37 [v4][transport] place OK in 3.41s
+18:47:38 [v4][sorting-loop] LOCKED on scaff pixel=(48, 259) world=(0.179,0.122,0.025)
+18:47:38 [v4][sorting-loop] LOCKED on green cube pixel=(581, 275) world=(0.180,-0.102,0.025)
+18:47:38 [v4][sorting-loop] LOCKED on green cube pixel=(458, 229) world=(0.197,-0.050,0.025)
+18:47:39 [v4][sorting-loop] FIRING TRANSPORT label=green cube pos=(0.198,-0.044,0.025) yaw=436
+18:47:39 [v4][transport] BEGIN pick green cube at (0.198,-0.047,0.080) yaw_pulse=436
+18:47:39 [v4][motion] base reached 444 after 1 extra wait(s)
+18:47:40 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=40.2 pub_fps=30.0 frames=4075 result_subs=1 roi=ok intrinsic=ok inference_age_ms=39 target=green cube transport=True sorting_thread=alive
+18:47:41 [v4][pick] descend obj_top_z=0.080 grab_depth=0.020 -> z=0.060 (worldpos=legacy/table)
+18:47:43 [v4][motion] base reached 500 after 1 extra wait(s)
+18:47:43 [v4][pick] pick green cube complete (standard)
+18:47:43 [v4][transport] pick OK in 4.15s
+18:47:44 [v4][motion] base reached 881 after 1 extra wait(s)
+18:47:45 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=43.3 pub_fps=30.3 frames=4292 result_subs=1 roi=ok intrinsic=ok inference_age_ms=82 target=green cube transport=True sorting_thread=alive
+18:47:46 [v4][transport] place OK in 3.20s
+18:47:47 [v4][sorting-loop] LOCKED on red cube pixel=(535, 281) world=(0.177,-0.082,0.025)
+18:47:47 [v4][sorting-loop] LOCKED on red cube pixel=(311, 245) world=(0.189,0.012,0.025)
+18:47:48 [v4][sorting-loop] TRACK red cube e_dist=0.0000 (thresh=0.005) still=10/10 move=0/10
+18:47:48 [v4][sorting-loop] FIRING TRANSPORT label=red cube pos=(0.189,0.012,0.025) yaw=128
+18:47:48 [v4][transport] BEGIN pick red cube at (0.189,0.013,0.080) yaw_pulse=128
+18:47:49 [v4][motion] base reached 515 after 1 extra wait(s)
+18:47:50 [v4][pick] descend obj_top_z=0.080 grab_depth=0.020 -> z=0.060 (worldpos=legacy/table)
+18:47:50 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=40.3 pub_fps=30.0 frames=4493 result_subs=1 roi=ok intrinsic=ok inference_age_ms=150 target=red cube transport=True sorting_thread=alive
+18:47:52 [v4][pick] pick red cube complete (standard)
+18:47:52 [v4][transport] pick OK in 3.98s
+18:47:52 [v4][place] 'red cube': replaying taught posture [817, 373, 167, 289, 465] (base first, verified)
+18:47:53 [v4][motion] base reached 817 after 1 extra wait(s)
+18:47:54 [v4][place] 'red cube': at taught posture - releasing
+18:47:55 [v4][transport] place OK in 2.98s
+18:47:55 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=44.5 pub_fps=30.4 frames=4715 result_subs=1 roi=ok intrinsic=ok inference_age_ms=105 target=red cube transport=True sorting_thread=alive
+18:47:56 [v4][sorting-loop] LOCKED on light blue cube pixel=(546, 233) world=(0.197,-0.087,0.025)
+18:47:56 [v4][sorting-loop] LOCKED on light blue cube pixel=(405, 195) world=(0.211,-0.027,0.025)
+18:47:57 [v4][sorting-loop] FIRING TRANSPORT label=light blue cube pos=(0.211,-0.028,0.025) yaw=465
+18:47:57 [v4][transport] BEGIN pick light blue cube at (0.211,-0.030,0.080) yaw_pulse=465
+18:47:58 [v4][motion] base reached 466 after 1 extra wait(s)
+18:47:59 [v4][pick] descend obj_top_z=0.080 grab_depth=0.020 -> z=0.060 (worldpos=legacy/table)
+18:48:00 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=42.0 pub_fps=30.2 frames=4925 result_subs=1 roi=ok intrinsic=ok inference_age_ms=103 target=light blue cube transport=True sorting_thread=alive
+18:48:02 [v4][motion] base reached 500 after 1 extra wait(s)
+18:48:02 [v4][pick] pick light blue cube complete (standard)
+18:48:02 [v4][transport] pick OK in 4.79s
+18:48:03 [v4][motion] base reached 956 after 1 extra wait(s)
+18:48:05 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=44.7 pub_fps=30.1 frames=5149 result_subs=1 roi=ok intrinsic=ok inference_age_ms=125 target=light blue cube transport=True sorting_thread=alive
+18:48:05 [v4][transport] place OK in 3.37s
+18:48:06 [v4][sorting-loop] LOCKED on red cube pixel=(115, 216) world=(0.198,0.095,0.025)
+18:48:10 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=43.3 pub_fps=30.2 frames=5365 result_subs=1 roi=ok intrinsic=ok inference_age_ms=105 target=none transport=False sorting_thread=alive
+18:48:15 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=38.6 pub_fps=30.4 frames=5558 result_subs=1 roi=ok intrinsic=ok inference_age_ms=34 target=none transport=False sorting_thread=alive
+18:48:20 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=45.0 pub_fps=30.2 frames=5783 result_subs=1 roi=ok intrinsic=ok inference_age_ms=60 target=none transport=False sorting_thread=alive
+18:48:25 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=47.9 pub_fps=30.4 frames=6023 result_subs=1 roi=ok intrinsic=ok inference_age_ms=63 target=none transport=False sorting_thread=alive
+18:48:30 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=51.1 pub_fps=30.2 frames=6278 result_subs=1 roi=ok intrinsic=ok inference_age_ms=52 target=none transport=False sorting_thread=alive
+18:48:35 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=44.8 pub_fps=30.4 frames=6502 result_subs=1 roi=ok intrinsic=ok inference_age_ms=64 target=none transport=False sorting_thread=alive
+18:48:40 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=42.5 pub_fps=30.1 frames=6715 result_subs=1 roi=ok intrinsic=ok inference_age_ms=87 target=none transport=False sorting_thread=alive
+18:48:45 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=44.1 pub_fps=30.5 frames=6935 result_subs=1 roi=ok intrinsic=ok inference_age_ms=62 target=none transport=False sorting_thread=alive
+18:48:50 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=37.8 pub_fps=30.2 frames=7124 result_subs=1 roi=ok intrinsic=ok inference_age_ms=104 target=none transport=False sorting_thread=alive
+18:48:55 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=43.6 pub_fps=30.4 frames=7342 result_subs=1 roi=ok intrinsic=ok inference_age_ms=39 target=none transport=False sorting_thread=alive
+18:49:00 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=47.4 pub_fps=30.2 frames=7579 result_subs=1 roi=ok intrinsic=ok inference_age_ms=70 target=none transport=False sorting_thread=alive
+18:49:05 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=42.0 pub_fps=30.4 frames=7789 result_subs=1 roi=ok intrinsic=ok inference_age_ms=99 target=none transport=False sorting_thread=alive
+18:49:10 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=42.8 pub_fps=30.2 frames=8003 result_subs=1 roi=ok intrinsic=ok inference_age_ms=77 target=none transport=False sorting_thread=alive
+18:49:15 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=42.0 pub_fps=30.4 frames=8213 result_subs=1 roi=ok intrinsic=ok inference_age_ms=86 target=none transport=False sorting_thread=alive
+18:49:20 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=41.3 pub_fps=30.1 frames=8420 result_subs=1 roi=ok intrinsic=ok inference_age_ms=96 target=none transport=False sorting_thread=alive
+18:49:25 [v4][publish] result_subs changed: 1 -> 0
+18:49:25 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=24.6 pub_fps=17.0 frames=8543 result_subs=0 roi=ok intrinsic=ok inference_age_ms=2064 target=none transport=False sorting_thread=alive
+18:49:28 [v4][publish] WARNING: overlay is 4.6s stale - detection loop may be stuck or slow
+18:49:30 [v4][publish] result_subs changed: 0 -> 1
+18:49:30 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=14.6 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=7064 target=none transport=False sorting_thread=alive
+18:49:35 [v4][publish] result_subs changed: 1 -> 0
+18:49:35 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=0 roi=ok intrinsic=ok inference_age_ms=12063 target=none transport=False sorting_thread=alive
+18:49:40 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=0.0 frames=8543 result_subs=0 roi=ok intrinsic=ok inference_age_ms=17063 target=none transport=False sorting_thread=alive
+18:49:45 [v4][publish] result_subs changed: 0 -> 1
+18:49:45 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=6.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=22063 target=none transport=False sorting_thread=alive
+18:49:50 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=27064 target=none transport=False sorting_thread=alive
+18:49:55 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=32063 target=none transport=False sorting_thread=alive
+18:49:58 [v4][publish] WARNING: overlay is 34.6s stale - detection loop may be stuck or slow
+18:50:00 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=37063 target=none transport=False sorting_thread=alive
+18:50:05 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=42064 target=none transport=False sorting_thread=alive
+18:50:10 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=47063 target=none transport=False sorting_thread=alive
+18:50:15 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=52064 target=none transport=False sorting_thread=alive
+18:50:20 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=57063 target=none transport=False sorting_thread=alive
+18:50:25 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=62063 target=none transport=False sorting_thread=alive
+18:50:28 [v4][publish] WARNING: overlay is 64.7s stale - detection loop may be stuck or slow
+18:50:30 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=67064 target=none transport=False sorting_thread=alive
+18:50:35 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=72063 target=none transport=False sorting_thread=alive
+18:50:40 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=77063 target=none transport=False sorting_thread=alive
+18:50:45 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=82063 target=none transport=False sorting_thread=alive
+18:50:50 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=87063 target=none transport=False sorting_thread=alive
+18:50:55 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=92063 target=none transport=False sorting_thread=alive
+18:50:58 [v4][publish] WARNING: overlay is 94.7s stale - detection loop may be stuck or slow
+18:51:00 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=97064 target=none transport=False sorting_thread=alive
+18:51:05 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=102063 target=none transport=False sorting_thread=alive
+18:51:10 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=107064 target=none transport=False sorting_thread=alive
+18:51:15 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=112063 target=none transport=False sorting_thread=alive
+18:51:20 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=117063 target=none transport=False sorting_thread=alive
+18:51:25 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=122063 target=none transport=False sorting_thread=alive
+18:51:28 [v4][publish] WARNING: overlay is 124.7s stale - detection loop may be stuck or slow
+18:51:30 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=127063 target=none transport=False sorting_thread=alive
+18:51:35 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=132064 target=none transport=False sorting_thread=alive
+18:51:40 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=137064 target=none transport=False sorting_thread=alive
+18:51:45 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=142065 target=none transport=False sorting_thread=alive
+18:51:50 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=147063 target=none transport=False sorting_thread=alive
+18:51:55 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=152066 target=none transport=False sorting_thread=alive
+18:51:58 [v4][publish] WARNING: overlay is 154.8s stale - detection loop may be stuck or slow
+18:52:00 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=157063 target=none transport=False sorting_thread=alive
+18:52:05 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=162064 target=none transport=False sorting_thread=alive
+18:52:10 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=167063 target=none transport=False sorting_thread=alive
+18:52:15 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=172064 target=none transport=False sorting_thread=alive
+18:52:20 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=177063 target=none transport=False sorting_thread=alive
+18:52:25 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.4 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=182066 target=none transport=False sorting_thread=alive
+18:52:28 [v4][publish] WARNING: overlay is 184.8s stale - detection loop may be stuck or slow
+18:52:30 [v4][heartbeat] enter=True sorting=True cam=LIVE ai=LIVE cam_fps=0.0 pub_fps=30.2 frames=8543 result_subs=1 roi=ok intrinsic=ok inference_age_ms=187063 target=none transport=False sorting_thread=alive
+18:52:34 [v4][main] KeyboardInterrupt - shutting down
+18:52:34 [v4][inference] worker thread stopped
